@@ -48,7 +48,6 @@ def safe_fragment()->str:
     frag=frag.replace("if int(f.get('fixture_id') or 0) in used_fixtures:continue","if fixture_key(f) in used_fixtures:continue")
     if "def fixture_key(f):" not in frag or "uniq={fixture_key(o[0]):o for o in options}" not in frag:
         raise RuntimeError('schema-safe fixture key patch not applied')
-    # It is unsafe for the bridge/global matcher to collapse missing fixture ids onto 0.
     if "int(o[0].get('fixture_id') or 0)" in frag:
         raise RuntimeError('unsafe zero fixture-id uniqueness remains')
     return frag.rstrip()+'\n\n'
@@ -63,14 +62,31 @@ def patch_importer(html:str)->str:
     if start<0 or end<0: raise RuntimeError('history recovery function markers not found')
     frag=safe_fragment()
     py2=py[:start]+frag+py[end:]
-    # Expose the decoder paths in Export Debug without making them required by old builds.
+    # Expose every universal-history path in Export Debug. This is intentionally optional
+    # for older payloads: missing counters read as zero and do not alter import behaviour.
     needle="'unlabelled_rich_propagation_matches':member_rich_diag.get('propagation_matches',0),"
     extra=(needle+"'unlabelled_rich_cohort_side_labels':member_rich_diag.get('cohort_side_labels',0),"
            "'unlabelled_rich_fixture_identity_matches':member_rich_diag.get('fixture_identity_matches',0),"
            "'unlabelled_rich_single_side_bridge_matches':member_rich_diag.get('single_side_bridge_matches',0),"
-           "'unlabelled_rich_identity_rounds':member_rich_diag.get('identity_rounds',0),")
-    if needle in py2 and 'unlabelled_rich_fixture_identity_matches' not in py2:
-        py2=py2.replace(needle,extra)
+           "'unlabelled_rich_identity_rounds':member_rich_diag.get('identity_rounds',0),"
+           "'unlabelled_rich_ambiguous_seed_player_ids':member_rich_diag.get('ambiguous_seed_player_ids',0),"
+           "'unlabelled_rich_transfer_conflict_neutralized_players':member_rich_diag.get('transfer_conflict_neutralized_players',0),"
+           "'unlabelled_rich_adaptive_cluster_edges':member_rich_diag.get('adaptive_cluster_edges',0),"
+           "'unlabelled_rich_adaptive_cluster_edges_rejected_conflict':member_rich_diag.get('adaptive_cluster_edges_rejected_conflict',0),")
+    if needle in py2:
+        # Replace any previous shorter diagnostic expansion as well as the bare needle.
+        old_prefix=needle
+        if 'unlabelled_rich_cohort_side_labels' not in py2:
+            py2=py2.replace(needle,extra,1)
+        else:
+            # Existing builds already contain the first v53 fields; append only new v55/v56 counters.
+            anchor="'unlabelled_rich_identity_rounds':member_rich_diag.get('identity_rounds',0),"
+            addition=(anchor+"'unlabelled_rich_ambiguous_seed_player_ids':member_rich_diag.get('ambiguous_seed_player_ids',0),"
+                      "'unlabelled_rich_transfer_conflict_neutralized_players':member_rich_diag.get('transfer_conflict_neutralized_players',0),"
+                      "'unlabelled_rich_adaptive_cluster_edges':member_rich_diag.get('adaptive_cluster_edges',0),"
+                      "'unlabelled_rich_adaptive_cluster_edges_rejected_conflict':member_rich_diag.get('adaptive_cluster_edges_rejected_conflict',0),")
+            if anchor in py2 and 'unlabelled_rich_adaptive_cluster_edges' not in py2:
+                py2=py2.replace(anchor,addition,1)
     compile(py2,'fm_importer.py','exec')
     new_b64=base64.b64encode(py2.encode()).decode()
     html2=html[:m.start(1)]+new_b64+html[m.end(1):]
@@ -90,9 +106,8 @@ def repack(html:str)->None:
 
 def main():
     html=reconstruct_html();patched=patch_importer(html);repack(patched)
-    # Round-trip production validation.
     check=reconstruct_html()
     if check!=patched:raise RuntimeError('repack round-trip mismatch')
-    print('History decoder upgraded: strict + cluster + cohort + fixture identity + single-side bridge + schema-safe fixture key')
+    print('History decoder upgraded: strict + cluster + cohort + fixture identity + single-side bridge + schema-safe fixture key + transfer-safe anchors + rotation-safe clustering')
 
 if __name__=='__main__':main()
