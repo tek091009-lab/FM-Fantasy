@@ -161,7 +161,8 @@
     try{if(typeof renderStats==='function'&&$('statsPage')?.classList.contains('active'))renderStats();if(typeof renderMarket==='function'&&$('transfersPage')?.classList.contains('active'))renderMarket();if(typeof renderTeam==='function'&&$('teamPage')?.classList.contains('active'))renderTeam();if(typeof renderStar==='function'&&$('starPage')?.classList.contains('active'))renderStar()}catch(e){console.warn('Visible page refresh skipped',e)}
   }
   function fixTeamSummaryLabel(){const label=$('teamGWSum')?.closest('.sum')?.querySelector('small');if(label)label.textContent='Gameweek'}
-  function boot(){addStyles();installPublicNames();installTransferRows();installAllFixtures();installLeagueIcons();fixTeamSummaryLabel();requestAnimationFrame(refreshVisible);setTimeout(()=>{fixTeamSummaryLabel();refreshVisible()},120)}
+  function loadMobileLayer(){if(document.querySelector('script[data-fm-mobile]'))return;const s=document.createElement('script');s.src='./mobile.js?v=1';s.dataset.fmMobile='true';document.head.appendChild(s)}
+  function boot(){addStyles();installPublicNames();installTransferRows();installAllFixtures();installLeagueIcons();fixTeamSummaryLabel();loadMobileLayer();requestAnimationFrame(refreshVisible);setTimeout(()=>{fixTeamSummaryLabel();refreshVisible()},120)}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
   window.addEventListener('fmcloudready',()=>{aliasSignature='';installPublicNames();addAllFixtureOption();fixTeamSummaryLabel();requestAnimationFrame(refreshVisible)});
 })();
