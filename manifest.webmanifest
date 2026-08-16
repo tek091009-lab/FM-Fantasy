@@ -1,0 +1,14 @@
+{
+  "name": "FM Fantasy",
+  "short_name": "FM Fantasy",
+  "description": "Fantasy football powered by your Football Manager save.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#08051a",
+  "theme_color": "#170728",
+  "icons": [
+    {"src":"./fm-fantasy-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}
