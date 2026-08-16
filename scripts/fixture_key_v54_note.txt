@@ -1,0 +1,1 @@
+v54 retained-history safety: fixture uniqueness now falls back to structural calendar identity when fixture_id is zero/missing, preventing both false duplicate suppression and false single-side bridge uniqueness on alternate FM schema generations.
