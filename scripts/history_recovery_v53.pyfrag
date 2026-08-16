@@ -18,7 +18,8 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
         'propagation_rounds':0,'propagation_matches':0,'strict_seed_matches':0,
         'cluster_matches':0,'unmatched_cached_pairs':0,
         'cohort_side_labels':0,'fixture_identity_matches':0,'single_side_bridge_matches':0,
-        'identity_rounds':0,'ambiguous_seed_player_ids':0,'transfer_conflict_neutralized_players':0
+        'identity_rounds':0,'ambiguous_seed_player_ids':0,'transfer_conflict_neutralized_players':0,
+        'adaptive_cluster_edges':0,'adaptive_cluster_edges_rejected_conflict':0
     }
     club_sets={eid:set(int(x) for x in squads.get(eid,[])) for eid in selected_clubs}
     membership_owners=collections.defaultdict(set)
@@ -92,8 +93,33 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
                 a,b=arr[ai],arr[bi]
                 if a>b:a,b=b,a
                 shared[(a,b)]+=1
+    def direct_anchor_club(ids):
+        rank=[]
+        for eid,pids in unique_club_sets.items():
+            n=len(ids & pids)
+            if n:rank.append((n,eid))
+        rank.sort(reverse=True)
+        if not rank or rank[0][0]<4:return None
+        if len(rank)>1 and rank[0][0]-rank[1][0]<2:return None
+        return rank[0][1]
+
     for (a,b),cnt in shared.items():
-        if cnt>=8:union(a,b)
+        if cnt>=8:
+            union(a,b);continue
+        # Rotation-safe fallback: six shared players can be highly significant when the
+        # two retained sides are 15-22 player matchday groups. Require a meaningful
+        # proportional overlap and block the edge when independent unique squad anchors
+        # confidently identify different clubs.
+        if cnt<6:continue
+        ia=sides[a]['ids'];ib=sides[b]['ids']
+        denom=max(1,min(len(ia),len(ib)))
+        overlap=float(cnt)/denom
+        if overlap<0.34:continue
+        ca=direct_anchor_club(ia);cb=direct_anchor_club(ib)
+        if ca is not None and cb is not None and ca!=cb:
+            diagnostics['adaptive_cluster_edges_rejected_conflict']+=1
+            continue
+        union(a,b);diagnostics['adaptive_cluster_edges']+=1
 
     clusters=collections.defaultdict(list)
     for si in range(n):clusters[find(si)].append(si)
