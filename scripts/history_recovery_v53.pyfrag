@@ -1,0 +1,315 @@
+def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[int,Club], squads:dict[int,list[int]],
+                                    fixtures:list[dict[str,Any]], fixture_shift:int, competition:str):
+    """Recover retained player-match blocks that have no reliable team/competition label.
+
+    Multi-path identity strategy (all after one archive scan):
+      A. strict current-squad anchors (legacy path);
+      B. repeated-side cluster labels;
+      C. semi-supervised player/cohort propagation from confidently identified sides;
+      D. fixture-constrained global matching using both side identity and exact score;
+      E. one-strong-side bridge when the known club + score identifies exactly one fixture.
+
+    Text labels are intentionally not required here. Every accepted recovery is still tied to one
+    authoritative played fixture and exact aggregate score. Ambiguous candidates are left unused.
+    """
+    diagnostics={
+        'members_scanned':0,'members_with_stats':0,'stat_records':0,'candidate_pairs':0,
+        'matches_recovered':0,'cached_candidate_pairs':0,'side_clusters':0,'labelled_side_clusters':0,
+        'propagation_rounds':0,'propagation_matches':0,'strict_seed_matches':0,
+        'cluster_matches':0,'unmatched_cached_pairs':0,
+        'cohort_side_labels':0,'fixture_identity_matches':0,'single_side_bridge_matches':0,
+        'identity_rounds':0
+    }
+    club_sets={eid:set(int(x) for x in squads.get(eid,[])) for eid in selected_clubs}
+    club_names={eid:normalize_club_name(c.short or c.name) for eid,c in selected_clubs.items()}
+    played=[]
+    for f in fixtures:
+        if f.get('status')!='played':continue
+        heid=int(f['home_tid'])-int(fixture_shift);aeid=int(f['away_tid'])-int(fixture_shift)
+        played.append((heid,aeid,int(f.get('home_score') or 0),int(f.get('away_score') or 0),f))
+
+    cached=[];seen_pairs=set();seen_side_pair_signatures=set()
+    for i,name in enumerate(rich_names):
+        path=Path(f'/tmp/rich_{i}.bin')
+        if not path.exists():continue
+        diagnostics['members_scanned']+=1
+        buf=path.read_bytes()
+        stats=_rich_scan_stats_fast(buf,0,len(buf))
+        diagnostics['stat_records']+=len(stats)
+        if len(stats)<40:continue
+        diagnostics['members_with_stats']+=1
+        pairs=_rich_candidate_squad_pairs(stats)
+        diagnostics['candidate_pairs']+=len(pairs)
+        for left,right in pairs:
+            pk=(name,left[0]['offset'],left[-1]['offset'],right[0]['offset'],right[-1]['offset'])
+            if pk in seen_pairs:continue
+            seen_pairs.add(pk)
+            sig=(name,tuple(int(x['player_id']) for x in left),tuple(int(x['player_id']) for x in right))
+            if sig in seen_side_pair_signatures:continue
+            seen_side_pair_signatures.add(sig)
+            cached.append({'name':name,'left':left,'right':right,'pk':pk})
+    diagnostics['cached_candidate_pairs']=len(cached)
+    if not cached:return [],diagnostics
+
+    def ids_of(rows):
+        return {int(x['player_id']) for x in rows if int(x.get('player_id') or 0)>0}
+
+    def score_of(c):
+        left,right=c['left'],c['right']
+        lhg=sum(int(x.get('goals',0) or 0) for x in left)+sum(int(x.get('own_goals',0) or 0) for x in right)
+        lag=sum(int(x.get('goals',0) or 0) for x in right)+sum(int(x.get('own_goals',0) or 0) for x in left)
+        return lhg,lag
+
+    sides=[]
+    for ci,c in enumerate(cached):
+        for which in ('left','right'):
+            rows=c[which];sides.append({'candidate':ci,'which':which,'rows':rows,'ids':ids_of(rows)})
+    n=len(sides);parent=list(range(n));size=[1]*n
+    def find(x):
+        while parent[x]!=x:
+            parent[x]=parent[parent[x]];x=parent[x]
+        return x
+    def union(a,b):
+        a=find(a);b=find(b)
+        if a==b:return
+        if size[a]<size[b]:a,b=b,a
+        parent[b]=a;size[a]+=size[b]
+
+    occ=collections.defaultdict(list)
+    for si,s in enumerate(sides):
+        for pid in s['ids']:occ[pid].append(si)
+    shared=collections.Counter()
+    for arr in occ.values():
+        if len(arr)>80:continue
+        for ai in range(len(arr)):
+            for bi in range(ai+1,len(arr)):
+                a,b=arr[ai],arr[bi]
+                if a>b:a,b=b,a
+                shared[(a,b)]+=1
+    for (a,b),cnt in shared.items():
+        if cnt>=8:union(a,b)
+
+    clusters=collections.defaultdict(list)
+    for si in range(n):clusters[find(si)].append(si)
+    diagnostics['side_clusters']=len(clusters)
+
+    player_votes=collections.defaultdict(lambda:collections.Counter())
+    for eid,pids in club_sets.items():
+        for pid in pids:player_votes[int(pid)][eid]+=4.0
+
+    def player_club_weight(pid,eid):
+        votes=player_votes.get(int(pid))
+        if not votes:return 0.0
+        total=sum(votes.values())
+        if total<=0:return 0.0
+        top=votes.most_common(2)
+        if len(top)>1 and abs(top[0][1]-top[1][1])<0.75 and eid in (top[0][0],top[1][0]):
+            return 0.0
+        return min(1.0,float(votes.get(eid,0.0))/max(1.0,total)*1.35)
+
+    def side_scores(ids):
+        scores=[]
+        for eid in selected_clubs:
+            weighted=sum(player_club_weight(pid,eid) for pid in ids)
+            direct=len(ids & club_sets[eid])
+            score=weighted+0.55*direct
+            if score>0:scores.append((score,direct,eid))
+        scores.sort(reverse=True)
+        return scores
+
+    def best_side_club(ids,min_score=3.0,min_margin=1.15):
+        scores=side_scores(ids)
+        if not scores or scores[0][0]<min_score:return None
+        second=scores[1][0] if len(scores)>1 else 0.0
+        if scores[0][0]-second<min_margin:return None
+        return scores[0][2],scores[0][0],second,scores[0][1]
+
+    cluster_labels={}
+    def relabel_clusters():
+        cluster_labels.clear()
+        for root,members in clusters.items():
+            votes=collections.Counter()
+            for si in members:
+                hit=best_side_club(sides[si]['ids'],2.75,0.9)
+                if hit:votes[hit[0]]+=max(1.0,hit[1])
+            if votes:
+                top=votes.most_common(2)
+                if len(top)==1 or top[0][1]-top[1][1]>=2.0:cluster_labels[root]=top[0][0]
+        diagnostics['labelled_side_clusters']=max(diagnostics['labelled_side_clusters'],len(cluster_labels))
+
+    used_fixtures=set();used_candidates=set();out=[]
+
+    def candidate_fixture_options(ci,leid=None,reid=None):
+        c=cached[ci];lhg,lag=score_of(c);opts=[]
+        for heid,aeid,hs,as_,f in played:
+            fid=int(f.get('fixture_id') or 0)
+            if fid in used_fixtures:continue
+            if hs==lhg and as_==lag:
+                if (leid is None or heid==leid) and (reid is None or aeid==reid):opts.append((f,False,heid,aeid))
+            if hs==lag and as_==lhg:
+                if (leid is None or aeid==leid) and (reid is None or heid==reid):opts.append((f,True,aeid,heid))
+        return opts
+
+    def register_match(ci,f,rev,leid,reid,source_kind):
+        if ci in used_candidates:return False
+        fid=int(f.get('fixture_id') or 0)
+        if fid in used_fixtures:return False
+        c=cached[ci];left,right=c['left'],c['right']
+        H,A=(right,left) if rev else (left,right)
+        heid,realaeid=(reid,leid) if rev else (leid,reid)
+        hcalc=sum(int(x.get('goals',0) or 0) for x in H)+sum(int(x.get('own_goals',0) or 0) for x in A)
+        acalc=sum(int(x.get('goals',0) or 0) for x in A)+sum(int(x.get('own_goals',0) or 0) for x in H)
+        if hcalc!=int(f.get('home_score') or 0) or acalc!=int(f.get('away_score') or 0):return False
+        used_fixtures.add(fid);used_candidates.add(ci)
+        out.append({'stadium':f.get('stadium'),'home':club_names[heid],'away':club_names[realaeid],
+                    'home_tid':f['home_tid'],'away_tid':f['away_tid'],'competition':competition,
+                    'competition_code':SUPPORTED_LEAGUES.get(competition,{}).get('code'),
+                    'home_score':int(f['home_score']),'away_score':int(f['away_score']),'date':f.get('date'),
+                    'home_players':_rich_decorate(H),'away_players':_rich_decorate(A),
+                    'offset':min(H[0]['offset'],A[0]['offset']),'source_member':c['name'],'source':source_kind})
+        for pid in ids_of(H):
+            club_sets[heid].add(pid);player_votes[pid][heid]+=2.0
+        for pid in ids_of(A):
+            club_sets[realaeid].add(pid);player_votes[pid][realaeid]+=2.0
+        return True
+
+    def strict_seed(ci):
+        c=cached[ci];lids=ids_of(c['left']);rids=ids_of(c['right'])
+        lc=[];rc=[]
+        for eid,sset in club_sets.items():
+            lo=len(lids&sset);ro=len(rids&sset)
+            if lo>=5:lc.append((lo,eid))
+            if ro>=5:rc.append((ro,eid))
+        lc.sort(reverse=True);rc.sort(reverse=True)
+        best=None
+        for lov,leid in lc[:4]:
+            for rov,reid in rc[:4]:
+                if leid==reid or lov+rov<14:continue
+                score=(lov+rov,min(lov,rov))
+                if best is None or score>best[0]:best=(score,leid,reid)
+        if not best:return False
+        opts=candidate_fixture_options(ci,best[1],best[2])
+        if len(opts)!=1:return False
+        f,rev,leid,reid=opts[0]
+        return register_match(ci,f,rev,leid,reid,'unlabelled_retained_stat_blocks_strict')
+
+    for ci in range(len(cached)):
+        if strict_seed(ci):diagnostics['strict_seed_matches']+=1
+
+    def propagate_side_identities(max_rounds=8):
+        accepted=0
+        labelled_side=set()
+        for _ in range(max_rounds):
+            progress=0
+            relabel_clusters()
+            for si,s in enumerate(sides):
+                if si in labelled_side:continue
+                hit=best_side_club(s['ids'],3.0,1.15)
+                if not hit:
+                    ceid=cluster_labels.get(find(si))
+                    if ceid is None:continue
+                    scores=side_scores(s['ids']);sc=next((x[0] for x in scores if x[2]==ceid),0.0)
+                    if sc<2.2:continue
+                    hit=(ceid,sc,0.0,0)
+                eid=hit[0]
+                labelled_side.add(si);progress+=1;accepted+=1
+                for pid in s['ids']:player_votes[pid][eid]+=0.7
+            if not progress:break
+            diagnostics['identity_rounds']+=1
+        diagnostics['cohort_side_labels']=max(diagnostics['cohort_side_labels'],accepted)
+
+    propagate_side_identities()
+    relabel_clusters()
+
+    for ci in range(len(cached)):
+        if ci in used_candidates:continue
+        leid=cluster_labels.get(find(ci*2));reid=cluster_labels.get(find(ci*2+1))
+        if leid is None or reid is None or leid==reid:continue
+        opts=candidate_fixture_options(ci,leid,reid)
+        if len(opts)==1:
+            f,rev,le,re=opts[0]
+            if register_match(ci,f,rev,le,re,'unlabelled_retained_cluster_match'):
+                diagnostics['cluster_matches']+=1
+
+    def fixture_identity_pass():
+        proposals=[]
+        for ci,c in enumerate(cached):
+            if ci in used_candidates:continue
+            lids=ids_of(c['left']);rids=ids_of(c['right']);ls=side_scores(lids);rs=side_scores(rids)
+            lmap={eid:(sc,direct) for sc,direct,eid in ls};rmap={eid:(sc,direct) for sc,direct,eid in rs}
+            lhg,lag=score_of(c);rank=[]
+            for heid,aeid,hs,as_,f in played:
+                fid=int(f.get('fixture_id') or 0)
+                if fid in used_fixtures:continue
+                for rev in (False,True):
+                    if not rev:
+                        if hs!=lhg or as_!=lag:continue
+                        leid,reid=heid,aeid
+                    else:
+                        if hs!=lag or as_!=lhg:continue
+                        leid,reid=aeid,heid
+                    lsc,ld=lmap.get(leid,(0.0,0));rsc,rd=rmap.get(reid,(0.0,0))
+                    if lsc<=0 or rsc<=0:continue
+                    bonus=0.0
+                    lcl=cluster_labels.get(find(ci*2));rcl=cluster_labels.get(find(ci*2+1))
+                    if lcl==leid:bonus+=2.0
+                    elif lcl is not None and lcl!=leid:bonus-=4.0
+                    if rcl==reid:bonus+=2.0
+                    elif rcl is not None and rcl!=reid:bonus-=4.0
+                    total=lsc+rsc+bonus+0.35*(ld+rd)
+                    rank.append((total,min(lsc,rsc),f,rev,leid,reid))
+            rank.sort(key=lambda x:(x[0],x[1]),reverse=True)
+            if not rank:continue
+            best=rank[0];second=rank[1][0] if len(rank)>1 else -999.0
+            if best[0]>=7.2 and best[1]>=1.65 and best[0]-second>=1.35:
+                proposals.append((best[0]-second,best[0],ci,best))
+        proposals.sort(reverse=True)
+        added=0
+        for _margin,_score,ci,best in proposals:
+            if ci in used_candidates:continue
+            _,_,f,rev,leid,reid=best
+            if int(f.get('fixture_id') or 0) in used_fixtures:continue
+            if register_match(ci,f,rev,leid,reid,'unlabelled_retained_fixture_identity'):
+                added+=1;diagnostics['fixture_identity_matches']+=1
+        return added
+
+    def single_side_bridge_pass():
+        proposals=[]
+        for ci,c in enumerate(cached):
+            if ci in used_candidates:continue
+            lh=best_side_club(ids_of(c['left']),4.4,1.5);rh=best_side_club(ids_of(c['right']),4.4,1.5)
+            options=[]
+            if lh:
+                options.extend(candidate_fixture_options(ci,leid=lh[0],reid=None))
+            if rh:
+                options.extend(candidate_fixture_options(ci,leid=None,reid=rh[0]))
+            uniq={int(o[0].get('fixture_id') or 0):(o) for o in options}
+            if len(uniq)!=1:continue
+            f,rev,leid,reid=next(iter(uniq.values()))
+            heid=int(f['home_tid'])-int(fixture_shift);aeid=int(f['away_tid'])-int(fixture_shift)
+            left_eid,right_eid=(aeid,heid) if rev else (heid,aeid)
+            unknown_ids=ids_of(c['right'] if lh else c['left'])
+            ss=side_scores(unknown_ids)
+            if ss and ss[0][0]>=3.0 and ss[0][2]!=(right_eid if lh else left_eid):continue
+            strength=(lh[1] if lh else rh[1])
+            proposals.append((strength,ci,f,rev,left_eid,right_eid))
+        proposals.sort(reverse=True)
+        added=0
+        for _strength,ci,f,rev,leid,reid in proposals:
+            if ci in used_candidates or int(f.get('fixture_id') or 0) in used_fixtures:continue
+            if register_match(ci,f,rev,leid,reid,'unlabelled_retained_single_side_bridge'):
+                added+=1;diagnostics['single_side_bridge_matches']+=1
+        return added
+
+    for _round in range(8):
+        before=len(out)
+        propagate_side_identities(2);relabel_clusters()
+        a=fixture_identity_pass();b=single_side_bridge_pass()
+        if a or b:
+            diagnostics['propagation_rounds']+=1
+            diagnostics['propagation_matches']+=a+b
+        if len(out)==before:break
+
+    diagnostics['matches_recovered']=len(out)
+    diagnostics['unmatched_cached_pairs']=max(0,len(cached)-len(used_candidates))
+    return out,diagnostics
