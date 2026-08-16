@@ -18,9 +18,15 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
         'propagation_rounds':0,'propagation_matches':0,'strict_seed_matches':0,
         'cluster_matches':0,'unmatched_cached_pairs':0,
         'cohort_side_labels':0,'fixture_identity_matches':0,'single_side_bridge_matches':0,
-        'identity_rounds':0
+        'identity_rounds':0,'ambiguous_seed_player_ids':0,'transfer_conflict_neutralized_players':0
     }
     club_sets={eid:set(int(x) for x in squads.get(eid,[])) for eid in selected_clubs}
+    membership_owners=collections.defaultdict(set)
+    for _eid,_pids in club_sets.items():
+        for _pid in _pids:membership_owners[int(_pid)].add(_eid)
+    unique_club_sets={eid:{pid for pid in pids if len(membership_owners.get(int(pid),()))==1}
+                      for eid,pids in club_sets.items()}
+    ambiguous_seed_player_ids={pid for pid,owners in membership_owners.items() if len(owners)>1}
     club_names={eid:normalize_club_name(c.short or c.name) for eid,c in selected_clubs.items()}
     played=[]
     for f in fixtures:
@@ -94,15 +100,25 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
     diagnostics['side_clusters']=len(clusters)
 
     player_votes=collections.defaultdict(lambda:collections.Counter())
-    for eid,pids in club_sets.items():
+    diagnostics['ambiguous_seed_player_ids']=len(ambiguous_seed_player_ids)
+    for eid,pids in unique_club_sets.items():
         for pid in pids:player_votes[int(pid)][eid]+=4.0
+    transfer_conflicts=set()
 
     def player_club_weight(pid,eid):
         votes=player_votes.get(int(pid))
         if not votes:return 0.0
         total=sum(votes.values())
         if total<=0:return 0.0
-        top=votes.most_common(2)
+        top=votes.most_common(3)
+        # Once the same player has meaningful evidence for two clubs, treat that player as
+        # transfer/identity-ambiguous for historical side labelling. Teammate cohorts still
+        # identify the side, but this individual can no longer drag an old match toward his
+        # present-day club. Confirmed match rows remain available for fantasy scoring.
+        meaningful=[(ceid,v) for ceid,v in top if v>=1.75]
+        if len(meaningful)>1:
+            transfer_conflicts.add(int(pid));diagnostics['transfer_conflict_neutralized_players']=len(transfer_conflicts)
+            return 0.0
         if len(top)>1 and abs(top[0][1]-top[1][1])<0.75 and eid in (top[0][0],top[1][0]):
             return 0.0
         return min(1.0,float(votes.get(eid,0.0))/max(1.0,total)*1.35)
@@ -111,7 +127,7 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
         scores=[]
         for eid in selected_clubs:
             weighted=sum(player_club_weight(pid,eid) for pid in ids)
-            direct=len(ids & club_sets[eid])
+            direct=len(ids & unique_club_sets[eid])
             score=weighted+0.55*direct
             if score>0:scores.append((score,direct,eid))
         scores.sort(reverse=True)
@@ -177,7 +193,7 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
         c=cached[ci];lids=ids_of(c['left']);rids=ids_of(c['right'])
         lc=[];rc=[]
         for eid,sset in club_sets.items():
-            lo=len(lids&sset);ro=len(rids&sset)
+            uset=unique_club_sets.get(eid,set());lo=len(lids&uset);ro=len(rids&uset)
             if lo>=5:lc.append((lo,eid))
             if ro>=5:rc.append((ro,eid))
         lc.sort(reverse=True);rc.sort(reverse=True)
