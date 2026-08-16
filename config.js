@@ -1,4 +1,4 @@
 window.FM_FANTASY_CONFIG = {
-  supabaseUrl: 'YOUR_SUPABASE_URL',
-  supabaseAnonKey: 'YOUR_SUPABASE_PUBLISHABLE_KEY'
+  supabaseUrl: 'https://ysnrmtwukawmhmowpfrs.supabase.co',
+  supabaseAnonKey: 'sb_publishable_3n_do9q4xVT5tp1BTAjnJg_bZBLmXvL'
 };
