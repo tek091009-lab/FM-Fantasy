@@ -5,6 +5,7 @@
  const msg=t=>{const e=document.getElementById('authMsg');if(e)e.textContent=t||''};
  const gate=()=>document.getElementById('authGate');
  const setRoleUI=()=>{document.body.dataset.role=profile?.role||'user';const b=document.getElementById('cloudBadge'),u=document.getElementById('cloudUser');if(b)b.classList.toggle('online',!!session);if(u)u.textContent=profile?`${profile.username} · ${profile.role==='creator'?'Creator':'Manager'}`:'Offline'};
+ function clearLegacyListeners(){['authLoginTab','authSignupTab','roleUser','roleCreator','authSubmit','authPassword'].forEach(id=>{const el=document.getElementById(id);if(!el||!el.parentNode)return;const c=el.cloneNode(true);el.parentNode.replaceChild(c,el)})}
  async function bootstrap(){
    if(!hasCfg){msg('Cloud setup is not connected yet.');return}
    if(!window.supabase){msg('Login service failed to load. Refresh the page.');return}
@@ -41,6 +42,7 @@
  async function publishWorld(payload){if(!profile||profile.role!=='creator'||!world)return;const {error}=await client.from('worlds').update({payload,updated_at:new Date().toISOString()}).eq('id',world.id);if(error)throw error;world.payload=payload}
  async function loadWorld(){if(!world)return null;const {data,error}=await client.from('worlds').select('payload').eq('id',world.id).single();if(error)throw error;let payload=data?.payload||null;if(!payload&&profile?.role==='creator'&&typeof window.fmStoredGet==='function'){const local=await window.fmStoredGet();if(local){await publishWorld(local);payload=local}}return payload}
  window.FMCloud={managerState:null,ready:()=>!!(client&&session&&profile&&world),isCreator:()=>profile?.role==='creator',publishWorld,loadWorld,queueManagerSave:st=>{if(!client||!session||!world)return;clearTimeout(saveTimer);saveTimer=setTimeout(async()=>{const {error}=await client.from('manager_states').upsert({world_id:world.id,user_id:session.user.id,state:st,updated_at:new Date().toISOString()},{onConflict:'world_id,user_id'});if(error)console.warn('Manager cloud save failed',error)},650)},logout:()=>client?.auth.signOut(),getWorld:()=>world,getProfile:()=>profile};
+ clearLegacyListeners();
  document.getElementById('authLoginTab')?.addEventListener('click',()=>setMode(false));document.getElementById('authSignupTab')?.addEventListener('click',()=>setMode(true));document.getElementById('roleUser')?.addEventListener('click',()=>setRole('user'));document.getElementById('roleCreator')?.addEventListener('click',()=>setRole('creator'));document.getElementById('authSubmit')?.addEventListener('click',()=>signupMode?signup():login());document.getElementById('authPassword')?.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('authSubmit').click()});
  bootstrap().catch(e=>msg(String(e.message||e)));
 })();
