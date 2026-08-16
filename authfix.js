@@ -21,7 +21,17 @@
    const {data:m,error:me}=await client.from('world_members').select('world_id').eq('user_id',uid).limit(1).maybeSingle();if(me||!m?.world_id){msg(me?.message||'Shared FM world could not be loaded.');showGate();return}
    const {data:w,error:we}=await client.from('worlds').select('*').eq('id',m.world_id).single();if(we||!w){msg(we?.message||'Shared FM world could not be loaded.');showGate();return}world=w;
    const {data:ms}=await client.from('manager_states').select('state').eq('world_id',world.id).eq('user_id',uid).maybeSingle();
-   window.FMCloud.managerState=ms?.state||null;gate()?.classList.add('hidden');setRoleUI();window.dispatchEvent(new Event('fmcloudready'));
+   window.FMCloud.managerState=ms?.state||null;
+   gate()?.classList.add('hidden');setRoleUI();
+   try{
+     if(window.FMCloud.managerState && typeof state!=='undefined'){
+       state=Object.assign({},DEFAULT,window.FMCloud.managerState);
+       state.chips=state.chips||JSON.parse(JSON.stringify(DEFAULT.chips));
+     }
+     if(typeof loadServerImportState==='function')await loadServerImportState();
+     if(typeof renderAll==='function')renderAll();
+   }catch(e){console.error('Direct cloud database restore failed',e)}
+   window.dispatchEvent(new Event('fmcloudready'));
  }
  async function login(){const u=document.getElementById('authUsername').value.trim(),p=document.getElementById('authPassword').value;if(!u||!p)return msg('Enter your username and password.');msg('Logging in…');const {error}=await client.auth.signInWithPassword({email:synthetic(u),password:p});if(error)msg(error.message)}
  async function signup(){
