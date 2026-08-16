@@ -1,0 +1,23 @@
+(()=>{
+ let done=false,timer=null,tries=0;
+ async function applyCloudWorld(){
+   if(done||!window.FMCloud?.ready?.())return;
+   try{
+     const payload=await window.FMCloud.loadWorld();
+     if(!payload)return;
+     if(typeof window.fmStoredSetLocalOnly==='function')await window.fmStoredSetLocalOnly(payload);
+     if(typeof window.applyImportedPayload==='function')window.applyImportedPayload(payload,'cloud');
+     else if(typeof window.loadServerImportState==='function')await window.loadServerImportState();
+     if(window.FMCloud.managerState&&typeof window.state==='object'){
+       try{Object.assign(window.state,window.FMCloud.managerState)}catch(_e){}
+     }
+     if(typeof window.renderAll==='function')window.renderAll();
+     done=true;
+     if(timer)clearInterval(timer);
+     console.info('FM Fantasy shared world applied',{players:payload.players?.length||0,fixtures:payload.fixtures?.length||0});
+   }catch(e){console.error('FM Fantasy shared world apply failed',e)}
+ }
+ window.addEventListener('fmcloudready',()=>setTimeout(applyCloudWorld,0));
+ timer=setInterval(()=>{tries++;applyCloudWorld();if(done||tries>40)clearInterval(timer)},500);
+ setTimeout(applyCloudWorld,50);
+})();
