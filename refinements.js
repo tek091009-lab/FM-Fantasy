@@ -9,7 +9,7 @@
     const s=document.createElement('style');s.id='fmDesktopRefinementStyles';s.textContent=`
       /* The desktop type scale is intentional at first paint: primary identity first,
          secondary club/form copy second. */
-      #statsPage .statsWorkspace{grid-template-rows:44px 74px minmax(0,1fr) 148px!important;gap:8px!important}
+      #statsPage .statsWorkspace{grid-template-rows:44px 74px minmax(0,1fr) clamp(198px,22vh,218px)!important;gap:8px!important}
       #statsPage .statsToolbar{padding:6px 11px 6px 14px!important}
       #statsPage .statsHeroCard{padding:8px 12px!important}
       #statsPage .statsHeroCard small{font-size:7px!important}
@@ -18,34 +18,39 @@
       #statsPage .statRow .nm{color:#f8f3fc!important;font-size:8.7px!important;line-height:1.12!important;font-weight:900!important}
       #statsPage .statRow .sub{color:#81758f!important;font-size:6.2px!important;line-height:1.08!important;font-weight:600!important}
       #statsPage .statsBottom{grid-template-columns:minmax(0,1fr) 252px!important;gap:7px!important}
+      #statsPage .statsBottom>.card{display:grid!important;grid-template-rows:29px minmax(0,1fr)!important;min-height:0!important}
       #statsPage .statsBottom .statsCardHead{height:29px!important;min-height:29px!important;padding:5px 9px!important}
       #statsPage .statsBottom .statsCardHead small{display:none!important}
-      #statsPage #statsInsights{height:119px!important;min-height:0!important;gap:6px!important;padding:6px!important}
-      #statsPage .insightCard{counter-reset:insightRank!important;min-height:0!important;padding:6px 7px!important}
-      #statsPage .insightCard>small{margin:1px 0 3px!important;font-size:5.5px!important}
-      #statsPage .insightLine{grid-template-columns:15px minmax(0,1fr) 45px 25px!important;gap:4px!important;margin-top:4px!important;font-size:6.6px!important;line-height:1!important}
-      #statsPage .insightLine:before{width:14px!important;height:14px!important;font-size:6px!important;border-radius:4px!important}
-      #statsPage .insightBar{height:4px!important}
-      #statsPage #statsHighlights{height:119px!important;padding:3px 8px!important}
-      #statsPage .highlightRow{min-height:27px!important}
+      #statsPage #statsInsights{height:auto!important;min-height:0!important;gap:7px!important;padding:8px!important}
+      #statsPage .insightCard{counter-reset:insightRank!important;min-height:0!important;padding:8px!important}
+      #statsPage .insightCard>b{font-size:9px!important}
+      #statsPage .insightCard>small{margin:2px 0 6px!important;font-size:6.5px!important}
+      #statsPage .insightLine{grid-template-columns:16px minmax(0,1fr) 48px 28px!important;gap:5px!important;margin-top:6px!important;font-size:7.4px!important;line-height:1!important}
+      #statsPage .insightLine:before{width:15px!important;height:15px!important;font-size:6.5px!important;border-radius:4px!important}
+      #statsPage .insightBar{height:5px!important}
+      #statsPage #statsHighlights{height:auto!important;min-height:0!important;padding:6px 9px!important}
+      #statsPage .highlightRow{min-height:35px!important}
+      #statsPage .highlightRow b{font-size:8px!important}
+      #statsPage .highlightRow span{font-size:6px!important}
 
       /* Rules retain the clearer hierarchy without producing a page scrollbar. */
       @media(min-width:1181px){
         #rulesPage.active{height:calc(100vh - 119px)!important;overflow:hidden!important}
         #rulesPage .rulesConceptGrid{height:calc(100% - 22px)!important;grid-template-rows:repeat(3,minmax(0,1fr))!important;gap:7px!important}
-        #rulesPage .ruleConcept{min-height:0!important;padding:7px!important;overflow:hidden!important}
-        #rulesPage .ruleTitle{gap:7px!important;margin-bottom:5px!important}
-        #rulesPage .ruleTitle>span{width:20px!important;height:20px!important;flex-basis:20px!important;font-size:9px!important}
-        #rulesPage .ruleTitle h2{font-size:11px!important;line-height:1.12!important}
-        #rulesPage .ruleTitle p{font-size:6.3px!important;line-height:1.28!important}
-        #rulesPage .ruleScoringTop,#rulesPage .ruleTwin,#rulesPage .ruleThirds,#rulesPage .ruleFour{gap:5px!important}
-        #rulesPage .ruleMini,#rulesPage .ruleStrip{min-height:47px!important;gap:7px!important;padding:6px 7px!important}
-        #rulesPage .ruleMini>i,#rulesPage .ruleStrip>i{width:27px!important;height:27px!important;flex-basis:27px!important;font-size:11px!important}
-        #rulesPage .ruleMini b,#rulesPage .ruleStrip b{margin-bottom:2px!important;font-size:7px!important;line-height:1.15!important}
-        #rulesPage .ruleMini p,#rulesPage .ruleStrip p{font-size:6.2px!important;line-height:1.28!important}
-        #rulesPage .ruleScoring .ruleTwin{margin-top:5px!important}
-        #rulesPage .ruleInfo{min-height:28px!important;margin-top:5px!important;padding:5px 7px!important;font-size:6px!important;line-height:1.25!important}
-        #rulesPage .rulesFooter{height:20px!important;padding:4px 4px 0!important;font-size:6px!important}
+        #rulesPage .ruleConcept{min-height:0!important;padding:9px 10px!important;overflow:hidden!important}
+        #rulesPage .ruleTitle{gap:8px!important;margin-bottom:7px!important}
+        #rulesPage .ruleTitle>span{width:22px!important;height:22px!important;flex-basis:22px!important;font-size:10px!important}
+        #rulesPage .ruleTitle h2{font-size:13px!important;line-height:1.12!important}
+        #rulesPage .ruleTitle p{font-size:8px!important;line-height:1.32!important}
+        #rulesPage .ruleScoringTop,#rulesPage .ruleTwin,#rulesPage .ruleThirds,#rulesPage .ruleFour{gap:7px!important}
+        #rulesPage .ruleMini,#rulesPage .ruleStrip{min-height:56px!important;gap:8px!important;padding:8px 9px!important}
+        #rulesPage .ruleMini>i,#rulesPage .ruleStrip>i{width:30px!important;height:30px!important;flex-basis:30px!important;font-size:12px!important}
+        #rulesPage .ruleMini b,#rulesPage .ruleStrip b{margin-bottom:3px!important;font-size:8.7px!important;line-height:1.18!important}
+        #rulesPage .ruleMini p,#rulesPage .ruleStrip p{font-size:8px!important;line-height:1.34!important}
+        #rulesPage .ruleGoalRows{font-size:8px!important;line-height:1.28!important}
+        #rulesPage .ruleScoring .ruleTwin{margin-top:7px!important}
+        #rulesPage .ruleInfo{min-height:32px!important;margin-top:7px!important;padding:7px 9px!important;font-size:7.5px!important;line-height:1.32!important}
+        #rulesPage .rulesFooter{height:20px!important;padding:4px 4px 0!important;font-size:7px!important}
       }
 
       /* Fixtures: a compact filter rail leaves room for the calendar and the list owns
@@ -62,7 +67,7 @@
 
       /* Separate Star XI aggregate action and align every pitch navigator consistently. */
       #teamPage .pitchTopControls,#starPage .pitchTopControls{right:1.4%!important;display:flex!important;align-items:center!important;justify-content:flex-end!important;gap:6px!important}
-      #starAllToggle{order:2!important;margin:0!important;min-width:45px!important;height:29px!important;border-radius:8px!important}
+      #starAllToggle{order:2!important;margin:0!important;min-width:45px!important;height:29px!important;border-radius:8px!important;pointer-events:auto!important}
       #starPage .pitchTopControls>.gwNav{order:1!important}
 
       /* Transfer list hierarchy: club column is the club identity, the first column is
@@ -155,7 +160,8 @@
   function refreshVisible(){
     try{if(typeof renderStats==='function'&&$('statsPage')?.classList.contains('active'))renderStats();if(typeof renderMarket==='function'&&$('transfersPage')?.classList.contains('active'))renderMarket();if(typeof renderTeam==='function'&&$('teamPage')?.classList.contains('active'))renderTeam();if(typeof renderStar==='function'&&$('starPage')?.classList.contains('active'))renderStar()}catch(e){console.warn('Visible page refresh skipped',e)}
   }
-  function boot(){addStyles();installPublicNames();installTransferRows();installAllFixtures();installLeagueIcons();requestAnimationFrame(refreshVisible);setTimeout(refreshVisible,120)}
+  function fixTeamSummaryLabel(){const label=$('teamGWSum')?.closest('.sum')?.querySelector('small');if(label)label.textContent='Gameweek'}
+  function boot(){addStyles();installPublicNames();installTransferRows();installAllFixtures();installLeagueIcons();fixTeamSummaryLabel();requestAnimationFrame(refreshVisible);setTimeout(()=>{fixTeamSummaryLabel();refreshVisible()},120)}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
-  window.addEventListener('fmcloudready',()=>{aliasSignature='';installPublicNames();addAllFixtureOption();requestAnimationFrame(refreshVisible)});
+  window.addEventListener('fmcloudready',()=>{aliasSignature='';installPublicNames();addAllFixtureOption();fixTeamSummaryLabel();requestAnimationFrame(refreshVisible)});
 })();
