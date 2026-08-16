@@ -12,6 +12,22 @@ def reconstruct_html()->str:
     return gzip.decompress(base64.b64decode(b64)).decode('utf-8')
 
 
+def safe_fragment()->str:
+    frag=FRAG.read_text()
+    # A speculative side may teach club identity only once. Re-running the in-memory
+    # recovery loop must not let the same unconfirmed side recursively strengthen itself.
+    frag=frag.replace(
+        "    def propagate_side_identities(max_rounds=8):\n        accepted=0\n        labelled_side=set()\n",
+        "    learned_side_label={}\n    def propagate_side_identities(max_rounds=8):\n        accepted=0\n"
+    )
+    frag=frag.replace("                if si in labelled_side:continue\n","                if si in learned_side_label:continue\n")
+    frag=frag.replace("                labelled_side.add(si);progress+=1;accepted+=1\n","                learned_side_label[si]=eid;progress+=1;accepted+=1\n")
+    frag=frag.replace("        diagnostics['cohort_side_labels']=max(diagnostics['cohort_side_labels'],accepted)\n","        diagnostics['cohort_side_labels']=len(learned_side_label)\n")
+    if 'learned_side_label={}' not in frag or 'labelled_side=set()' in frag:
+        raise RuntimeError('cohort single-vote safety patch not applied')
+    return frag.rstrip()+'\n\n'
+
+
 def patch_importer(html:str)->str:
     m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
     if not m: raise RuntimeError('FM_PY_SOURCE_B64 not found')
@@ -19,7 +35,7 @@ def patch_importer(html:str)->str:
     start=py.find('def recover_unlabelled_rich_members(')
     end=py.find('def recover_game_db_rich_matches(',start)
     if start<0 or end<0: raise RuntimeError('history recovery function markers not found')
-    frag=FRAG.read_text().rstrip()+'\n\n'
+    frag=safe_fragment()
     py2=py[:start]+frag+py[end:]
     # Expose the new decoder paths in Export Debug without making them required by old builds.
     needle="'unlabelled_rich_propagation_matches':member_rich_diag.get('propagation_matches',0),"
