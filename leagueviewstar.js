@@ -165,15 +165,16 @@
 
     const gw=currentGw(m),gp=gwPts(m,gw),total=totalPts(m);
     let sum=document.getElementById('fmLeagueInlineSummary');if(!sum){sum=document.createElement('div');sum.id='fmLeagueInlineSummary';summary.appendChild(sum)}
-    sum.innerHTML=`<div class="fmLeagueSumCell"><small>Team Name</small><b>${esc(m.team||'My Team')}</b></div><div class="fmLeagueSumCell"><small>Manager</small><b>${esc(m.name||'Manager')}</b></div><div class="fmLeagueSumCell"><small>Gameweek</small><b>GW ${gw} <em>${gp} pts</em></b></div><div class="fmLeagueSumCell"><small>Total Points</small><b class="pink">${total}</b></div>`;
+    const sumHtml=`<div class="fmLeagueSumCell"><small>Team Name</small><b>${esc(m.team||'My Team')}</b></div><div class="fmLeagueSumCell"><small>Manager</small><b>${esc(m.name||'Manager')}</b></div><div class="fmLeagueSumCell"><small>Gameweek</small><b>GW ${gw} <em>${gp} pts</em></b></div><div class="fmLeagueSumCell"><small>Total Points</small><b class="pink">${total}</b></div>`;if(sum.innerHTML!==sumHtml)sum.innerHTML=sumHtml;
 
     let panel=document.getElementById('fmLeagueManagerStarPanel');if(!panel){panel=document.createElement('div');panel.id='fmLeagueManagerStarPanel';side.appendChild(panel)}
-    panel.innerHTML=`<div class="starSideHero"><div class="starSideIcon">★</div><h3>${esc(m.team||'My Team')}</h3><p>${esc(m.name||'Manager')} · read-only mini-league team view.</p></div><div class="starOverview"><h4>Manager Overview</h4><div class="starMetric"><span>Team Name</span><b>${esc(m.team||'My Team')}</b></div><div class="starMetric"><span>Manager</span><b>${esc(m.name||'Manager')}</b></div><div class="starMetric"><span>Gameweek</span><b>GW ${gw}</b></div><div class="starMetric points"><span>Gameweek Points</span><b>${gp}</b></div><div class="starMetric points"><span>Total Points</span><b>${total}</b></div></div><div class="starSideNote">Use the Gameweek arrows above the pitch to browse this manager's available Gameweeks. Their team remains read-only.</div>`;
+    const panelHtml=`<div class="starSideHero"><div class="starSideIcon">★</div><h3>${esc(m.team||'My Team')}</h3><p>${esc(m.name||'Manager')} · read-only mini-league team view.</p></div><div class="starOverview"><h4>Manager Overview</h4><div class="starMetric"><span>Team Name</span><b>${esc(m.team||'My Team')}</b></div><div class="starMetric"><span>Manager</span><b>${esc(m.name||'Manager')}</b></div><div class="starMetric"><span>Gameweek</span><b>GW ${gw}</b></div><div class="starMetric points"><span>Gameweek Points</span><b>${gp}</b></div><div class="starMetric points"><span>Total Points</span><b>${total}</b></div></div><div class="starSideNote">Use the Gameweek arrows above the pitch to browse this manager's available Gameweeks. Their team remains read-only.</div>`;if(panel.innerHTML!==panelHtml)panel.innerHTML=panelHtml;
   }
 
-  let timer;const refresh=()=>{clearTimeout(timer);timer=setTimeout(render,70)};
+  let frame=0,running=false;const refresh=()=>{if(running)return;cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{running=true;try{render()}finally{running=false}})};
+  window.fmRenderLeagueTeamView=()=>{if(running)return;running=true;try{render()}finally{running=false}};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',refresh,{once:true});else refresh();
   window.addEventListener('fmcloudready',refresh);window.addEventListener('resize',refresh);
-  document.addEventListener('click',()=>setTimeout(refresh,100),true);
+  document.addEventListener('click',refresh,true);
   new MutationObserver(refresh).observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['class']});
 })();
