@@ -25,6 +25,32 @@ def safe_fragment()->str:
     frag=frag.replace("        diagnostics['cohort_side_labels']=max(diagnostics['cohort_side_labels'],accepted)\n","        diagnostics['cohort_side_labels']=len(learned_side_label)\n")
     if 'learned_side_label={}' not in frag or 'labelled_side=set()' in frag:
         raise RuntimeError('cohort single-vote safety patch not applied')
+
+    # Some FM schema generations expose no useful fixture_id (or zero for many rows).
+    # The old matcher used fixture_id as the uniqueness key everywhere, so several valid
+    # fixtures could collapse onto key 0. Worse, the single-side bridge could mistake that
+    # collapse for a unique fixture. Use a structural key fallback instead: current fixture
+    # id when present, otherwise the calendar identity already decoded from FM.
+    marker="    used_fixtures=set();used_candidates=set();out=[]\n\n"
+    helper=(
+        "    used_fixtures=set();used_candidates=set();out=[]\n\n"
+        "    def fixture_key(f):\n"
+        "        fid=int(f.get('fixture_id') or 0)\n"
+        "        if fid>0:return ('id',fid)\n"
+        "        return ('struct',int(f.get('home_tid') or 0),int(f.get('away_tid') or 0),\n"
+        "                str(f.get('date') or ''),int(f.get('gameweek') or 0),\n"
+        "                int(f.get('home_score') or 0),int(f.get('away_score') or 0))\n\n"
+    )
+    if marker not in frag:raise RuntimeError('fixture identity insertion marker not found')
+    frag=frag.replace(marker,helper,1)
+    frag=frag.replace("fid=int(f.get('fixture_id') or 0)","fid=fixture_key(f)")
+    frag=frag.replace("uniq={int(o[0].get('fixture_id') or 0):(o) for o in options}","uniq={fixture_key(o[0]):o for o in options}")
+    frag=frag.replace("if int(f.get('fixture_id') or 0) in used_fixtures:continue","if fixture_key(f) in used_fixtures:continue")
+    if "def fixture_key(f):" not in frag or "uniq={fixture_key(o[0]):o for o in options}" not in frag:
+        raise RuntimeError('schema-safe fixture key patch not applied')
+    # It is unsafe for the bridge/global matcher to collapse missing fixture ids onto 0.
+    if "int(o[0].get('fixture_id') or 0)" in frag:
+        raise RuntimeError('unsafe zero fixture-id uniqueness remains')
     return frag.rstrip()+'\n\n'
 
 
@@ -37,7 +63,7 @@ def patch_importer(html:str)->str:
     if start<0 or end<0: raise RuntimeError('history recovery function markers not found')
     frag=safe_fragment()
     py2=py[:start]+frag+py[end:]
-    # Expose the new decoder paths in Export Debug without making them required by old builds.
+    # Expose the decoder paths in Export Debug without making them required by old builds.
     needle="'unlabelled_rich_propagation_matches':member_rich_diag.get('propagation_matches',0),"
     extra=(needle+"'unlabelled_rich_cohort_side_labels':member_rich_diag.get('cohort_side_labels',0),"
            "'unlabelled_rich_fixture_identity_matches':member_rich_diag.get('fixture_identity_matches',0),"
@@ -49,6 +75,7 @@ def patch_importer(html:str)->str:
     new_b64=base64.b64encode(py2.encode()).decode()
     html2=html[:m.start(1)]+new_b64+html[m.end(1):]
     if 'unlabelled_retained_fixture_identity' not in py2: raise RuntimeError('new decoder marker missing')
+    if "def fixture_key(f):" not in py2: raise RuntimeError('schema-safe fixture key missing from importer')
     return html2
 
 
@@ -66,6 +93,6 @@ def main():
     # Round-trip production validation.
     check=reconstruct_html()
     if check!=patched:raise RuntimeError('repack round-trip mismatch')
-    print('History decoder upgraded: strict + cluster + cohort + fixture identity + single-side bridge')
+    print('History decoder upgraded: strict + cluster + cohort + fixture identity + single-side bridge + schema-safe fixture key')
 
 if __name__=='__main__':main()
