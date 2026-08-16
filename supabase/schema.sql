@@ -1,4 +1,5 @@
 create extension if not exists pgcrypto;
+create schema if not exists private;
 
 create table if not exists public.profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
@@ -33,6 +34,37 @@ create table if not exists public.manager_states (
   primary key (world_id,user_id)
 );
 
+create or replace function private.fmfantasy_is_world_member(p_world_id uuid, p_user_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists(select 1 from public.world_members wm where wm.world_id=p_world_id and wm.user_id=p_user_id)
+$$;
+
+create or replace function private.fmfantasy_share_world(p_left uuid, p_right uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists(
+    select 1 from public.world_members a
+    join public.world_members b on b.world_id=a.world_id
+    where a.user_id=p_left and b.user_id=p_right
+  )
+$$;
+
+revoke all on schema private from public;
+grant usage on schema private to authenticated;
+revoke all on function private.fmfantasy_is_world_member(uuid,uuid) from public;
+revoke all on function private.fmfantasy_share_world(uuid,uuid) from public;
+grant execute on function private.fmfantasy_is_world_member(uuid,uuid) to authenticated;
+grant execute on function private.fmfantasy_share_world(uuid,uuid) to authenticated;
+
 alter table public.profiles enable row level security;
 alter table public.worlds enable row level security;
 alter table public.world_members enable row level security;
@@ -41,59 +73,40 @@ alter table public.manager_states enable row level security;
 create policy "profiles read self or world peers" on public.profiles
 for select to authenticated
 using (
-  user_id = (select auth.uid())
-  or exists (
-    select 1 from public.world_members me
-    join public.world_members them on them.world_id = me.world_id
-    where me.user_id = (select auth.uid()) and them.user_id = profiles.user_id
-  )
+  user_id=(select auth.uid())
+  or private.fmfantasy_share_world((select auth.uid()), user_id)
 );
 
 create policy "world members read world" on public.worlds
 for select to authenticated
-using (exists (
-  select 1 from public.world_members m
-  where m.world_id = worlds.id and m.user_id = (select auth.uid())
-));
+using (private.fmfantasy_is_world_member(id,(select auth.uid())));
 
 create policy "creator updates world" on public.worlds
 for update to authenticated
-using (creator_id = (select auth.uid()))
-with check (creator_id = (select auth.uid()));
+using (creator_id=(select auth.uid()))
+with check (creator_id=(select auth.uid()));
 
 create policy "members read memberships" on public.world_members
 for select to authenticated
-using (exists (
-  select 1 from public.world_members me
-  where me.world_id = world_members.world_id and me.user_id = (select auth.uid())
-));
+using (private.fmfantasy_is_world_member(world_id,(select auth.uid())));
 
 create policy "members read manager states" on public.manager_states
 for select to authenticated
-using (exists (
-  select 1 from public.world_members me
-  where me.world_id = manager_states.world_id and me.user_id = (select auth.uid())
-));
+using (private.fmfantasy_is_world_member(world_id,(select auth.uid())));
 
 create policy "manager inserts own state" on public.manager_states
 for insert to authenticated
 with check (
-  user_id = (select auth.uid())
-  and exists (
-    select 1 from public.world_members me
-    where me.world_id = manager_states.world_id and me.user_id = (select auth.uid())
-  )
+  user_id=(select auth.uid())
+  and private.fmfantasy_is_world_member(world_id,(select auth.uid()))
 );
 
 create policy "manager updates own state" on public.manager_states
 for update to authenticated
-using (user_id = (select auth.uid()))
+using (user_id=(select auth.uid()))
 with check (
-  user_id = (select auth.uid())
-  and exists (
-    select 1 from public.world_members me
-    where me.world_id = manager_states.world_id and me.user_id = (select auth.uid())
-  )
+  user_id=(select auth.uid())
+  and private.fmfantasy_is_world_member(world_id,(select auth.uid()))
 );
 
 create or replace function public.fmfantasy_finish_signup(
