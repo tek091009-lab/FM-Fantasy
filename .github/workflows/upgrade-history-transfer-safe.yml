@@ -1,0 +1,34 @@
+name: Upgrade transfer-safe history decoder
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/upgrade_history_decoder_v55.py'
+      - '.github/workflows/upgrade-history-transfer-safe.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch embedded importer
+        run: python scripts/upgrade_history_decoder_v55.py
+      - name: Verify generated importer
+        run: |
+          git diff --check
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('scripts/history_recovery_v53.pyfrag').read_text()
+          assert 'unique_club_sets' in s
+          assert 'transfer_conflict_neutralized_players' in s
+          assert 'fixture_key(f)' not in s  # applied dynamically by the base upgrade script
+          print('transfer-safe fragment checks passed')
+          PY
+      - name: Commit production upgrade
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/history_recovery_v53.pyfrag app/part* app/fix*
+          git commit -m "Make historical club identity transfer-safe"
+          git push origin HEAD:main
