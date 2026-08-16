@@ -18,63 +18,29 @@
       .page.active:not(#teamPage) [class*="muted"],
       .page.active:not(#teamPage) [class*="meta"]{line-height:1.4!important}
 
-      /* Rules was the clearest example of text being too compressed. */
-      #rulesPage h2,#rulesPage .sectionTitle{font-size:17px!important;line-height:1.2!important}
-      #rulesPage h3{font-size:14px!important;line-height:1.25!important}
-      #rulesPage p,#rulesPage li,#rulesPage label{line-height:1.5!important}
-      #rulesPage .card,
-      #rulesPage [class*="ruleCard"],#rulesPage [class*="rule-card"],
-      #rulesPage [class*="rulesCard"],#rulesPage [class*="rules-card"]{padding:16px!important}
-      #rulesPage [class*="ruleGrid"],#rulesPage [class*="rule-grid"],
-      #rulesPage [class*="rulesGrid"],#rulesPage [class*="rules-grid"]{gap:14px!important}
-
-      /* Dense data pages: slightly taller rows make the larger type breathe. */
-      #statsPage td,#statsPage th,
-      #transfersPage td,#transfersPage th,
-      #leagueTablePage td,#leagueTablePage th,
-      #fixturesPage td,#fixturesPage th{padding-top:8px!important;padding-bottom:8px!important}
-
       #statsPage [class*="leader"],#statsPage [class*="insight"],
       #leaguesPage [class*="league"],#newsPage [class*="news"]{line-height:1.38!important}
-
-      /* Apply the clearer type immediately, before per-element measurement runs. */
-      .page:not(#teamPage) p,.page:not(#teamPage) li,.page:not(#teamPage) label,
-      .page:not(#teamPage) td,.page:not(#teamPage) th{font-size:max(11px,1em)!important}
-      .page:not(#teamPage) small,.page:not(#teamPage) [class*="sub"],
-      .page:not(#teamPage) [class*="desc"],.page:not(#teamPage) [class*="muted"],
-      .page:not(#teamPage) [class*="meta"]{font-size:max(10.5px,1em)!important}
-
-      @media (max-width:1100px){
-        #rulesPage .card,
-        #rulesPage [class*="ruleCard"],#rulesPage [class*="rule-card"]{padding:13px!important}
-      }
     `;
     document.head.appendChild(s);
   }
 
   function pageMinimum(root){
     const id=(root?.id||'').toLowerCase();
-    if(id.includes('rules')) return 12;
-    if(id.includes('stats')) return 11;
-    if(id.includes('transfer')) return 11;
-    if(id.includes('league')) return 11;
-    if(id.includes('fixture')) return 11;
-    if(id.includes('news')) return 11.25;
-    if(id.includes('settings')) return 11;
-    return 10.5;
+    if(id.includes('news')) return 9;
+    if(id.includes('settings')) return 9;
+    return 0;
   }
 
   function readableLeaf(el,min){
-    if(!el||el.closest(SKIP_CLOSEST)) return;
+    if(!el||!min||el.closest(SKIP_CLOSEST)) return;
     const text=(el.textContent||'').trim();
     if(!text||!/[A-Za-z0-9£€%]/.test(text)) return;
     const cs=getComputedStyle(el), current=parseFloat(cs.fontSize||'0');
     if(!current||current>=min) return;
 
     let target=min;
-    if(el.tagName==='SMALL') target=Math.max(target,11.5);
-    if(el.matches('th,[class*="header"],[class*="label"]')) target=Math.max(target,10.75);
-    if(el.matches('button,a')) target=Math.max(target,11);
+    if(el.tagName==='SMALL') target=Math.max(target,8.5);
+    if(el.matches('button,a')) target=Math.max(target,9);
 
     el.style.setProperty('font-size',target+'px','important');
     if(cs.lineHeight==='normal'||parseFloat(cs.lineHeight)<target*1.25){
@@ -177,13 +143,13 @@
       #leagueModal .leagueRow{min-height:58px!important;margin-top:7px!important;padding:10px 13px!important;border:1px solid rgba(213,154,247,.13)!important;border-radius:10px!important;background:#160d35!important}
 
       /* Season insights concept. */
-      #statsPage #statsInsights{counter-reset:insightRank;gap:10px!important;padding:10px!important}
-      #statsPage .insightCard{position:relative!important;min-height:160px!important;padding:14px!important;overflow:hidden!important;border-color:rgba(255,255,255,.09)!important;border-radius:11px!important;background:radial-gradient(circle at 100% 0,rgba(197,48,241,.12),transparent 38%),linear-gradient(145deg,#221345,#130c31)!important}
+      #statsPage #statsInsights{gap:7px!important;padding:7px!important}
+      #statsPage .insightCard{counter-reset:insightRank;position:relative!important;min-height:0!important;padding:8px!important;overflow:hidden!important;border-color:rgba(255,255,255,.09)!important;border-radius:9px!important;background:radial-gradient(circle at 100% 0,rgba(197,48,241,.12),transparent 38%),linear-gradient(145deg,#221345,#130c31)!important}
       #statsPage .insightCard:nth-child(2){background:radial-gradient(circle at 100% 0,rgba(40,133,255,.14),transparent 38%),linear-gradient(145deg,#181b48,#100d30)!important}
       #statsPage .insightCard:nth-child(3){background:radial-gradient(circle at 100% 0,rgba(39,210,152,.13),transparent 38%),linear-gradient(145deg,#123b3b,#100d30)!important}
       #statsPage .insightCard:nth-child(4){background:radial-gradient(circle at 100% 0,rgba(255,183,55,.13),transparent 38%),linear-gradient(145deg,#36243c,#100d30)!important}
-      #statsPage .insightCard>b{font-size:12px!important}#statsPage .insightCard>small{margin:3px 0 11px!important;font-size:8px!important}
-      #statsPage .insightLine{counter-increment:insightRank;grid-template-columns:18px minmax(0,1fr) 62px 30px!important;gap:7px!important;margin-top:8px!important;font-size:8px!important}
+      #statsPage .insightCard>b{font-size:9px!important}#statsPage .insightCard>small{margin:2px 0 5px!important;font-size:6px!important}
+      #statsPage .insightLine{counter-increment:insightRank;grid-template-columns:16px minmax(0,1fr) 52px 27px!important;gap:5px!important;margin-top:5px!important;font-size:7px!important}
       #statsPage .insightLine:before{content:counter(insightRank);display:grid;place-items:center;width:17px;height:17px;border-radius:5px;color:#e8dcf7;background:#37205e;font-size:7px;font-weight:900}
       #statsPage .insightBar{height:6px!important;background:rgba(3,2,22,.45)!important}#statsPage .insightLine em{font-size:7px!important}
       #statsPage .insightCard:nth-child(2) .insightBar i{background:linear-gradient(90deg,#477cff,#2ac8ff)!important}#statsPage .insightCard:nth-child(3) .insightBar i{background:linear-gradient(90deg,#25a77a,#65e8ae)!important}#statsPage .insightCard:nth-child(4) .insightBar i{background:linear-gradient(90deg,#e79826,#ffd160)!important}
@@ -238,7 +204,7 @@
     return best||{picks:[],points:0,formation:{}};
   }
   function ensureAllControl(){
-    const nav=byId('starGWLabel')?.parentElement;if(!nav)return null;let b=byId('starAllToggle');if(!b){b=document.createElement('button');b.id='starAllToggle';b.type='button';b.textContent='All';b.title='Highest aggregate points across all completed Gameweeks';nav.appendChild(b);b.onclick=()=>{starAll=true;renderStar()}}b.classList.toggle('active',starAll);return b;
+    const nav=byId('starGWLabel')?.parentElement,host=nav?.parentElement;if(!nav||!host)return null;let b=byId('starAllToggle');if(!b){b=document.createElement('button');b.id='starAllToggle';b.type='button';b.textContent='All';b.title='Highest aggregate points across all completed Gameweeks';host.appendChild(b);b.onclick=()=>{starAll=!starAll;renderStar()}}else if(b.parentElement!==host)host.appendChild(b);b.classList.toggle('active',starAll);return b;
   }
   function renderStarAll(){
     ensureAllControl();const best=allStarTeam(),players=best.picks.map(x=>x.p),pointMap=new Map(best.picks.map(x=>[String(x.p.id),x.pts]));
@@ -253,7 +219,7 @@
     if(typeof renderStar!=='function'||baseRenderStar)return;baseRenderStar=renderStar;
     renderStar=function(){ensureAllControl();if(starAll){renderStarAll();return}baseRenderStar();ensureAllControl()?.classList.remove('active');if(byId('starNextGW'))byId('starNextGW').disabled=false};
     if(byId('starPrevGW'))byId('starPrevGW').onclick=()=>{if(starAll){starAll=false;starViewGW=Math.max(1,Number(META?.completed_gameweek||1))}else starViewGW=Math.max(1,starViewGW-1);renderStar()};
-    if(byId('starNextGW'))byId('starNextGW').onclick=()=>{if(starAll)return;const last=Math.max(1,Number(META?.completed_gameweek||1));if(starViewGW>=last)starAll=true;else starViewGW=Math.min(last,starViewGW+1);renderStar()};
+    if(byId('starNextGW'))byId('starNextGW').onclick=()=>{const last=Math.max(1,Number(META?.completed_gameweek||1));if(starAll){starAll=false;starViewGW=last}else starViewGW=Math.min(last,starViewGW+1);renderStar()};
     renderStar();
   }
 
@@ -270,7 +236,7 @@
     const existing=collectPayloadInjuries(payload),found=new Map(existing.map(x=>[String(x.pid||x.name).toLowerCase(),x]));if(!file||!payload?.players?.length||!window.fzstd)return payload;
     try{
       const raw=await file.arrayBuffer(),b=new Uint8Array(raw),marker=new Uint8Array([2,1,102,109,102,46]),magicBytes=new Uint8Array([0x28,0xb5,0x2f,0xfd]),tail=b.subarray(Math.max(0,b.length-4000000)),rel=FM_RUNTIME.rfind(tail,marker),magic=FM_RUNTIME.find(tail,magicBytes,Math.max(0,rel+marker.length));if(rel<0||magic<0)return payload;
-      const manifest=window.fzstd.decompress(tail.subarray(magic)),items=FM_RUNTIME.parseManifest(manifest).items.filter(m=>m.plain>0&&m.plain<=64000000&&/(injur|medical|health|unavail|condition|physio)/i.test(m.name));
+      const manifest=window.fzstd.decompress(tail.subarray(magic)),items=FM_RUNTIME.parseManifest(manifest).items.filter(m=>m.plain>0&&m.plain<=96000000&&(/(injur|medical|health|unavail|condition|physio)/i.test(m.name)||/^(game_db|news)\.dat$/i.test(String(m.name||'').split(/[\\/]/).pop())));payload.meta=payload.meta||{};payload.meta.injury_members_scanned=items.map(x=>x.name);
       const ids=new Map();for(const p of payload.players)for(const key of ['pid','id','eid','uid']){const n=Number(p?.[key]);if(Number.isInteger(n)&&n>0&&n<=0xffffffff)ids.set(n,p)}
       const decoder=new TextDecoder('latin1');for(const item of items){let data;try{const src=b.subarray(26+item.offset,26+item.offset+item.stored);data=window.fzstd.decompress(src,new Uint8Array(item.plain))}catch(_e){continue}const view=new DataView(data.buffer,data.byteOffset,data.byteLength);for(let off=0;off+4<=data.length;off+=4){const p=ids.get(view.getUint32(off,true));if(!p)continue;const start=Math.max(0,off-160),end=Math.min(data.length,off+700),txt=decoder.decode(data.subarray(start,end)).replace(/[^\x20-\x7e]+/g,' '),term=injuryTerm(txt);if(!term)continue;const key=String(p.pid??p.id??playerName(p)).toLowerCase();if(found.has(key))continue;const title=term.charAt(0).toUpperCase()+term.slice(1);p.injury_status=title;found.set(key,{pid:String(p.pid??p.id??''),name:playerName(p),club:p.club,pos:p.pos,detail:/^injur/i.test(title)?title:`Injured · ${title}`})}data=null}
     }catch(e){console.warn('FM injury table enrichment skipped',e)}
