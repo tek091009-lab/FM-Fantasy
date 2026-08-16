@@ -21,7 +21,7 @@
       #teamPage.fmLeagueStarExact .teamGrid.teamWorkspace{
         display:grid!important;
         grid-template-columns:minmax(0,1fr) clamp(285px,19%,315px)!important;
-        grid-template-rows:82px minmax(590px,1fr) 58px!important;
+        grid-template-rows:82px minmax(610px,1fr) 38px!important;
         grid-template-areas:"leagueSummary leagueSide" "leaguePitch leagueSide" "leagueFooter leagueSide"!important;
         gap:9px 0!important;
         width:100%!important;
@@ -67,7 +67,7 @@
         height:100%!important;
         min-height:0!important;
         margin:0!important;
-        padding:0 14px 8px!important;
+        padding:0 14px 2px!important;
         overflow:hidden!important;
         border:0!important;
         border-radius:0!important;
@@ -76,6 +76,8 @@
       }
       #teamPage.fmLeagueStarExact .pitchCard>.pitchScroll{flex:1 1 auto!important;min-height:0!important;width:100%!important;overflow:hidden!important;display:flex!important;align-items:stretch!important;justify-content:center!important}
       #teamPage.fmLeagueStarExact .pitchCard>.pitchScroll>.pitch{width:100%!important;max-width:none!important;height:100%!important;min-height:0!important;margin:0!important}
+      #teamPage.fmLeagueStarExact .pitch .pline.fwd{top:57%!important}
+      #teamPage.fmLeagueStarExact .pitch>.teamBench{bottom:2px!important}
 
       #teamPage.leagueReadOnly.fmLeagueStarExact #teamSide.fmLeagueStarSide,
       #teamPage.fmLeagueStarExact #teamSide.fmLeagueStarSide{
@@ -114,7 +116,7 @@
       #fmLeagueManagerStarPanel .starMetric:last-child{border-bottom:0}#fmLeagueManagerStarPanel .starMetric b{color:#fff;font-size:13px;text-align:right}#fmLeagueManagerStarPanel .starMetric.points b{color:#ff5aa6}
       #fmLeagueManagerStarPanel .starSideNote{margin-top:auto;padding:13px;border:1px solid rgba(213,183,238,.16);border-radius:5px;background:rgba(31,15,58,.88);color:#c7b5d9;font-size:9px;line-height:1.55}
 
-      #teamPage.fmLeagueStarExact .teamGrid.teamWorkspace>.teamHead{grid-area:leagueFooter!important;display:flex!important;width:calc(100% - 28px)!important;height:58px!important;min-height:0!important;margin:0 14px!important;padding:8px 12px!important;box-sizing:border-box!important;overflow:hidden!important;border:1px solid rgba(189,126,235,.22)!important;border-radius:5px!important;background:linear-gradient(180deg,#211540,#160d33)!important;box-shadow:0 9px 22px rgba(0,0,0,.17)!important}
+      #teamPage.fmLeagueStarExact .teamGrid.teamWorkspace>.teamHead{grid-area:leagueFooter!important;display:flex!important;width:calc(100% - 28px)!important;height:38px!important;min-height:0!important;margin:0 14px!important;padding:3px 12px!important;box-sizing:border-box!important;overflow:hidden!important;border:1px solid rgba(189,126,235,.22)!important;border-radius:5px!important;background:linear-gradient(180deg,#211540,#160d33)!important;box-shadow:0 9px 22px rgba(0,0,0,.17)!important}
       #teamPage.fmLeagueStarExact .teamGrid.teamWorkspace>.teamHead #teamActions{display:none!important}
 
       @media(max-width:1180px){
@@ -124,7 +126,7 @@
         #teamPage.fmLeagueStarExact .teamGrid.teamWorkspace>.teamHead{width:100%!important;margin:9px 0 0!important}
       }
       @media(min-width:1181px) and (max-height:850px){
-        #teamPage.leagueReadOnly.fmLeagueStarExact .teamGrid.teamWorkspace,#teamPage.fmLeagueStarExact .teamGrid.teamWorkspace{grid-template-rows:76px minmax(500px,1fr) 48px!important;min-height:624px!important}
+        #teamPage.leagueReadOnly.fmLeagueStarExact .teamGrid.teamWorkspace,#teamPage.fmLeagueStarExact .teamGrid.teamWorkspace{grid-template-rows:76px minmax(515px,1fr) 33px!important;min-height:624px!important}
         #teamPage.fmLeagueStarExact .teamGrid.teamWorkspace>.summary{height:76px!important}
         #fmLeagueManagerStarPanel .starSideHero{min-height:175px;padding:18px 17px}
       }
