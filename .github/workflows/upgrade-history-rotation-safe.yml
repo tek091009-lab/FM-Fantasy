@@ -1,0 +1,35 @@
+name: Upgrade rotation-safe history decoder
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/upgrade_history_decoder_v56.py'
+      - 'scripts/upgrade_history_decoder.py'
+      - '.github/workflows/upgrade-history-rotation-safe.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch embedded importer
+        run: python scripts/upgrade_history_decoder_v56.py
+      - name: Verify generated importer
+        run: |
+          git diff --check
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('scripts/history_recovery_v53.pyfrag').read_text()
+          assert 'adaptive_cluster_edges' in s
+          assert 'direct_anchor_club' in s
+          assert 'overlap<0.34' in s
+          print('rotation-safe cluster checks passed')
+          PY
+      - name: Commit production upgrade
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/history_recovery_v53.pyfrag app/part* app/fix*
+          git commit -m "Add rotation-safe historical side clustering"
+          git push origin HEAD:main
