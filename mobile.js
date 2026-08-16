@@ -69,6 +69,33 @@
       .bench{min-width:680px!important}
       .leagueTableScroll{max-height:70dvh!important}
     }
+    @media(max-width:900px){
+      /* Native phone pitch: the mobile view has its own geometry rather than a
+         scaled or horizontally clipped desktop canvas. */
+      .pitchCard>.pitchScroll,.starPitchCard>.pitchScroll{height:auto!important;min-height:0!important;overflow:visible!important}
+      .pitchCard>.pitchScroll>.pitch,.starPitchCard>.pitchScroll>.pitch,#transfersPage .pitch{
+        transform:none!important;width:100%!important;min-width:0!important;max-width:100%!important;
+        height:auto!important;min-height:650px!important;margin:0!important;padding:14px 5px 10px!important;
+        box-sizing:border-box!important;border-radius:16px!important;clip-path:none!important;
+        background:repeating-linear-gradient(180deg,#08a94d 0,#08a94d 72px,#079b46 72px,#079b46 144px)!important
+      }
+      .pitchCard .halfPitchMarkings{inset:8px 7px 8px!important}.pitchCard .halfPitchMarkings .outline{clip-path:none!important;border-radius:12px!important}
+      .pitchCard .pline{display:flex!important;width:100%!important;max-width:100%!important;justify-content:space-evenly!important;align-items:flex-start!important;gap:3px!important;box-sizing:border-box!important}
+      .pitchCard .pline.gk{margin-top:15px!important}.pitchCard .pline.def{margin-top:72px!important}.pitchCard .pline.mid{margin-top:68px!important}.pitchCard .pline.fwd{margin-top:66px!important}
+      .pitchCard .pchip{flex:0 1 72px!important;width:min(18vw,72px)!important;min-width:0!important;max-width:72px!important;min-height:91px!important;padding:5px 3px 6px!important;border-radius:9px!important;box-sizing:border-box!important;overflow:visible!important}
+      .pitchCard .shirt{width:34px!important;height:36px!important;margin:0 auto 5px!important}.pitchCard .kitBadge{top:11px!important;transform:translateX(-50%) scale(.82)!important}
+      .pitchCard .pchip b{display:-webkit-box!important;-webkit-line-clamp:2!important;-webkit-box-orient:vertical!important;min-height:20px!important;font-size:8.5px!important;line-height:1.12!important;overflow:hidden!important}
+      .pitchCard .pchip span{display:block!important;font-size:7.5px!important;line-height:1.12!important;white-space:normal!important}
+      .pitchCard .captag{top:3px!important;left:3px!important;width:17px!important;height:17px!important;font-size:7px!important}.pitchCard .statusFlag{top:3px!important;right:3px!important;min-width:20px!important;height:14px!important;font-size:6px!important}
+      .pitchCard .centerCircle{width:150px!important;height:150px!important;bottom:-73px!important}
+      .pitchCard .bench{position:relative!important;width:calc(100% - 12px)!important;min-width:0!important;max-width:none!important;margin:22px 6px 0!important;padding:10px 5px 11px!important;border-radius:13px!important;box-sizing:border-box!important}
+      .pitchCard .benchGrid{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:4px!important}.pitchCard .benchGrid>div{min-width:0!important}.pitchCard .bench .pchip{width:100%!important;max-width:78px!important;margin:0 auto!important}.pitchCard .slotLabel{font-size:7px!important;white-space:nowrap!important}
+      #teamPage .pitchCard,#starPage .pitchCard{padding:0!important;border-radius:14px!important;background:#110927!important}
+      #teamPage .pitchTopControls,#starPage .pitchTopControls{top:7px!important;right:7px!important}.gwNav{padding:3px!important}.gwArrow{width:27px!important;height:27px!important}.gwNav b{min-width:78px!important;font-size:8px!important}
+      #teamPage .teamSide,#starPage .starSide{border-radius:14px!important}.chipButtons{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important}.chipButton{min-width:0!important}
+      #transfersPage .pitchCard{padding:0!important}#transfersPage .pitchCard>.cardh{padding:14px 14px 11px!important}#transfersPage .pitchScroll{margin:0!important}
+      #transfersPage .actionbar{display:grid!important;grid-template-columns:1fr!important;gap:9px!important;padding:11px!important}.transferDraftActions{display:grid!important;grid-template-columns:1fr!important;gap:7px!important}
+    }
   `;
   function title(){
     const active=document.querySelector('.page.active');
@@ -77,18 +104,7 @@
   function close(){document.body.classList.remove('fmMobileOpen');document.getElementById('fmMobileMenu')?.setAttribute('aria-expanded','false')}
   function updateTitle(){const el=document.getElementById('fmMobileTitle');if(el)el.textContent=title()}
   let fitTimer=0;
-  function fitPitches(){
-    if(innerWidth>900)return;
-    const targets=[...document.querySelectorAll('.pitchCard>.pitchScroll>.pitch,.starPitchCard>.pitchScroll>.pitch,#txPitch')];
-    for(const pitch of targets){
-      const wrap=pitch.closest('.pitchScroll')||pitch.parentElement;if(!wrap)continue;
-      const naturalWidth=parseFloat(getComputedStyle(pitch).width)||760,naturalHeight=parseFloat(getComputedStyle(pitch).height)||610;
-      const available=Math.max(280,wrap.clientWidth||document.documentElement.clientWidth-28),scale=Math.min(1,available/naturalWidth);
-      pitch.style.setProperty('--fm-mobile-pitch-scale',String(scale));
-      wrap.style.setProperty('height',`${Math.ceil(naturalHeight*scale)}px`,'important');
-      wrap.style.setProperty('min-height','0px','important');
-    }
-  }
+  function fitPitches(){if(innerWidth>900)return;for(const wrap of document.querySelectorAll('.pitchScroll')){wrap.style.removeProperty('height');wrap.style.removeProperty('min-height')}for(const pitch of document.querySelectorAll('.pitch'))pitch.style.removeProperty('--fm-mobile-pitch-scale')}
   function queueFit(){clearTimeout(fitTimer);fitTimer=setTimeout(fitPitches,40)}
   function boot(){
     if(document.getElementById('fmMobileStyles'))return;
@@ -102,6 +118,9 @@
     new MutationObserver(()=>{updateTitle();queueFit()}).observe(document.body,{subtree:true,attributes:true,attributeFilter:['class']});
     new MutationObserver(queueFit).observe(document.body,{subtree:true,childList:true});
     addEventListener('resize',queueFit,{passive:true});addEventListener('orientationchange',queueFit,{passive:true});
+    const manifest=document.createElement('link');manifest.rel='manifest';manifest.href='./manifest.webmanifest?v=1';document.head.appendChild(manifest);
+    for(const [name,content] of [['theme-color','#170728'],['apple-mobile-web-app-capable','yes'],['apple-mobile-web-app-status-bar-style','black-translucent'],['apple-mobile-web-app-title','FM Fantasy']]){if(!document.querySelector(`meta[name="${name}"]`)){const m=document.createElement('meta');m.name=name;m.content=content;document.head.appendChild(m)}}
+    if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js?v=1').catch(()=>{});
     updateTitle();queueFit();setTimeout(fitPitches,250);setTimeout(fitPitches,900);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
