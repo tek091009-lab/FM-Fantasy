@@ -1,0 +1,1 @@
+Fresh GitHub Pages trigger for the verified v6.1 bundle after GitHub infrastructure failed the previous deployment before the site could publish.
