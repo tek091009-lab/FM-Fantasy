@@ -1,0 +1,240 @@
+name: Finish injuries suspensions pricing
+on:
+  push:
+    paths:
+      - '.github/workflows/finish-injuries-pricing.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch production bundle
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
+          if not m: raise SystemExit('FM_PY_SOURCE_B64 not found')
+          py=base64.b64decode(m.group(1)).decode('utf-8')
+
+          marker='def _clamp(x:float,a:float=0.0,b:float=1.0)->float:return max(a,min(b,x))\n'
+          helper=r'''
+
+def _fm_stamp_date_obj(v:int):
+    try:
+        year=int(v)>>16; doy=int(v)&0x1FF
+        if year<1900 or year>2200 or doy<1 or doy>366:return None
+        return dt.date(year,1,1)+dt.timedelta(days=doy-1)
+    except Exception:return None
+
+
+def _structural_availability_from_fs(players:list[dict[str,Any]], fixtures:list[dict[str,Any]]|None=None)->dict[str,Any]:
+    """Decode current FM injuries/suspensions from the dedicated save members.
+
+    injury_manager.dat uses four counted arrays in the proven FM26 schema:
+      A1 count@12, 14-byte rows; A2 immediately follows, 14-byte rows;
+      A3 13-byte rows; A4 15-byte rows. The save date is self-calibrated as
+      max(A4 event date) == min(A1 scheduled date). A2 is the current injury
+      window table: player EID + earliest/full return dates. No name guessing.
+
+    discipline.dat begins with a count at 12 followed by variable 59/60-byte
+    active ban rows. Each row starts 00 + player EID and contains the ban expiry
+    date at logical offset 14; the following row is found structurally rather
+    than by assuming a fixed byte length.
+    """
+    out={'save_date':None,'injury_records':0,'injured_players':0,'suspension_records':0,'suspended_players':0,
+         'injury_source':'injury_manager.dat/current-window-v1','suspension_source':'discipline.dat/active-ban-v1'}
+    byid={int(p.get('pid') or p.get('id') or 0):p for p in players}
+    fixtures=fixtures or []
+    save_date=None
+
+    ip=Path('/tmp/injury_manager.dat')
+    if ip.exists():
+        try:
+            b=ip.read_bytes(); ip.unlink(missing_ok=True)
+            c1=u32(b,12); s1=16; e1=s1+c1*14
+            if 0<c1<2_000_000 and e1+4<=len(b):
+                c2=u32(b,e1); s2=e1+4; e2=s2+c2*14
+                if 0<=c2<2_000_000 and e2+4<=len(b):
+                    c3=u32(b,e2); s3=e2+4; e3=s3+c3*13
+                    if 0<=c3<2_000_000 and e3+4<=len(b):
+                        c4=u32(b,e3); s4=e3+4; e4=s4+c4*15
+                        if 0<=c4<5_000_000 and e4<=len(b):
+                            past=[]
+                            for i in range(c4):
+                                d=_fm_stamp_date_obj(u32(b,s4+i*15+1))
+                                if d:past.append(d)
+                            future=[]
+                            for i in range(c1):
+                                d=_fm_stamp_date_obj(u32(b,s1+i*14+1))
+                                if d:future.append(d)
+                            if past:save_date=max(past)
+                            if future:
+                                fmin=min(future)
+                                if save_date is None or abs((fmin-save_date).days)<=2:save_date=fmin if save_date is None else save_date
+                            seen=set(); recs=0
+                            for i in range(c2):
+                                o=s2+i*14
+                                earliest=_fm_stamp_date_obj(u32(b,o+1)); full=_fm_stamp_date_obj(u32(b,o+5)); eid=u32(b,o+9)
+                                if not full or not save_date or full<save_date:continue
+                                p=byid.get(int(eid))
+                                if not p:continue
+                                days=max(0,(full-save_date).days)
+                                p['injured']=True;p['availability_status']='injured';p['status_flag']='i'
+                                p['injury']={'kind':'injury','earliest_return':earliest.isoformat() if earliest else None,
+                                             'expected_return':full.isoformat(),'days_remaining':days,
+                                             'source':'injury_manager.dat/current-window-v1'}
+                                p['expected_return']=full.isoformat();p['injury_days_remaining']=days
+                                seen.add(int(eid));recs+=1
+                            out['injury_records']=recs;out['injured_players']=len(seen)
+        except Exception as e:
+            out['injury_error']=str(e)[:180]
+
+    # If injury-manager calibration was unavailable, infer the current date from
+    # the played fixture calendar rather than inventing a wall-clock date.
+    if save_date is None:
+        played_dates=[]
+        for f in fixtures:
+            if f.get('status')!='played' or not f.get('date'):continue
+            try:played_dates.append(dt.date.fromisoformat(str(f['date'])[:10]))
+            except Exception:pass
+        if played_dates:save_date=max(played_dates)
+    out['save_date']=save_date.isoformat() if save_date else None
+
+    dp=Path('/tmp/discipline.dat')
+    if dp.exists():
+        try:
+            b=dp.read_bytes(); dp.unlink(missing_ok=True); count=u32(b,12) if len(b)>=16 else 0
+            # Active rows have a highly stable FM26 structural prefix. Find exactly
+            # count row starts; this handles the known 59/60-byte variant safely.
+            starts=[]; pos=16
+            while pos+20<=len(b) and len(starts)<count:
+                found=-1
+                for q in range(pos,min(len(b)-20,pos+96)):
+                    if b[q]!=0:continue
+                    if q+13<len(b) and b[q+7:q+13]==b'\x02\x00\xff\xff\x06\x01':found=q;break
+                if found<0:break
+                starts.append(found);pos=found+1
+            seen=set(); recs=0
+            for ri,s in enumerate(starts):
+                e=starts[ri+1] if ri+1<len(starts) else min(len(b),s+64)
+                if e-s<18:continue
+                eid=u32(b,s+1); expiry=_fm_stamp_date_obj(u32(b,s+14))
+                p=byid.get(int(eid))
+                if not p or not expiry or (save_date and expiry<save_date):continue
+                games=None
+                if save_date and p.get('club'):
+                    upcoming=[]
+                    for f in fixtures:
+                        try:fd=dt.date.fromisoformat(str(f.get('date') or '')[:10])
+                        except Exception:continue
+                        if fd<=save_date or fd>expiry:continue
+                        if p.get('club') in (f.get('home'),f.get('away')):upcoming.append(fd)
+                    if upcoming:games=max(1,len(set(upcoming)))
+                p['suspended']=True;p['availability_status']='suspended';p['status_flag']='s'
+                p['suspension']={'kind':'suspension','expiry':expiry.isoformat(),'games_remaining':games,
+                                 'source':'discipline.dat/active-ban-v1'}
+                p['suspension_until']=expiry.isoformat();p['suspension_games_remaining']=games
+                seen.add(int(eid));recs+=1
+            out['suspension_records']=recs;out['suspended_players']=len(seen)
+        except Exception as e:
+            out['suspension_error']=str(e)[:180]
+    return out
+'''
+          if '_structural_availability_from_fs' not in py:
+              if marker not in py: raise SystemExit('helper insertion marker missing')
+              py=py.replace(marker,marker+helper,1)
+
+          # Make £6.0m+ genuinely premium for defenders. The old post-top-8 cap
+          # of 5.8 rounded to 6.0 because launch prices use £0.5m steps.
+          py=py.replace("elif i<8:raw=min(6.5,raw)\n        else:raw=min(5.8,raw)",
+                        "elif i<5:raw=min(6.5,raw)\n        elif i<8:raw=min(5.5,raw)\n        else:raw=min(5.5,raw)")
+          py=py.replace("elif att<0.42:\n            # A strong-team CB with low attacking threat can still be premium-ish, but not\n            # priced like the rare elite clean-sheet + goal-threat defender.\n            raw=min(raw,6.5)",
+                        "elif att<0.42:\n            # Low-attacking defenders stay below the premium £6m line.\n            raw=min(raw,5.5)")
+          py=py.replace("'pricing_model':'fpl-shaped-v5b-launch-role-coverage-safe'",
+                        "'pricing_model':'fpl-shaped-v6-premium-defenders-scarce'")
+
+          # Browser payload: decode after history/pricing so availability fields survive.
+          needle="aggregate_player_history(players,rich_matches)\n    reprice_players(players,fixtures)"
+          repl="aggregate_player_history(players,rich_matches)\n    reprice_players(players,fixtures)\n    availability_diag=_structural_availability_from_fs(players,fixtures)"
+          if needle in py:py=py.replace(needle,repl)
+          # There are two build paths with the same sequence; replace any remaining instance.
+          if needle in py:py=py.replace(needle,repl)
+
+          # Add availability diagnostics to metadata in both build paths.
+          target="'pricing_model':'fpl-shaped-v6-premium-defenders-scarce','observed_position_reclassifications'"
+          replacement="'pricing_model':'fpl-shaped-v6-premium-defenders-scarce','availability_decoder':'structural-v1','injured_players':availability_diag.get('injured_players',0),'suspended_players':availability_diag.get('suspended_players',0),'availability_save_date':availability_diag.get('save_date'),'availability_diagnostics':availability_diag,'observed_position_reclassifications'"
+          py=py.replace(target,replacement)
+
+          newb64=base64.b64encode(py.encode()).decode()
+          html=html[:m.start(1)]+newb64+html[m.end(1):]
+
+          # Browser archive extraction: retain dedicated availability members for Python.
+          old="const fixM=by.get('fix_man.dat'),dbM=by.get('game_db.dat');if(!fixM||!dbM)throw new Error('Required FM database/fixture members were not found in this save.');"
+          new="const fixM=by.get('fix_man.dat'),dbM=by.get('game_db.dat'),injM=by.get('injury_manager.dat'),discM=by.get('discipline.dat');if(!fixM||!dbM)throw new Error('Required FM database/fixture members were not found in this save.');"
+          if old not in html: raise SystemExit('member declaration marker missing')
+          html=html.replace(old,new,1)
+          old2="report('Extracting players, clubs and results…',63);let db=get(dbM);py.FS.writeFile('/tmp/game_db.dat',db);db=null;b=null;rawBuffer=null;report('Players, clubs and results extracted.',69);"
+          new2="report('Extracting players, clubs and results…',63);let db=get(dbM);py.FS.writeFile('/tmp/game_db.dat',db);db=null;if(injM){let ib=get(injM);py.FS.writeFile('/tmp/injury_manager.dat',ib);ib=null}if(discM){let sb=get(discM);py.FS.writeFile('/tmp/discipline.dat',sb);sb=null}b=null;rawBuffer=null;report('Players, clubs, results and availability extracted.',69);"
+          if old2 not in html: raise SystemExit('archive extraction marker missing')
+          html=html.replace(old2,new2,1)
+
+          # Generic FPL-style warning presentation independent of older evidence script.
+          ui=r'''<script id="fmStructuralAvailabilityUI">
+(function(){
+ const fmt=d=>{try{return new Date(d+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'})}catch(e){return d||''}};
+ const msg=p=>{if(p?.suspended){const g=Number(p?.suspension_games_remaining||p?.suspension?.games_remaining||0);return g?`Suspended — ${g} game${g===1?'':'s'}`:`Suspended${p?.suspension_until?' — until '+fmt(p.suspension_until):''}`}if(p?.injured)return `Injured${p?.expected_return?' — expected back '+fmt(p.expected_return):''}`;return ''};
+ const cls=p=>p?.suspended?'fmSus':p?.injured?'fmInj':'';
+ function decorate(root=document){
+   for(const el of root.querySelectorAll('[data-id],[data-player],[data-pid]')){
+     const id=String(el.dataset.id||el.dataset.player||el.dataset.pid||'');if(!id)continue;
+     const p=(window.PLAYERS||[]).find(x=>String(x.id||x.pid)===id);if(!p||( !p.injured&&!p.suspended))continue;
+     if(!el.querySelector('.fmAvailBadge')){const b=document.createElement('span');b.className='fmAvailBadge '+cls(p);b.textContent=p.suspended?'S':'!';b.title=msg(p);el.appendChild(b)}
+   }
+ }
+ const old=window.openPlayer||window.showPlayer||null;
+ new MutationObserver(()=>decorate()).observe(document.documentElement,{subtree:true,childList:true});
+ document.addEventListener('mouseover',e=>{const el=e.target.closest?.('[data-id],[data-player],[data-pid]');if(!el)return;const id=String(el.dataset.id||el.dataset.player||el.dataset.pid||'');const p=(window.PLAYERS||[]).find(x=>String(x.id||x.pid)===id);if(p&&(p.injured||p.suspended))el.title=msg(p)});
+ decorate();
+})();
+</script><style id="fmStructuralAvailabilityCSS">.fmAvailBadge{display:inline-grid;place-items:center;min-width:15px;height:15px;padding:0 3px;border-radius:999px;font-size:9px;font-weight:1000;line-height:1;margin-left:4px;vertical-align:middle}.fmAvailBadge.fmInj{background:#ffb020;color:#241400}.fmAvailBadge.fmSus{background:#ff4d61;color:#fff}</style>'''
+          html=html.replace('</body>',ui+'</body>',1)
+
+          packed=base64.b64encode(gzip.compress(html.encode(),9)).decode()
+          # Keep existing 21-part loader contract, balancing chunks across all files.
+          n=21; size=(len(packed)+n-1)//n
+          chunks=[packed[i*size:(i+1)*size] for i in range(n)]
+          for p,c in zip(parts,chunks):p.write_text(c)
+          print('patched python bytes',len(py),'html bytes',len(html),'packed',len(packed))
+          PY
+      - name: Verify production invariants
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          checks=['injury_manager.dat','discipline.dat','_structural_availability_from_fs','availability_decoder','fpl-shaped-v6-premium-defenders-scarce','raw=min(raw,5.5)','fmStructuralAvailabilityUI']
+          miss=[x for x in checks if x not in html]
+          if miss:raise SystemExit('missing '+repr(miss))
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);py=base64.b64decode(m.group(1)).decode()
+          assert "elif i<8:raw=min(5.5,raw)" in py
+          assert "raw=min(raw,5.5)" in py
+          assert py.count('_structural_availability_from_fs(players,fixtures)')>=1
+          print('all checks passed')
+          PY
+      - name: Commit production bundle
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/part* app/fix*
+          git commit -m 'Decode FM injuries suspensions and tighten defender prices' || exit 0
+          git push
