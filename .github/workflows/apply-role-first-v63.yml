@@ -21,11 +21,11 @@ jobs:
           html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
           m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
           py=base64.b64decode(m.group(1)).decode()
-          req=['fpl-shaped-v63-role-first-transfer-aware','new_arrival_unproven','rotation_behind_starter','observed_midfield_usage_v63','current_club_observed_matches']
+          req=['fpl-shaped-v63-role-bands-transfer-aware','new_arrival_unproven','observed_midfield_usage_v63','current_club_observed_matches','usage_role_floor','usage_role_cap']
           miss=[x for x in req if x not in py]
           if miss:raise SystemExit('missing '+repr(miss))
           compile(py,'fm_importer.py','exec')
-          print('verified v6.3 role-first transfer-aware bundle')
+          print('verified v6.3 role-band transfer-aware bundle')
           PY
       - name: Commit production bundle
         run: |
@@ -33,5 +33,5 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add app/
           git diff --cached --quiet && exit 0
-          git commit -m "Build role-first transfer-aware pricing v6.3"
+          git commit -m "Build role-band transfer-aware pricing v6.3"
           git push
