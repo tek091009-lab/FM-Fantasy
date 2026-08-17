@@ -1,0 +1,43 @@
+name: Inspect FM availability importer
+on:
+  push:
+    paths:
+      - '.github/workflows/inspect-injury-importer.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode embedded Python importer
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
+          if not m:
+              raise SystemExit('FM_PY_SOURCE_B64 not found')
+          py=base64.b64decode(m.group(1)).decode('utf-8')
+          lines=py.splitlines()
+          print('PY_LENGTH',len(py),'LINES',len(lines))
+          needles=['injury','suspension','history','archive','manifest','game_db','Person(','class Person','bind_target_people','build_players','parse_','decode_','container','object','current_date','save_date']
+          for needle in needles:
+              print('\n===== NEEDLE',needle,'=====')
+              hits=[i for i,l in enumerate(lines) if needle.lower() in l.lower()]
+              print('HITS',len(hits))
+              for i in hits[:40]:
+                  a=max(0,i-5); b=min(len(lines),i+9)
+                  print(f'--- lines {a+1}-{b} ---')
+                  for j in range(a,b): print(f'{j+1:05d}: {lines[j]}')
+          print('\n===== DEFINITIONS =====')
+          for i,l in enumerate(lines):
+              if re.match(r'^\s*(?:class|def)\s+',l): print(f'{i+1:05d}: {l}')
+          print('\n===== STRING LITERALS WITH HISTORY / INJURY / SUSPENSION =====')
+          for i,l in enumerate(lines):
+              if re.search(r'["\'][^"\']*(?:injur|suspension|history|medical|ban)[^"\']*["\']',l,re.I): print(f'{i+1:05d}: {l}')
+          PY
