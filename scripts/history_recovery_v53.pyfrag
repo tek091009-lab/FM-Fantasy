@@ -19,7 +19,8 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
         'cluster_matches':0,'unmatched_cached_pairs':0,
         'cohort_side_labels':0,'fixture_identity_matches':0,'single_side_bridge_matches':0,
         'identity_rounds':0,'ambiguous_seed_player_ids':0,'transfer_conflict_neutralized_players':0,
-        'adaptive_cluster_edges':0,'adaptive_cluster_edges_rejected_conflict':0
+        'adaptive_cluster_edges':0,'adaptive_cluster_edges_rejected_conflict':0,
+        'near_duplicate_candidate_pairs_collapsed':0
     }
     club_sets={eid:set(int(x) for x in squads.get(eid,[])) for eid in selected_clubs}
     membership_owners=collections.defaultdict(set)
@@ -55,6 +56,29 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
             if sig in seen_side_pair_signatures:continue
             seen_side_pair_signatures.add(sig)
             cached.append({'name':name,'left':left,'right':right,'pk':pk})
+    # Normalize near-identical scanner windows before any identity inference. A save may
+    # contain several candidate windows around the same retained player block; allowing all
+    # of them into proposal ranking artificially lowers uniqueness margins. Do not collapse
+    # by lineup alone: two real matches can reuse an XI. Require the same source member, the
+    # same two player-id sets and a near-identical byte span (<= 2048 bytes at both ends).
+    if cached:
+        compact=[];seen_near=collections.defaultdict(list)
+        for c in cached:
+            lids=tuple(sorted(int(x.get('player_id') or 0) for x in c['left'] if int(x.get('player_id') or 0)>0))
+            rids=tuple(sorted(int(x.get('player_id') or 0) for x in c['right'] if int(x.get('player_id') or 0)>0))
+            pair_key=tuple(sorted((lids,rids)))
+            start=min(int(c['left'][0]['offset']),int(c['right'][0]['offset']))
+            end=max(int(c['left'][-1]['offset']),int(c['right'][-1]['offset']))
+            sig=(c['name'],pair_key)
+            duplicate=False
+            for ps,pe in seen_near[sig]:
+                if abs(start-ps)<=2048 and abs(end-pe)<=2048:
+                    duplicate=True;break
+            if duplicate:
+                diagnostics['near_duplicate_candidate_pairs_collapsed']+=1
+                continue
+            seen_near[sig].append((start,end));compact.append(c)
+        cached=compact
     diagnostics['cached_candidate_pairs']=len(cached)
     if not cached:return [],diagnostics
 
