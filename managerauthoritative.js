@@ -1,15 +1,20 @@
 (()=>{
  const cfg=window.FM_FANTASY_CONFIG||{};
  if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return;
- const client=supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
- let busy=false,lastStamp='';
+ let client=null,busy=false,lastStamp='';
  const clone=v=>JSON.parse(JSON.stringify(v||{}));
+ function cloudClient(){
+  if(!window.FMCloud?.ready?.())return null;
+  if(!client)client=supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:false,detectSessionInUrl:false}});
+  return client;
+ }
  async function restore(){
-  if(busy)return false;busy=true;
+  if(busy||!window.FMCloud?.ready?.())return false;busy=true;
   try{
-   const sess=(await client.auth.getSession()).data.session;if(!sess)return false;
+   const c=cloudClient();if(!c)return false;
+   const sess=(await c.auth.getSession()).data.session;if(!sess)return false;
    const world=window.FMCloud?.getWorld?.();if(!world?.id)return false;
-   const{data,error}=await client.from('manager_states').select('state,updated_at').eq('world_id',world.id).eq('user_id',sess.user.id).maybeSingle();
+   const{data,error}=await c.from('manager_states').select('state,updated_at').eq('world_id',world.id).eq('user_id',sess.user.id).maybeSingle();
    if(error||!data?.state)return false;
    const raw=clone(data.state),clean=window.FMCloud?.normaliseManagerState?window.FMCloud.normaliseManagerState(raw):raw;
    const sig=`${data.updated_at||''}|${(clean.squad||[]).length}|${(clean.starters||[]).length}|${(clean.bench||[]).length}|${clean.currentGameweek||''}`;
@@ -30,7 +35,5 @@
  }
  window.fmRestoreManagerFromCloud=restore;
  window.addEventListener('fmcloudready',()=>setTimeout(restore,250));
- window.addEventListener('pageshow',()=>setTimeout(restore,350));
- document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')setTimeout(restore,250)});
- setTimeout(restore,1800);
+ document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&window.FMCloud?.ready?.())setTimeout(restore,250)});
 })();
