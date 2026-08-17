@@ -1,5 +1,6 @@
 (()=>{
-  const ID='fmNewsOverlay', CLEAR_KEY='fmFantasyCloudDatabaseCleared', RX_ALL=/^(?:show|view)\s*all$/i;
+  const ID='fmNewsOverlay', CLEAR_KEY='fmFantasyCloudDatabaseCleared';
+  const RX_ALL=/^(?:show|view)\s*all(?:\s+\d+)?$/i;
   const cleared=()=>{try{return localStorage.getItem(CLEAR_KEY)==='1'||sessionStorage.getItem(CLEAR_KEY)==='1'}catch(_){return false}};
   const markActive=()=>{try{localStorage.removeItem(CLEAR_KEY);sessionStorage.removeItem(CLEAR_KEY)}catch(_){}};
 
@@ -7,27 +8,59 @@
     #${ID}{position:fixed;inset:0;z-index:99999;display:none;align-items:center;justify-content:center;padding:28px;background:rgba(5,2,18,.82);backdrop-filter:blur(8px)}
     #${ID}.open{display:flex}#${ID} .fmNewsShell{width:min(980px,94vw);height:min(780px,88vh);display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden;border:1px solid rgba(255,255,255,.12);border-radius:20px;background:linear-gradient(180deg,#160a33,#0b061d);box-shadow:0 28px 80px rgba(0,0,0,.5)}
     #${ID} .fmNewsHead{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 20px;border-bottom:1px solid rgba(255,255,255,.08)}#${ID} .fmNewsHead h2{margin:0;font-size:24px;line-height:1;font-weight:950;color:#fff}#${ID} .fmNewsClose{width:38px;height:38px;border:0;border-radius:11px;background:#2a174d;color:#fff;font-size:22px;cursor:pointer}
-    #${ID} .fmNewsBody{min-height:0;overflow:auto;padding:16px 18px 22px}#${ID} .fmNewsBody>*{max-height:none!important;height:auto!important;overflow:visible!important}#${ID} [data-fm-hide-in-overlay="1"]{display:none!important}.fmNewsClearedEmpty{padding:18px;color:#aaa2c8;font-size:12px}
+    #${ID} .fmNewsBody{min-height:0;overflow:auto;padding:16px 18px 22px}#${ID} .fmNewsBody>*{max-height:none!important;height:auto!important;overflow:visible!important}#${ID} [data-news-toggle]{display:none!important}.fmNewsClearedEmpty{padding:18px;color:#aaa2c8;font-size:12px}
     @media(max-width:700px){#${ID}{padding:0}#${ID} .fmNewsShell{width:100vw;height:100dvh;border-radius:0;border:0}#${ID} .fmNewsHead{padding:16px}#${ID} .fmNewsHead h2{font-size:20px}#${ID} .fmNewsBody{padding:12px}}
   `;document.head.appendChild(s)}
 
   function ensure(){addStyles();let o=document.getElementById(ID);if(o)return o;o=document.createElement('div');o.id=ID;o.innerHTML='<div class="fmNewsShell"><div class="fmNewsHead"><h2>News</h2><button class="fmNewsClose" type="button" aria-label="Close news">×</button></div><div class="fmNewsBody"></div></div>';document.body.appendChild(o);o.addEventListener('click',e=>{if(e.target===o||e.target.closest('.fmNewsClose'))close()});document.addEventListener('keydown',e=>{if(e.key==='Escape')close()});return o}
   function close(){const o=document.getElementById(ID);if(o)o.classList.remove('open');document.documentElement.style.overflow=''}
-  function looksLikeNews(el){return !!el&&/\bnews\b/i.test((el.textContent||'').replace(/\s+/g,' '))}
-  function findSection(btn){let el=btn;for(let i=0;i<9&&el;i++,el=el.parentElement){if(looksLikeNews(el)&&(el.matches?.('section,.card,.panel,.box,[class*="news" i]')||i>2))return el}return null}
-  function titleFor(section){const h=section?.querySelector?.('h1,h2,h3,h4,.title,.cardTitle,.panelTitle,.sectionTitle');return /news/i.test((h?.textContent||''))?(h.textContent||'News').trim():'News'}
 
-  function openFrom(btn){const section=findSection(btn);if(!section)return false;const o=ensure(),body=o.querySelector('.fmNewsBody');o.querySelector('.fmNewsHead h2').textContent=titleFor(section);if(cleared()){body.innerHTML='<div class="fmNewsClearedEmpty">No news available. Import an FM database to populate player news.</div>'}else{const clone=section.cloneNode(true);clone.querySelectorAll('button,a,[role="button"]').forEach(el=>{if(RX_ALL.test((el.textContent||'').trim().replace(/\s+/g,' ')))el.dataset.fmHideInOverlay='1'});body.replaceChildren(clone)}o.classList.add('open');document.documentElement.style.overflow='hidden';return true}
+  function sectionFromToggle(btn){
+    const hidden=document.getElementById(btn?.dataset?.newsToggle||'');
+    if(hidden){const card=hidden.closest('[id^="news"],.newsCard,.card,.panel,.box,section');if(card)return card}
+    let el=btn;for(let i=0;i<8&&el;i++,el=el.parentElement){if(el.id?.startsWith('news')||el.classList?.contains('newsCard'))return el}
+    return btn?.parentElement?.parentElement||null;
+  }
+  function titleFor(section){const h=section?.querySelector?.('h1,h2,h3,h4,.newsHead h3,.title,.cardTitle,.panelTitle,.sectionTitle');return (h?.textContent||'News').trim()||'News'}
+  function openToggle(btn){
+    const section=sectionFromToggle(btn);if(!section)return false;
+    const o=ensure(),body=o.querySelector('.fmNewsBody');o.querySelector('.fmNewsHead h2').textContent=titleFor(section);
+    if(cleared()){body.innerHTML='<div class="fmNewsClearedEmpty">No news available. Import an FM database to populate player news.</div>'}
+    else{
+      const clone=section.cloneNode(true);
+      clone.querySelectorAll('.newsHidden').forEach(el=>el.classList.remove('newsHidden'));
+      clone.querySelectorAll('[data-news-toggle]').forEach(el=>el.remove());
+      clone.querySelectorAll('[data-news-search]').forEach(el=>el.value='');
+      body.replaceChildren(clone);
+    }
+    o.classList.add('open');document.documentElement.style.overflow='hidden';return true;
+  }
 
-  function clearVisibleNews(){if(!cleared())return;for(const el of document.querySelectorAll('section,.card,.panel,.box,[class*="news" i]')){if(!looksLikeNews(el))continue;const all=[...el.querySelectorAll('button,a,[role="button"]')].find(x=>RX_ALL.test((x.textContent||'').trim().replace(/\s+/g,' ')));if(!all)continue;let holder=all.parentElement?.parentElement||el;const children=[...holder.children].filter(x=>x!==all&&x!==all.parentElement);for(const c of children){const t=(c.textContent||'').trim();if(t&&!/news/i.test(t))c.style.display='none'}if(!holder.querySelector('.fmNewsClearedEmpty')){const empty=document.createElement('div');empty.className='fmNewsClearedEmpty';empty.textContent='No news available.';holder.insertBefore(empty,all.parentElement||all)}}}
+  function clearVisibleNews(){
+    if(!cleared())return;
+    for(const id of ['newsTransfers','newsPriceUp','newsPriceDown','newsInjuries','newsSuspensions']){
+      const el=document.getElementById(id);if(!el)continue;
+      const head=el.querySelector('.newsHead');
+      el.innerHTML='';if(head)el.appendChild(head);
+      const empty=document.createElement('div');empty.className='fmNewsClearedEmpty';empty.textContent='No news available.';el.appendChild(empty);
+    }
+    const stamp=document.getElementById('newsStamp');if(stamp)stamp.textContent='No FM database loaded.';
+  }
 
-  // Capture-phase override beats the app's old scroll-only Show/View All handler.
-  document.addEventListener('click',e=>{const b=e.target.closest?.('button,a,[role="button"]');if(!b)return;const text=(b.textContent||'').trim().replace(/\s+/g,' ');if(!RX_ALL.test(text))return;const section=findSection(b);if(!section)return;e.preventDefault();e.stopImmediatePropagation();openFrom(b)},true);
+  // Exact production control: every real News expansion button carries data-news-toggle.
+  document.addEventListener('click',e=>{
+    const b=e.target.closest?.('[data-news-toggle]');if(!b)return;
+    e.preventDefault();e.stopImmediatePropagation();openToggle(b);
+  },true);
 
-  // A real import re-activates News immediately, even before creator saves it to cloud.
-  if(typeof window.applyImportedPayload==='function'&&!window.applyImportedPayload.__fmNewsWrapped){const orig=window.applyImportedPayload;const wrapped=function(payload,...args){if(payload&&Array.isArray(payload.players)&&payload.players.length)markActive();return orig.call(this,payload,...args)};wrapped.__fmNewsWrapped=true;window.applyImportedPayload=wrapped}
+  // Fallback for any future markup that keeps the same label but drops the data attribute.
+  document.addEventListener('click',e=>{
+    const b=e.target.closest?.('button,a,[role="button"]');if(!b||b.hasAttribute('data-news-toggle'))return;
+    const text=(b.textContent||'').trim().replace(/\s+/g,' ');if(!RX_ALL.test(text))return;
+    e.preventDefault();e.stopImmediatePropagation();openToggle(b);
+  },true);
 
   let busy=false;new MutationObserver(()=>{if(busy)return;busy=true;requestAnimationFrame(()=>{busy=false;clearVisibleNews()})}).observe(document.documentElement,{subtree:true,childList:true});
-  setTimeout(clearVisibleNews,0);setTimeout(clearVisibleNews,500);
-  window.FMNewsView={openFrom,close,clearVisibleNews};
+  setTimeout(clearVisibleNews,0);setTimeout(clearVisibleNews,350);
+  window.FMNewsView={openToggle,close,clearVisibleNews,markActive};
 })();
