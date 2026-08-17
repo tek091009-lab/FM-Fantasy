@@ -17,17 +17,24 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           s=Path('/tmp/app.html').read_text(errors='replace')
-          print('DECODED_LENGTH',len(s))
-          needles=['function renderTeam','function renderTransferPitch','function renderMarket','function pby','club_eid','kit','shirt','clubFilter','refreshClubFilters','function applyImportedPayload','fmMergeHistorical','fmDiff','club_full','CLUBS']
+          out=[]
+          out.append('DECODED_LENGTH '+str(len(s)))
+          needles=['function renderTeam','function renderTransferPitch','function renderMarket','function pby','club_eid','kit','shirt','clubFilter','refreshClubFilters','function applyImportedPayload','function fmStoredSet','fmMergeHistorical','fmDiff','club_full','CLUBS','function save','queueManagerSave']
           for n in needles:
-              print('\n===== NEEDLE:',n,'=====')
+              out.append('\n===== NEEDLE: '+n+' =====')
               start=0; count=0
               while count<14:
                   i=s.find(n,start)
                   if i<0: break
                   a=max(0,i-2600); b=min(len(s),i+5200)
-                  print(s[a:b])
-                  print('\n---')
+                  out.append(s[a:b])
+                  out.append('\n---')
                   start=i+len(n); count+=1
-              if count==0: print('NO MATCH')
+              if count==0: out.append('NO MATCH')
+          Path('/tmp/club-audit.txt').write_text('\n'.join(out),encoding='utf-8')
           PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: club-audit
+          path: /tmp/club-audit.txt
+          retention-days: 1
