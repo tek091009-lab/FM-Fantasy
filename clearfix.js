@@ -20,14 +20,8 @@
   }
 
   async function clearSharedWorld(){
-    // Mark cleared before touching local state so every auto-loader stands down
-    // immediately and stays down across the reload below.
     try{localStorage.setItem(CLEAR_KEY,'1')}catch(_){ }
     try{sessionStorage.setItem(CLEAR_KEY,'1')}catch(_){ }
-
-    // For the creator, clearing the database also clears the canonical shared
-    // payload in Supabase. publishWorld(null) updates worlds.payload to NULL;
-    // accounts, memberships, join code and manager states are intentionally kept.
     try{
       if(window.FMCloud?.ready?.()&&window.FMCloud?.isCreator?.()&&typeof window.FMCloud.publishWorld==='function'){
         await window.FMCloud.publishWorld(null);
@@ -38,16 +32,21 @@
     }
   }
 
+  function isImportedFantasyKey(k){
+    if(!k||k===CLEAR_KEY||RX_AUTH.test(k))return false;
+    const fm=/(fm|fantasy)/i.test(k);
+    const imported=/(db|database|world|save|import|payload|fixture|player|history|injur|suspend|ban|availability|status|news|discipline|match|club|competition|gameweek)/i.test(k);
+    return fm&&imported;
+  }
+
   async function clearImportedWorld(){
     await clearSharedWorld();
 
-    // Prefer the app's own storage API when available.
     const helper=await callFirst([
       'fmStoredClear','fmStoredDelete','fmClearStored','clearImportedDatabase',
       'deleteImportedDatabase','resetImportedDatabase','clearFmDatabase','clearFMDatabase'
     ]);
 
-    // IndexedDB fallback. Imported-world DBs only; auth/session stores are excluded.
     try{
       if(indexedDB?.databases){
         const dbs=await indexedDB.databases();
@@ -62,18 +61,24 @@
       }
     }catch(e){console.warn('[FM clear] IndexedDB fallback failed',e)}
 
-    // Remove only imported-world local/session keys; preserve Supabase/auth/account keys
-    // and preserve CLEAR_KEY itself so the cloud loader remains suppressed after reload.
     for(const store of [localStorage,sessionStorage]){
       try{
         const doomed=[];
         for(let i=0;i<store.length;i++){
           const k=String(store.key(i)||'');
-          if(!k||k===CLEAR_KEY||RX_AUTH.test(k))continue;
-          if(/(fm|fantasy)/i.test(k)&&/(db|database|world|save|import|payload|fixture|player|history)/i.test(k))doomed.push(k);
+          if(isImportedFantasyKey(k))doomed.push(k);
         }
         doomed.forEach(k=>store.removeItem(k));
       }catch(e){console.warn('[FM clear] storage fallback failed',e)}
+    }
+
+    // Clear in-memory imported availability/news state before reload as well, so a
+    // delayed renderer cannot re-persist stale injury/suspension rows during teardown.
+    for(const name of ['PLAYERS','MATCHES','SEASON_FIXTURES','NEWS','INJURIES','SUSPENSIONS']){
+      try{
+        const v=window[name];
+        if(Array.isArray(v))v.length=0;
+      }catch(_){ }
     }
 
     if(!helper&&typeof window.fmStoredSetLocalOnly==='function'){
