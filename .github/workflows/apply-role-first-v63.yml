@@ -1,4 +1,4 @@
-name: Inspect final price preservation
+name: Apply v6.6 corrective price rebaseline
 on:
   push:
     paths:
@@ -6,33 +6,17 @@ on:
 permissions:
   contents: write
 jobs:
-  inspect:
+  patch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Extract pricing merge diagnostics
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import base64,gzip,re
-          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
-          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8','replace')
-          out=[]
-          for needle in ['price_policy','price_baseline_gw','launch price','initial_price','baselinePrice','preservePrice','fingerprint','importMode','import mode','season import','existingPlayer','oldPrice','price=old','price:old']:
-              start=0;hits=0
-              while True:
-                  pos=html.lower().find(needle.lower(),start)
-                  if pos<0:break
-                  hits+=1
-                  out.append(f'\n### {needle} hit {hits}\n'+html[max(0,pos-4500):min(len(html),pos+9000)])
-                  start=pos+len(needle)
-                  if hits>=6:break
-          Path('_price_merge_diag.txt').write_text(''.join(out),encoding='utf-8')
-          PY
-      - name: Commit diagnostic
+      - name: Apply v6.6 corrective price rebaseline
+        run: python scripts/upgrade_v66_price_rebaseline.py
+      - name: Commit production bundle
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add _price_merge_diag.txt
-          git commit -m "Inspect final price preservation path" || exit 0
+          git add app/
+          git diff --cached --quiet && exit 0
+          git commit -m "Apply v6.6 corrective price rebaseline"
           git push
