@@ -1,4 +1,4 @@
-name: Apply v6.6 corrective price rebaseline
+name: Apply v6.7 post-payload pricing correction
 on:
   push:
     paths:
@@ -10,13 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply v6.6 corrective price rebaseline
-        run: python scripts/upgrade_v66_price_rebaseline.py
+      - name: Apply v6.7 post-payload pricing correction
+        run: python scripts/upgrade_v67_postpayload_pricing.py
       - name: Commit production bundle
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add app/
           git diff --cached --quiet && exit 0
-          git commit -m "Apply v6.6 corrective price rebaseline"
+          git commit -m "Apply v6.7 post-payload pricing correction"
           git push
