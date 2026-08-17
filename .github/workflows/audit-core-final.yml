@@ -1,3 +1,4 @@
+# final re-run after normalization
 name: Final core availability audit
 on:
   push:
@@ -49,5 +50,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add _core_final_audit.json
-          git commit -m 'Record final core availability audit' || exit 0
+          git commit -m 'Record final normalized core availability audit' || exit 0
           git push
