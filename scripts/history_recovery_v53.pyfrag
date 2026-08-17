@@ -20,7 +20,8 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
         'cohort_side_labels':0,'fixture_identity_matches':0,'single_side_bridge_matches':0,
         'identity_rounds':0,'ambiguous_seed_player_ids':0,'transfer_conflict_neutralized_players':0,
         'adaptive_cluster_edges':0,'adaptive_cluster_edges_rejected_conflict':0,
-        'near_duplicate_candidate_pairs_collapsed':0,'near_duplicate_candidate_pairs_soft_collapsed':0
+        'near_duplicate_candidate_pairs_collapsed':0,'near_duplicate_candidate_pairs_soft_collapsed':0,
+        'temporal_transfer_fixture_evidence':0
     }
     club_sets={eid:set(int(x) for x in squads.get(eid,[])) for eid in selected_clubs}
     membership_owners=collections.defaultdict(set)
@@ -187,6 +188,16 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
     for eid,pids in unique_club_sets.items():
         for pid in pids:player_votes[int(pid)][eid]+=4.0
     transfer_conflicts=set()
+    # Confirmed retained matches supply dated club appearances. Keep them separately from the
+    # ordinary player votes so transfer ambiguity can remain neutral by default while fixture
+    # scoring may use a very small nearest-date signal when BOTH clubs have confirmed dates.
+    confirmed_temporal_clubs=collections.defaultdict(list)
+    def _history_date_ordinal(v):
+        try:
+            y,m,d=(int(x) for x in str(v or '')[:10].split('-'))
+            return y*372+m*31+d
+        except Exception:
+            return 0
 
     def player_club_weight(pid,eid):
         votes=player_votes.get(int(pid))
@@ -222,6 +233,25 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
         second=scores[1][0] if len(scores)>1 else 0.0
         if scores[0][0]-second<min_margin:return None
         return scores[0][2],scores[0][0],second,scores[0][1]
+
+    def temporal_side_evidence(ids,eid,date_value):
+        target=_history_date_ordinal(date_value)
+        if not target:return 0.0
+        value=0.0
+        for pid in ids:
+            pid=int(pid)
+            if pid not in transfer_conflicts:continue
+            recs=confirmed_temporal_clubs.get(pid,[])
+            # A single dated club is not enough: it may simply be the old club plus today's
+            # squad membership. Require confirmed retained appearances for at least two clubs.
+            if len({ceid for _ord,ceid in recs})<2:continue
+            nearest=min(recs,key=lambda x:abs(x[0]-target))
+            gap=abs(nearest[0]-target)
+            if gap>93:continue
+            closeness=1.0-(gap/94.0)
+            if nearest[1]==eid:value+=0.55*closeness
+            elif gap<=31:value-=0.45*(1.0-gap/32.0)
+        return value
 
     cluster_labels={}
     def relabel_clusters():
@@ -272,6 +302,12 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
         acalc=sum(int(x.get('goals',0) or 0) for x in A)+sum(int(x.get('own_goals',0) or 0) for x in H)
         if hcalc!=int(f.get('home_score') or 0) or acalc!=int(f.get('away_score') or 0):return False
         used_fixtures.add(fid);used_candidates.add(ci)
+        # Only accepted matches teach temporal membership. Speculative side labels never enter
+        # this table, preventing a guessed transfer timeline from reinforcing itself.
+        ford=_history_date_ordinal(f.get('date'))
+        if ford:
+            for pid in ids_of(H):confirmed_temporal_clubs[int(pid)].append((ford,heid))
+            for pid in ids_of(A):confirmed_temporal_clubs[int(pid)].append((ford,realaeid))
         out.append({'stadium':f.get('stadium'),'home':club_names[heid],'away':club_names[realaeid],
                     'home_tid':f['home_tid'],'away_tid':f['away_tid'],'competition':competition,
                     'competition_code':SUPPORTED_LEAGUES.get(competition,{}).get('code'),
@@ -367,7 +403,9 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
                     elif lcl is not None and lcl!=leid:bonus-=4.0
                     if rcl==reid:bonus+=2.0
                     elif rcl is not None and rcl!=reid:bonus-=4.0
-                    total=lsc+rsc+bonus+0.35*(ld+rd)
+                    temporal=temporal_side_evidence(lids,leid,f.get('date'))+temporal_side_evidence(rids,reid,f.get('date'))
+                    if abs(temporal)>=0.05:diagnostics['temporal_transfer_fixture_evidence']+=1
+                    total=lsc+rsc+bonus+0.35*(ld+rd)+temporal
                     rank.append((total,min(lsc,rsc),f,rev,leid,reid))
             rank.sort(key=lambda x:(x[0],x[1]),reverse=True)
             if not rank:continue
