@@ -1,11 +1,12 @@
 {
-  "verified_live_sha": "3a996801fd5527f7054d92dc2aec163bbcab5fae",
-  "verified_at": "2026-08-17T23:07:27Z",
+  "verified_live_sha": "35dbe979d42cefc0fdb89a46e36685561fb9a38e",
+  "verified_at": "2026-08-17T23:08:28Z",
   "authfix": "v12-authoritative-cloud",
-  "availability_truth": "v2-stale-snapshot-suppression",
+  "availability_truth": "v3-direct-structural-evidence",
   "update_guard": "v2",
   "canonical_publish": "v1",
   "identity_guard": "v3-diagnostic-only",
   "world_scorer": "v5-chip-persistence",
-  "draft_recovery": "v2"
+  "draft_recovery": "v2",
+  "capability_consistency": "v1"
 }
