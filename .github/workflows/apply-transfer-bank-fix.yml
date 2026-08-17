@@ -1,0 +1,45 @@
+name: Apply transfer bank fix
+on:
+  push:
+    paths:
+      - 'scripts/upgrade_transfer_bank_v63.py'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch production bundle
+        run: python scripts/upgrade_transfer_bank_v63.py
+      - name: Verify production invariants
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          required=[
+            'function fmSyncPreEntryBank()',
+            'fmSyncPreEntryBank();const c={GK:0,DEF:0,MID:0,FWD:0}',
+            'if(!rulesActive())fmSyncPreEntryBank();else state.bank=fmRoundMoney(Number(state.bank||0)-Number(p.price||0))',
+            'if(!rulesActive())fmSyncPreEntryBank();else if(p)state.bank=fmRoundMoney(Number(state.bank||0)+Number(p.price||0))',
+            "if(!rulesActive())fmSyncPreEntryBank();refreshCompetitionUI();refreshClubFilters();save();renderAll();"
+          ]
+          missing=[x for x in required if x not in html]
+          if missing: raise SystemExit('Missing invariants: '+repr(missing))
+          print('transfer bank invariants OK')
+          PY
+      - name: Commit production bundle
+        shell: bash
+        run: |
+          if git diff --quiet -- app; then
+            echo 'No production changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20
+          git commit -m 'Fix transfer bank drift before first gameweek'
+          git push
