@@ -1,4 +1,4 @@
-name: Inspect current pricing and position model
+name: Inspect early rich match recovery
 on:
   push:
     paths:
@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Extract current importer model snippets
+      - name: Extract recovery source
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -19,18 +19,18 @@ jobs:
           html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8','replace')
           m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
           py=base64.b64decode(m.group(1)).decode('utf-8','replace')
+          names=['def recover_unlabelled_rich_members','def single_side_bridge_pass','def strict_seed','def recover_game_db_rich','unlabelled_rich_cached_candidate_pairs','unlabelled_rich_unmatched_cached_pairs','def fixture_key']
           out=[]
-          for needle in ['def reprice_players','def _calibrate_observed_hybrid_positions','marker_roles','observed_midfield_usage_v63','def aggregate_player_history']:
+          for needle in names:
               out.append('\n### '+needle+'\n')
               pos=py.find(needle)
-              if pos>=0: out.append(py[max(0,pos-1000):min(len(py),pos+12000)])
-              else: out.append('NOT FOUND')
-          Path('_model_diag.txt').write_text(''.join(out))
+              out.append(py[max(0,pos-1500):min(len(py),pos+18000)] if pos>=0 else 'NOT FOUND')
+          Path('_recovery_diag.txt').write_text(''.join(out))
           PY
       - name: Commit diagnostic
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add _model_diag.txt
-          git commit -m "Inspect current pricing and position source" || exit 0
+          git add _recovery_diag.txt
+          git commit -m "Inspect early rich match recovery" || exit 0
           git push
