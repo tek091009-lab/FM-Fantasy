@@ -1,11 +1,11 @@
 {
-  "verified_live_sha": "f0960171967b1e280fff40099b2db09fc4fe6b8f",
-  "verified_at": "2026-08-17T23:00:29Z",
+  "verified_live_sha": "ad5718a688e98abaa18c53aa9cf2da8190eef6ac",
+  "verified_at": "2026-08-17T23:03:20Z",
   "authfix": "v12-authoritative-cloud",
   "availability_truth": "v2-stale-snapshot-suppression",
   "update_guard": "v2",
   "canonical_publish": "v1",
   "identity_guard": "v3-diagnostic-only",
-  "world_scorer": "v4",
+  "world_scorer": "v5-chip-persistence",
   "draft_recovery": "v2"
 }
