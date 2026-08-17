@@ -1,0 +1,1613 @@
+
+### def _rich_stat_record_at
+'usage_role_cap']=role_cap
+            elif c.get('new_arrival'):
+                c['usage_role']='new_arrival_unproven'
+            elif absence_excused:
+                c['usage_role']='absence_excused'
+            else:
+                c['usage_role']='unproven'
+            raw_scores[p['id']]=raw
+            c['distribution_cap']=round(raw,2)
+
+    for p in players:
+        c=p['price_context'];basement=(c['observed_matches']>=2 and club_usage_coverage.get(p.get('club'),False) and float(p.get('minutes',0) or 0)==0 and not c['zero_minute_exception'])
+        base=3.5 if basement else {'GK':4.0,'DEF':4.0,'MID':4.5,'FWD':4.5}[p['pos']]
+        price=round(max(base,raw_scores[p['id']])*2)/2
+        if basement:price=min(4.5,price)
+        p['price']=price;c['price']=price
+        c['summary']=(f"{c['role']} · available-minute share {round(c['minutes_share']*100)}% · starts {round(c['start_share']*100)}% · "
+                      f"attack {round(c['attack_profile']*100)}/100 · team strength {round(c['team_strength']*100)}/100 · "
+                      f"quality {round(c['quality']*100)}/100 · {c['availability_signal']}")
+
+def scan_completed_results(db:bytes,fixtures:list[dict[str,Any]]):
+    keys={(r['home_tid'],r['away_tid'],r['date']):r for r in fixtures}
+    teams=sorted({x for r in fixtures for x in (r['home_tid'],r['away_tid'])})
+    pat=re.compile(b'|'.join(re.escape(struct.pack('<I',x)) for x in teams))
+    found={}
+    for m in pat.finditer(db):
+        p=m.start()
+        if p+86>len(db):continue
+        home=u32(db,p); away=u32(db,p+4)
+        if away not in teams:continue
+        stamp=u16(db,p+8);year=u16(db,p+10);doy=stamp&0x1ff
+        if not (1<=doy<=366 and 2024<=year<=2045):continue
+        date=fm_date(stamp,year)
+        key=(home,away,date)
+        if key not in keys:continue
+        hs,as_=db[p+84],db[p+85]
+        if hs>30 or as_>30:continue
+        found[key]=(hs,as_,p)
+    # one result per completed fixture; 50 in current regression save
+    for key,(hs,as_,p) in found.items():
+        f=keys[key];f['status']='played';f['home_score']=hs;f['away_score']=as_;f['result_offset']=p
+    return found
+
+
+def _rich_read_lp_utf8(buf:bytes,pos:int,max_len:int=80):
+    if pos+4>len(buf): return None,pos
+    n=u32(buf,pos)
+    if n>max_len or pos+4+n>len(buf): return None,pos
+    raw=buf[pos+4:pos+4+n]
+    try:s=raw.decode('utf-8')
+    except UnicodeDecodeError:return None,pos
+    if any(ord(c)<32 for c in s):return None,pos
+    return s,pos+4+n
+
+
+def _rich_stat_record_at(buf:bytes,p:int):
+    if p+214>len(buf) or buf[p]!=2:return None
+    c=buf[p:p+214];rating=u16(c,136)
+    if not (1<=c[5]<=99 and c[7]==2 and c[20]<=12 and c[21]<=20 and c[50]<=30 and c[51]<=30 and c[52]<=30 and c[56]<=12 and c[63]<=5 and c[64]<=2 and c[67]<=130 and c[71]<=130 and 400<=rating<=1000):
+        return None
+    out={
+        'player_id':u32(c,1),'shirt':c[5],'goals':c[20],
+        'goalkeeper_goals_conceded_from_sot':c[21],'penalties_taken':c[22],
+        'penalties_scored':c[23],'own_goals':c[24],
+        'shots_on_target':c[42],'shots_blocked':c[43],
+        'save_component_1':c[50],'save_component_2':c[51],'save_component_3':c[52],
+        'save_component_legacy_1':c[50],'save_component_legacy_2':c[51],'save_component_legacy_3':c[52],
+        'blocks':c[55],'assists':c[56],
+        'yellow_cards':c[63],'red_cards':c[64],'sub_off':c[67],'sub_on':c[71],
+        'sent_off_minute':c[74],'match_position_marker':c[77],
+        'passes_attempted':c[86],'passes_completed':c[87],
+        'tackles_attempted':c[92],'tackles_won':c[93],'key_tackles_candidate':c[94],
+        'headers_attempted':c[95],'headers_won':c[96],
+        'interceptions_candidate':c[97],'clearances_candidate':c[98],
+        'team_goals_while_on_pitch':c[145],'team_goals_conceded_while_on_pitch':c[146],
+        'possession_won_candidate':c[151],'possession_lost_candidate':c[152],
+        'shots_on_target_faced':c[157],
+        'rating_raw':rating,'rating':round(rating/100,1),'offset':p,
+    }
+    out['saves']=max(0,out['shots_on_target_faced']-out['goalkeeper_goals_conceded_from_sot'])
+    out['penalties_missed']=max(0,out['penalties_taken']-out['penalties_scored'])
+    out['is_goalkeeper_match_role']=out['match_position_marker']==4
+    out['goals_conceded']=out['team_goals_conceded_while_on_pitch']
+    out['cbit_candidate']=out['blocks']+out['tackles_won']+out['interceptions_candidate']+out['clearances_candidate']
+    out['mapping_confidence']={
+        'blocks':'exact-mirror','tackles_won':'strong-pair-and-ui-check',
+        'interceptions_candidate':'working-high','clearances_candidate':'working-high',
+        'possession_won_candidate':'working-high',
+    }
+    return out
+
+
+def _rich_scan_stats(buf:bytes,start:int,end:int):
+    out=[];p=start
+    while p<end-214:
+        if buf[p]==2:
+            r=_rich_stat_record_at(buf,p)
+            if r:
+                out.append(r);p+=140;continue
+        p+=1
+    return out
+
+
+def _rich_pick_two_squads(stats:list[dict[str,Any]]):
+    if len(stats)<40:return None
+    candidates=[]
+    for j in range(19,len(stats)-20):
+        gap=stats[j+1]['offset']-stats[j]['offset']
+        left=stats[j-19:j+1];right=stats[j+1:j+21]
+        max_l=max((left[k+1]['offset']-left[k]['offset'] for k in range(19)),default=0)
+        max_r=max((right[k+1]['offset']-right[k]['offset'] for k in range(19)),default=0)
+        if gap>800 and max_l<1200 and max_r<1200:candidates.append((gap,j,left,right))
+    if not candidates:return None
+    _,_,left,right=min(candidates,key=lambda x:x[2][0]['offset'])
+    return left,right
+
+
+def _rich_decorate(rows:list[dict[str,Any]]):
+    result=[]
+    for idx,r0 in enumerate(rows):
+        r=dict(r0);starter=idx<11
+        if starter:
+            r['appearance']='Started'
+            if r['sub_off']:
+                r['minutes']=r['sub_off'];r['appearance']+=f", off {r['sub_off']}'"
+            elif r['red_cards'] and r['sent_off_minute']:
+                r['minutes']=r['sent_off_minute'];r['appearance']+=f", sent off {r['sent_off_minute']}'"
+            else:r['minutes']=90
+        else:
+            if r['sub_on']:
+                r['appearance']=f"On {r['sub_on']}'";r['minutes']=max(0,90-r['sub_on'])
+            else:
+                r['appearance']='Unused';r['minutes']=0;r['rating']=None
+        result.append(r)
+    return result
+
+
+
+def _rich_header(buf:bytes,comp_pos:int,rich_team_names:dict[int,str],competition_text:bytes):
+    p=comp_pos+len(competition_text)
+    short,p2=_rich_read_lp_utf8(buf,p,80)
+    # FM stores a second competition label immediately after the long label. Accept the
+    # label generically; team identity and league fixture matching provide the validation.
+    if not short:return None
+    stadium=None;stadium_end=None
+    for q in range(p2,min(p2+120,len(buf)-8)):
+        text,nxt=_rich_read_lp_utf8(buf,q,80)
+        if text and len(text)>=3 and nxt+12<len(buf) and buf[nxt:nxt+2]==b'\x03\x02':
+            stadium=text;stadium_end=nxt;break
+    if not stadium:return None
+    q=stadium_end
+    if buf[q:q+2]!=b'\x03\x02' or buf[q+6]!=2:return None
+    home_tid=u32(buf,q+7)
+    marker=buf.find(b'\x00\x03\x02',q+11,q+70)
+    if marker<0 or buf[marker+7]!=2:return None
+    away_tid=u32(buf,marker+8)
+    home=rich_team_names.get(home_tid);away=rich_team_names.get(away_tid)
+    if not home or not away:return None
+    return {'stadium':stadium,'home':home,'away':away,'home_tid':home_tid,'away_tid':away_tid,'competition_short':short}
+
+
+def _rich_extract_member(buf:bytes,rich_team_names:dict[int,str],source_member:str):
+    matches=[]
+    for canonical,spec in SUPPORTED_LEAGUES.items():
+        for long_name in spec['long_names']:
+            competition=long_name.encode('utf-8')
+            comps=[];p=0
+            while True:
+                p=buf.find(competition,p)
+                if p<0:break
+                comps.append(p);p+=1
+            for i,pos in enumerate(comps):
+                header=_rich_header(buf,pos,rich_team_names,competition)
+                if not header:continue
+                nextpos=comps[i+1] if i+1<len(comps) else min(len(buf),pos+120_000)
+                end=min(nextpos,pos+120_000)
+                stats=_rich_scan_stats(buf,pos,end)
+                squads=_rich_pick_two_squads(stats)
+                if not squads:continue
+                hs,as_=squads
+                first_stat=min(hs[0]['offset'],as_[0]['offset'])
+                if first_stat<pos or first_stat-pos>5000:continue
+                home=_rich_decorate(hs);away=_rich_decorate(as_)
+                matches.append({**header,'competition':canonical,'competition_code':spec['code'],
+                    'home_score':sum(x['goals'] for x in home)+sum(x['own_goals'] for x in away),
+                    'away_score':sum(x['goals'] for x in away)+sum(x['own_goals'] for x in home),
+                    'home_players':home,'away_players':away,'offset':pos,'source_member':source_member})
+    # De-duplicate if a generic label appears inside a longer label.
+    out=[];seen=set()
+    for m in matches:
+        k=(m['competition'],m['home_tid'],m['away_tid'],m['home_score'],m['away_score'],
+           tuple(x['player_id'] for x in m['home_players']),tuple(x['player_id'] for x in m['away_players']))
+        if k in seen:continue
+        seen.add(k);out.append(m)
+    return out
+
+def rich_extract_named(save_path:Path,all_clubs:dict[int,Club])->list[dict[str,Any]]:
+    # Rich match copies live across labelled save members (news, play-fixture manager,
+    # and transient APM/SCM snapshots). Scan members one-at-a-time so the importer
+    # never needs the legacy ~500 MB whole-save decompression.
+    rich_team_names={c.uid+1:normalize_club_name(c.short or c.name) for c in all_clubs.values()}
+    _save,items=read_manifest(save_path)
+    raw=[]
+    for member in items:
+        if member.plain_len<=0 or member.plain_len>30_000_000:continue
+        buf=extract_member(save_path,member)
+        if b'Sky Bet Championship' not in buf:continue
+        raw.extend(_rich_extract_member(buf,rich_team_names,member.name))
+    ded=[];seen=set()
+    for m in raw:
+        key=(m['home'],m['away'],m['home_score'],m['away_score'],
+             tuple(x['player_id'] for x in m['home_players']),tuple(x['player_id'] for x in m['away_players']))
+        if key in seen:continue
+        seen.add(key);ded.append(m)
+    return ded
+
+def normalize_club_name(name:str)->str:
+    repl={'West Ham United':'West Ham Utd','Queens Park Rangers':'QPR','Sheffield United':'Sheffield Utd','West Bromwich Albion':'West Brom'}
+    return repl.get(name,name)
+
+
+def score_player(row:dict[str,Any],pos:str)->dict[str,Any]:
+    mins=row.get('minutes',0) or 0
+    app=2 if mins>=60 else 1 if mins>0 else 0
+    goals=row.get('goals',0) or 0; assists=row.get('assists',0) or 0
+    goal_pts=goals*({'GK':10,'DEF':6,'MID':5,'FWD':4}[pos])
+    assist_pts=assists*3
+    gc=row.get('team_goals_conceded_while_on_pitch',row.get('goals_conceded',0)) or 0
+    cs=0
+    if mins>=60 and gc==0: cs={'GK':4,'DEF':4,'MID':1,'FWD':0}[pos]
+    saves=row.get('saves',0) or 0
+    save_pts=(saves//3) if pos=='GK' else 0
+    gc_pts=-(gc//2) if pos in ('GK','DEF') and mins>0 else 0
+    reds=(row.get('red_cards',0) or 0); yellows=(row.get('yellow_cards',0) or 0); card_pts=(-3*reds) if reds else (-yellows)
+    pen_pts=-2*(row.get('penalties_missed',0) or 0)
+    og_pts=-2*(row.get('own_goals',0) or 0)
+    cbit=(row.get('blocks',0) or 0)+(row.get('tackles_won',0) or 0)+(row.get('interceptions_candidate',0) or 0)+(row.get('clearances_candidate',0) or 0)
+    recovery=row.get('possession_won_candidate',0) or 0
+    def_actions=cbit if pos=='DEF' else cbit+recovery
+    threshold=10 if pos=='DEF' else 12
+    def_pts=2 if pos!='GK' and def_actions>=threshold else 0
+    base=app+goal_pts+assist_pts+cs+save_pts+gc_pts+card_pts+pen_pts+og_pts+def_pts
+    # Transparent FM-derived BPS proxy: rank only; not claimed as official FPL BPS.
+    rating=float(row.get('rating') or 0)
+    proxy=round(rating*10 + goals*18 + assists*9 + cs*4 + saves*2 + def_actions*0.5 + base,1) if mins else 0.0
+    return {'appearance_pts':app,'goal_pts':goal_pts,'assist_pts':assist_pts,'clean_sheet_pts':cs,'save_pts':save_pts,'gc_pts':gc_pts,'card_pts':card_pts+pen_pts+og_pts,'defcon_actions':def_actions,'defcon_pts':def_pts,'base_points':base,'bps_proxy':proxy}
+
+
+def award_bonus(players:list[dict[str,Any]]):
+    active=[p for p in players if p.get('minutes',0)>0]
+    active.sort(key=lambda x:(x['bps_proxy'],x.get('rating') or 0,x.get('goals',0),x.get('assists',0)),reverse=True)
+    # Simple 3/2/1 proxy ranking. Ties intentionally resolve deterministically rather than emulating official BPS tie rules.
+    for p in players:p['bonus']=0
+    for pts,p in zip((3,2,1),active[:3]):p['bonus']=pts
+    for p in players:p['fpl_points']=p['base_points']+p['bonus']
+
+
+
+def _position_strengths(p:dict[str,Any]):
+    ps=p.get('positions') or {};v=lambda k:float(ps.get(k,0) or 0)
+    return {'GK':v('GK'),'DEF':max(v('SW'),v('DL'),v('DC'),v('DR'),v('WBL'),v('WBR')),
+            'MID':max(v('DM'),v('ML'),v('MC'),v('MR'),v('AML'),v('AMC'),v('AMR')),'FWD':v('ST')}
+
+def infer_hybrid_positions_from_match_markers(rich:list[dict[str,Any]],players_by_eid:dict[int,dict[str,Any]]):
+    """Self-calibrate FM's retained match-position marker from unambiguous players.
+
+    Marker 4 is already proven as goalkeeper. Other marker meanings can vary across
+    retained objects, so never hard-code them: learn a marker->FPL band mapping only
+    when the save itself gives a strong, repeated correlation. Then use that mapping
+    solely to resolve genuine DEF/MID hybrids; ordinary positions are left untouched.
+    """
+    marker_counts=collections.defaultdict(collections.Counter)
+    for m in rich:
+        for key in ('home_players','away_players'):
+            for r in m.get(key,[]):
+                p=players_by_eid.get(int(r.get('player_id') or 0));marker=int(r.get('match_position_marker') or 0)
+                if not p or not marker or marker==4 or float(r.get('minutes') or 0)<=0:continue
+                strengths=_position_strengths(p);order=sorted(strengths.items(),key=lambda x:x[1],reverse=True)
+                if order[0][1]<15 or order[0][1]-order[1][1]<3:continue
+                marker_counts[marker][order[0][0]]+=1
+    marker_roles={4:'GK'}
+    for marker,c in marker_counts.items():
+        total=sum(c.values())
+        if total<8:continue
+        role,n=c.most_common(1)[0]
+        if n/total>=0.80:marker_roles[marker]=role
+    usage=collections.defaultdict(collections.Counter)
+    for m in rich:
+        for key in ('home_players','away_players'):
+            for r in m.get(key,[]):
+                if float(r.get('minutes') or 0)<=0:continue
+                role=marker_roles.get(int(r.get('match_position_marker') or 0))
+                if role:usage[int(r.get('player_id') or 0)][role]+=1
+    changed=[]
+    for eid,c in usage.items():
+        p=players_by_eid.get(eid)
+        if not p:continue
+        st=_position_strengths(p)
+        if max(st['DEF'],st['MID'])<15:continue
+        dm=c['DEF']+c['MID']
+        if dm<2:continue
+        if c['MID']/dm>=0.80 and p.get('pos')!='MID':p['pos']='MID';p['position_source']='observed_midfield_usage_v63';changed.append(eid)
+        elif c['DEF']/dm>=0.80 and p.get('pos')!='DEF':p['pos']='DEF';p['position_source']='observed_defensive_usage_v63';changed.append(eid)
+    return {'marker_roles':marker_roles,'hybrid_players_reclassified':changed}
+
+def join_rich_matches(rich:list[dict[str,Any]],fixtures:list[dict[str,Any]],players_by_eid:dict[int,dict[str,Any]]):
+    infer_hybrid_positions_from_match_markers(rich,players_by_eid)
+    # Rich headers use another team-id namespace, so bind by normalized club names and the exact played schedule.
+    by_pair=collections.defaultdict(list)
+    for f in fixtures:
+        if f['status']=='played': by_pair[(f['home'],f['away'])].append(f)
+    out=[]
+    for mid,m in enumerate(rich,1):
+        home=normalize_club_name(m['home']); away=normalize_club_name(m['away'])
+        candidates=by_pair.get((home,away),[])
+        if m.get('date'):
+            dated=[f for f in candidates if f.get('date')==m.get('date')]
+            if dated:candidates=dated
+        # Score disambiguates the return fixture when needed.
+        candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates
+        if len(candidates)!=1: continue
+        fix=candidates[0]
+        mm={'id':mid,'match_id':mid,'fixture_id':fix['fixture_id'],'gameweek':fix['gameweek'],'date':fix['date'],'home':home,'away':away,'home_score':fix['home_score'],'away_score':fix['away_score'],'status':'played','source':'fm_rich_stats'}
+        allp=[]
+        for side,key,club,opp,venue in [('home','home_players',home,away,'H'),('away','away_players',away,home,'A')]:
+            arr=[]
+            for r in m[key]:
+                eid=int(r['player_id']); canon=players_by_eid.get(eid)
+                pos=canon['pos'] if canon else ('GK' if r.get('is_goalkeeper_match_role') else 'MID')
+                name=canon['name'] if canon else r.get('player',f'FM Player {eid}')
+                row=dict(r); row.update({'player_id':str(eid),'name':name,'club':club,'pos':pos,'opponent':opp,'venue':venue,'home':home,'away':away,'score':f"{fix['home_score']}-{fix['away_score']}",'gameweek':fix['gameweek'],'match_id':mid})
+                row.update(score_player(row,pos)); arr.append(row);allp.append(row)
+            mm[side+'_players']=arr
+        award_bonus(allp)
+        # bonus/fpl point fields are shared row dicts referenced in arrays.
+        out.append(mm)
+    return out
+
+
+def build_players(squads:dict[int,list[int]], selected_clubs:dict[int,Club], people:dict[int,Person], rich:list[dict[str,Any]]|None=None):
+    memberships=collections.defaultdict(list)
+    for ceid,eids in squads.items():
+        for eid in eids: memberships[eid].append(ceid)
+    # Resolve duplicate list membership from actual current-season rich match participation when available.
+    played_club={}
+    if rich:
+        name_to_eid={normalize_club_name(c.name):eid for eid,c in selected_clubs.items()}
+        name_to_eid.update({normalize_club_name(c.short):eid for eid,c in selected_clubs.items()})
+        for m in rich:
+            for side,key in [('home','home_players'),('away','away_players')]:
+                ceid=name_to_eid.get(normalize_club_name(m[side]))
+              
+### match_position_marker
+    f"attack {round(c['attack_profile']*100)}/100 · team strength {round(c['team_strength']*100)}/100 · "
+                      f"quality {round(c['quality']*100)}/100 · {c['availability_signal']}")
+
+def scan_completed_results(db:bytes,fixtures:list[dict[str,Any]]):
+    keys={(r['home_tid'],r['away_tid'],r['date']):r for r in fixtures}
+    teams=sorted({x for r in fixtures for x in (r['home_tid'],r['away_tid'])})
+    pat=re.compile(b'|'.join(re.escape(struct.pack('<I',x)) for x in teams))
+    found={}
+    for m in pat.finditer(db):
+        p=m.start()
+        if p+86>len(db):continue
+        home=u32(db,p); away=u32(db,p+4)
+        if away not in teams:continue
+        stamp=u16(db,p+8);year=u16(db,p+10);doy=stamp&0x1ff
+        if not (1<=doy<=366 and 2024<=year<=2045):continue
+        date=fm_date(stamp,year)
+        key=(home,away,date)
+        if key not in keys:continue
+        hs,as_=db[p+84],db[p+85]
+        if hs>30 or as_>30:continue
+        found[key]=(hs,as_,p)
+    # one result per completed fixture; 50 in current regression save
+    for key,(hs,as_,p) in found.items():
+        f=keys[key];f['status']='played';f['home_score']=hs;f['away_score']=as_;f['result_offset']=p
+    return found
+
+
+def _rich_read_lp_utf8(buf:bytes,pos:int,max_len:int=80):
+    if pos+4>len(buf): return None,pos
+    n=u32(buf,pos)
+    if n>max_len or pos+4+n>len(buf): return None,pos
+    raw=buf[pos+4:pos+4+n]
+    try:s=raw.decode('utf-8')
+    except UnicodeDecodeError:return None,pos
+    if any(ord(c)<32 for c in s):return None,pos
+    return s,pos+4+n
+
+
+def _rich_stat_record_at(buf:bytes,p:int):
+    if p+214>len(buf) or buf[p]!=2:return None
+    c=buf[p:p+214];rating=u16(c,136)
+    if not (1<=c[5]<=99 and c[7]==2 and c[20]<=12 and c[21]<=20 and c[50]<=30 and c[51]<=30 and c[52]<=30 and c[56]<=12 and c[63]<=5 and c[64]<=2 and c[67]<=130 and c[71]<=130 and 400<=rating<=1000):
+        return None
+    out={
+        'player_id':u32(c,1),'shirt':c[5],'goals':c[20],
+        'goalkeeper_goals_conceded_from_sot':c[21],'penalties_taken':c[22],
+        'penalties_scored':c[23],'own_goals':c[24],
+        'shots_on_target':c[42],'shots_blocked':c[43],
+        'save_component_1':c[50],'save_component_2':c[51],'save_component_3':c[52],
+        'save_component_legacy_1':c[50],'save_component_legacy_2':c[51],'save_component_legacy_3':c[52],
+        'blocks':c[55],'assists':c[56],
+        'yellow_cards':c[63],'red_cards':c[64],'sub_off':c[67],'sub_on':c[71],
+        'sent_off_minute':c[74],'match_position_marker':c[77],
+        'passes_attempted':c[86],'passes_completed':c[87],
+        'tackles_attempted':c[92],'tackles_won':c[93],'key_tackles_candidate':c[94],
+        'headers_attempted':c[95],'headers_won':c[96],
+        'interceptions_candidate':c[97],'clearances_candidate':c[98],
+        'team_goals_while_on_pitch':c[145],'team_goals_conceded_while_on_pitch':c[146],
+        'possession_won_candidate':c[151],'possession_lost_candidate':c[152],
+        'shots_on_target_faced':c[157],
+        'rating_raw':rating,'rating':round(rating/100,1),'offset':p,
+    }
+    out['saves']=max(0,out['shots_on_target_faced']-out['goalkeeper_goals_conceded_from_sot'])
+    out['penalties_missed']=max(0,out['penalties_taken']-out['penalties_scored'])
+    out['is_goalkeeper_match_role']=out['match_position_marker']==4
+    out['goals_conceded']=out['team_goals_conceded_while_on_pitch']
+    out['cbit_candidate']=out['blocks']+out['tackles_won']+out['interceptions_candidate']+out['clearances_candidate']
+    out['mapping_confidence']={
+        'blocks':'exact-mirror','tackles_won':'strong-pair-and-ui-check',
+        'interceptions_candidate':'working-high','clearances_candidate':'working-high',
+        'possession_won_candidate':'working-high',
+    }
+    return out
+
+
+def _rich_scan_stats(buf:bytes,start:int,end:int):
+    out=[];p=start
+    while p<end-214:
+        if buf[p]==2:
+            r=_rich_stat_record_at(buf,p)
+            if r:
+                out.append(r);p+=140;continue
+        p+=1
+    return out
+
+
+def _rich_pick_two_squads(stats:list[dict[str,Any]]):
+    if len(stats)<40:return None
+    candidates=[]
+    for j in range(19,len(stats)-20):
+        gap=stats[j+1]['offset']-stats[j]['offset']
+        left=stats[j-19:j+1];right=stats[j+1:j+21]
+        max_l=max((left[k+1]['offset']-left[k]['offset'] for k in range(19)),default=0)
+        max_r=max((right[k+1]['offset']-right[k]['offset'] for k in range(19)),default=0)
+        if gap>800 and max_l<1200 and max_r<1200:candidates.append((gap,j,left,right))
+    if not candidates:return None
+    _,_,left,right=min(candidates,key=lambda x:x[2][0]['offset'])
+    return left,right
+
+
+def _rich_decorate(rows:list[dict[str,Any]]):
+    result=[]
+    for idx,r0 in enumerate(rows):
+        r=dict(r0);starter=idx<11
+        if starter:
+            r['appearance']='Started'
+            if r['sub_off']:
+                r['minutes']=r['sub_off'];r['appearance']+=f", off {r['sub_off']}'"
+            elif r['red_cards'] and r['sent_off_minute']:
+                r['minutes']=r['sent_off_minute'];r['appearance']+=f", sent off {r['sent_off_minute']}'"
+            else:r['minutes']=90
+        else:
+            if r['sub_on']:
+                r['appearance']=f"On {r['sub_on']}'";r['minutes']=max(0,90-r['sub_on'])
+            else:
+                r['appearance']='Unused';r['minutes']=0;r['rating']=None
+        result.append(r)
+    return result
+
+
+
+def _rich_header(buf:bytes,comp_pos:int,rich_team_names:dict[int,str],competition_text:bytes):
+    p=comp_pos+len(competition_text)
+    short,p2=_rich_read_lp_utf8(buf,p,80)
+    # FM stores a second competition label immediately after the long label. Accept the
+    # label generically; team identity and league fixture matching provide the validation.
+    if not short:return None
+    stadium=None;stadium_end=None
+    for q in range(p2,min(p2+120,len(buf)-8)):
+        text,nxt=_rich_read_lp_utf8(buf,q,80)
+        if text and len(text)>=3 and nxt+12<len(buf) and buf[nxt:nxt+2]==b'\x03\x02':
+            stadium=text;stadium_end=nxt;break
+    if not stadium:return None
+    q=stadium_end
+    if buf[q:q+2]!=b'\x03\x02' or buf[q+6]!=2:return None
+    home_tid=u32(buf,q+7)
+    marker=buf.find(b'\x00\x03\x02',q+11,q+70)
+    if marker<0 or buf[marker+7]!=2:return None
+    away_tid=u32(buf,marker+8)
+    home=rich_team_names.get(home_tid);away=rich_team_names.get(away_tid)
+    if not home or not away:return None
+    return {'stadium':stadium,'home':home,'away':away,'home_tid':home_tid,'away_tid':away_tid,'competition_short':short}
+
+
+def _rich_extract_member(buf:bytes,rich_team_names:dict[int,str],source_member:str):
+    matches=[]
+    for canonical,spec in SUPPORTED_LEAGUES.items():
+        for long_name in spec['long_names']:
+            competition=long_name.encode('utf-8')
+            comps=[];p=0
+            while True:
+                p=buf.find(competition,p)
+                if p<0:break
+                comps.append(p);p+=1
+            for i,pos in enumerate(comps):
+                header=_rich_header(buf,pos,rich_team_names,competition)
+                if not header:continue
+                nextpos=comps[i+1] if i+1<len(comps) else min(len(buf),pos+120_000)
+                end=min(nextpos,pos+120_000)
+                stats=_rich_scan_stats(buf,pos,end)
+                squads=_rich_pick_two_squads(stats)
+                if not squads:continue
+                hs,as_=squads
+                first_stat=min(hs[0]['offset'],as_[0]['offset'])
+                if first_stat<pos or first_stat-pos>5000:continue
+                home=_rich_decorate(hs);away=_rich_decorate(as_)
+                matches.append({**header,'competition':canonical,'competition_code':spec['code'],
+                    'home_score':sum(x['goals'] for x in home)+sum(x['own_goals'] for x in away),
+                    'away_score':sum(x['goals'] for x in away)+sum(x['own_goals'] for x in home),
+                    'home_players':home,'away_players':away,'offset':pos,'source_member':source_member})
+    # De-duplicate if a generic label appears inside a longer label.
+    out=[];seen=set()
+    for m in matches:
+        k=(m['competition'],m['home_tid'],m['away_tid'],m['home_score'],m['away_score'],
+           tuple(x['player_id'] for x in m['home_players']),tuple(x['player_id'] for x in m['away_players']))
+        if k in seen:continue
+        seen.add(k);out.append(m)
+    return out
+
+def rich_extract_named(save_path:Path,all_clubs:dict[int,Club])->list[dict[str,Any]]:
+    # Rich match copies live across labelled save members (news, play-fixture manager,
+    # and transient APM/SCM snapshots). Scan members one-at-a-time so the importer
+    # never needs the legacy ~500 MB whole-save decompression.
+    rich_team_names={c.uid+1:normalize_club_name(c.short or c.name) for c in all_clubs.values()}
+    _save,items=read_manifest(save_path)
+    raw=[]
+    for member in items:
+        if member.plain_len<=0 or member.plain_len>30_000_000:continue
+        buf=extract_member(save_path,member)
+        if b'Sky Bet Championship' not in buf:continue
+        raw.extend(_rich_extract_member(buf,rich_team_names,member.name))
+    ded=[];seen=set()
+    for m in raw:
+        key=(m['home'],m['away'],m['home_score'],m['away_score'],
+             tuple(x['player_id'] for x in m['home_players']),tuple(x['player_id'] for x in m['away_players']))
+        if key in seen:continue
+        seen.add(key);ded.append(m)
+    return ded
+
+def normalize_club_name(name:str)->str:
+    repl={'West Ham United':'West Ham Utd','Queens Park Rangers':'QPR','Sheffield United':'Sheffield Utd','West Bromwich Albion':'West Brom'}
+    return repl.get(name,name)
+
+
+def score_player(row:dict[str,Any],pos:str)->dict[str,Any]:
+    mins=row.get('minutes',0) or 0
+    app=2 if mins>=60 else 1 if mins>0 else 0
+    goals=row.get('goals',0) or 0; assists=row.get('assists',0) or 0
+    goal_pts=goals*({'GK':10,'DEF':6,'MID':5,'FWD':4}[pos])
+    assist_pts=assists*3
+    gc=row.get('team_goals_conceded_while_on_pitch',row.get('goals_conceded',0)) or 0
+    cs=0
+    if mins>=60 and gc==0: cs={'GK':4,'DEF':4,'MID':1,'FWD':0}[pos]
+    saves=row.get('saves',0) or 0
+    save_pts=(saves//3) if pos=='GK' else 0
+    gc_pts=-(gc//2) if pos in ('GK','DEF') and mins>0 else 0
+    reds=(row.get('red_cards',0) or 0); yellows=(row.get('yellow_cards',0) or 0); card_pts=(-3*reds) if reds else (-yellows)
+    pen_pts=-2*(row.get('penalties_missed',0) or 0)
+    og_pts=-2*(row.get('own_goals',0) or 0)
+    cbit=(row.get('blocks',0) or 0)+(row.get('tackles_won',0) or 0)+(row.get('interceptions_candidate',0) or 0)+(row.get('clearances_candidate',0) or 0)
+    recovery=row.get('possession_won_candidate',0) or 0
+    def_actions=cbit if pos=='DEF' else cbit+recovery
+    threshold=10 if pos=='DEF' else 12
+    def_pts=2 if pos!='GK' and def_actions>=threshold else 0
+    base=app+goal_pts+assist_pts+cs+save_pts+gc_pts+card_pts+pen_pts+og_pts+def_pts
+    # Transparent FM-derived BPS proxy: rank only; not claimed as official FPL BPS.
+    rating=float(row.get('rating') or 0)
+    proxy=round(rating*10 + goals*18 + assists*9 + cs*4 + saves*2 + def_actions*0.5 + base,1) if mins else 0.0
+    return {'appearance_pts':app,'goal_pts':goal_pts,'assist_pts':assist_pts,'clean_sheet_pts':cs,'save_pts':save_pts,'gc_pts':gc_pts,'card_pts':card_pts+pen_pts+og_pts,'defcon_actions':def_actions,'defcon_pts':def_pts,'base_points':base,'bps_proxy':proxy}
+
+
+def award_bonus(players:list[dict[str,Any]]):
+    active=[p for p in players if p.get('minutes',0)>0]
+    active.sort(key=lambda x:(x['bps_proxy'],x.get('rating') or 0,x.get('goals',0),x.get('assists',0)),reverse=True)
+    # Simple 3/2/1 proxy ranking. Ties intentionally resolve deterministically rather than emulating official BPS tie rules.
+    for p in players:p['bonus']=0
+    for pts,p in zip((3,2,1),active[:3]):p['bonus']=pts
+    for p in players:p['fpl_points']=p['base_points']+p['bonus']
+
+
+
+def _position_strengths(p:dict[str,Any]):
+    ps=p.get('positions') or {};v=lambda k:float(ps.get(k,0) or 0)
+    return {'GK':v('GK'),'DEF':max(v('SW'),v('DL'),v('DC'),v('DR'),v('WBL'),v('WBR')),
+            'MID':max(v('DM'),v('ML'),v('MC'),v('MR'),v('AML'),v('AMC'),v('AMR')),'FWD':v('ST')}
+
+def infer_hybrid_positions_from_match_markers(rich:list[dict[str,Any]],players_by_eid:dict[int,dict[str,Any]]):
+    """Self-calibrate FM's retained match-position marker from unambiguous players.
+
+    Marker 4 is already proven as goalkeeper. Other marker meanings can vary across
+    retained objects, so never hard-code them: learn a marker->FPL band mapping only
+    when the save itself gives a strong, repeated correlation. Then use that mapping
+    solely to resolve genuine DEF/MID hybrids; ordinary positions are left untouched.
+    """
+    marker_counts=collections.defaultdict(collections.Counter)
+    for m in rich:
+        for key in ('home_players','away_players'):
+            for r in m.get(key,[]):
+                p=players_by_eid.get(int(r.get('player_id') or 0));marker=int(r.get('match_position_marker') or 0)
+                if not p or not marker or marker==4 or float(r.get('minutes') or 0)<=0:continue
+                strengths=_position_strengths(p);order=sorted(strengths.items(),key=lambda x:x[1],reverse=True)
+                if order[0][1]<15 or order[0][1]-order[1][1]<3:continue
+                marker_counts[marker][order[0][0]]+=1
+    marker_roles={4:'GK'}
+    for marker,c in marker_counts.items():
+        total=sum(c.values())
+        if total<8:continue
+        role,n=c.most_common(1)[0]
+        if n/total>=0.80:marker_roles[marker]=role
+    usage=collections.defaultdict(collections.Counter)
+    for m in rich:
+        for key in ('home_players','away_players'):
+            for r in m.get(key,[]):
+                if float(r.get('minutes') or 0)<=0:continue
+                role=marker_roles.get(int(r.get('match_position_marker') or 0))
+                if role:usage[int(r.get('player_id') or 0)][role]+=1
+    changed=[]
+    for eid,c in usage.items():
+        p=players_by_eid.get(eid)
+        if not p:continue
+        st=_position_strengths(p)
+        if max(st['DEF'],st['MID'])<15:continue
+        dm=c['DEF']+c['MID']
+        if dm<2:continue
+        if c['MID']/dm>=0.80 and p.get('pos')!='MID':p['pos']='MID';p['position_source']='observed_midfield_usage_v63';changed.append(eid)
+        elif c['DEF']/dm>=0.80 and p.get('pos')!='DEF':p['pos']='DEF';p['position_source']='observed_defensive_usage_v63';changed.append(eid)
+    return {'marker_roles':marker_roles,'hybrid_players_reclassified':changed}
+
+def join_rich_matches(rich:list[dict[str,Any]],fixtures:list[dict[str,Any]],players_by_eid:dict[int,dict[str,Any]]):
+    infer_hybrid_positions_from_match_markers(rich,players_by_eid)
+    # Rich headers use another team-id namespace, so bind by normalized club names and the exact played schedule.
+    by_pair=collections.defaultdict(list)
+    for f in fixtures:
+        if f['status']=='played': by_pair[(f['home'],f['away'])].append(f)
+    out=[]
+    for mid,m in enumerate(rich,1):
+        home=normalize_club_name(m['home']); away=normalize_club_name(m['away'])
+        candidates=by_pair.get((home,away),[])
+        if m.get('date'):
+            dated=[f for f in candidates if f.get('date')==m.get('date')]
+            if dated:candidates=dated
+        # Score disambiguates the return fixture when needed.
+        candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates
+        if len(candidates)!=1: continue
+        fix=candidates[0]
+        mm={'id':mid,'match_id':mid,'fixture_id':fix['fixture_id'],'gameweek':fix['gameweek'],'date':fix['date'],'home':home,'away':away,'home_score':fix['home_score'],'away_score':fix['away_score'],'status':'played','source':'fm_rich_stats'}
+        allp=[]
+        for side,key,club,opp,venue in [('home','home_players',home,away,'H'),('away','away_players',away,home,'A')]:
+            arr=[]
+            for r in m[key]:
+                eid=int(r['player_id']); canon=players_by_eid.get(eid)
+                pos=canon['pos'] if canon else ('GK' if r.get('is_goalkeeper_match_role') else 'MID')
+                name=canon['name'] if canon else r.get('player',f'FM Player {eid}')
+                row=dict(r); row.update({'player_id':str(eid),'name':name,'club':club,'pos':pos,'opponent':opp,'venue':venue,'home':home,'away':away,'score':f"{fix['home_score']}-{fix['away_score']}",'gameweek':fix['gameweek'],'match_id':mid})
+                row.update(score_player(row,pos)); arr.append(row);allp.append(row)
+            mm[side+'_players']=arr
+        award_bonus(allp)
+        # bonus/fpl point fields are shared row dicts referenced in arrays.
+        out.append(mm)
+    return out
+
+
+def build_players(squads:dict[int,list[int]], selected_clubs:dict[int,Club], people:dict[int,Person], rich:list[dict[str,Any]]|None=None):
+    memberships=collections.defaultdict(list)
+    for ceid,eids in squads.items():
+        for eid in eids: memberships[eid].append(ceid)
+    # Resolve duplicate list membership from actual current-season rich match participation when available.
+    played_club={}
+    if rich:
+        name_to_eid={normalize_club_name(c.name):eid for eid,c in selected_clubs.items()}
+        name_to_eid.update({normalize_club_name(c.short):eid for eid,c in selected_clubs.items()})
+        for m in rich:
+            for side,key in [('home','home_players'),('away','away_players')]:
+                ceid=name_to_eid.get(normalize_club_name(m[side]))
+                if ceid is None:continue
+                for r in m[key]: played_club[int(r['player_id'])]=ceid
+    out=[]; unresolved=[]; ambiguous=[]
+    for eid,clubs in sorted(memberships.items()):
+        person=people.get(eid)
+        if not person:
+            unresolved.append(eid);continue
+        ceid=clubs[0]
+        if len(clubs)>1:
+            if played_club.get(eid) in clubs: ceid=played_club[eid]
+            else: ambiguous.append({'player_eid':eid,'club_eids':clubs})
+        c=selected_clubs[ceid]
+        pos=fantasy_position(person.positions)
+        out.append({'id':str(eid),'pid':str(eid),'name':person.display_name,'display_name':person.display_name,'public_name':person.display_name,'legal_name':person.name,'first_name':getattr(person,'first_name',None),'surname_name':getattr(person,'surname_name',None),'common_name':person.common_name,'first_name_id':getattr(person,'first_name_id',None),'surname_name_id':getattr(person
+### is_goalkeeper_match_role
+<=year<=2045):continue
+        date=fm_date(stamp,year)
+        key=(home,away,date)
+        if key not in keys:continue
+        hs,as_=db[p+84],db[p+85]
+        if hs>30 or as_>30:continue
+        found[key]=(hs,as_,p)
+    # one result per completed fixture; 50 in current regression save
+    for key,(hs,as_,p) in found.items():
+        f=keys[key];f['status']='played';f['home_score']=hs;f['away_score']=as_;f['result_offset']=p
+    return found
+
+
+def _rich_read_lp_utf8(buf:bytes,pos:int,max_len:int=80):
+    if pos+4>len(buf): return None,pos
+    n=u32(buf,pos)
+    if n>max_len or pos+4+n>len(buf): return None,pos
+    raw=buf[pos+4:pos+4+n]
+    try:s=raw.decode('utf-8')
+    except UnicodeDecodeError:return None,pos
+    if any(ord(c)<32 for c in s):return None,pos
+    return s,pos+4+n
+
+
+def _rich_stat_record_at(buf:bytes,p:int):
+    if p+214>len(buf) or buf[p]!=2:return None
+    c=buf[p:p+214];rating=u16(c,136)
+    if not (1<=c[5]<=99 and c[7]==2 and c[20]<=12 and c[21]<=20 and c[50]<=30 and c[51]<=30 and c[52]<=30 and c[56]<=12 and c[63]<=5 and c[64]<=2 and c[67]<=130 and c[71]<=130 and 400<=rating<=1000):
+        return None
+    out={
+        'player_id':u32(c,1),'shirt':c[5],'goals':c[20],
+        'goalkeeper_goals_conceded_from_sot':c[21],'penalties_taken':c[22],
+        'penalties_scored':c[23],'own_goals':c[24],
+        'shots_on_target':c[42],'shots_blocked':c[43],
+        'save_component_1':c[50],'save_component_2':c[51],'save_component_3':c[52],
+        'save_component_legacy_1':c[50],'save_component_legacy_2':c[51],'save_component_legacy_3':c[52],
+        'blocks':c[55],'assists':c[56],
+        'yellow_cards':c[63],'red_cards':c[64],'sub_off':c[67],'sub_on':c[71],
+        'sent_off_minute':c[74],'match_position_marker':c[77],
+        'passes_attempted':c[86],'passes_completed':c[87],
+        'tackles_attempted':c[92],'tackles_won':c[93],'key_tackles_candidate':c[94],
+        'headers_attempted':c[95],'headers_won':c[96],
+        'interceptions_candidate':c[97],'clearances_candidate':c[98],
+        'team_goals_while_on_pitch':c[145],'team_goals_conceded_while_on_pitch':c[146],
+        'possession_won_candidate':c[151],'possession_lost_candidate':c[152],
+        'shots_on_target_faced':c[157],
+        'rating_raw':rating,'rating':round(rating/100,1),'offset':p,
+    }
+    out['saves']=max(0,out['shots_on_target_faced']-out['goalkeeper_goals_conceded_from_sot'])
+    out['penalties_missed']=max(0,out['penalties_taken']-out['penalties_scored'])
+    out['is_goalkeeper_match_role']=out['match_position_marker']==4
+    out['goals_conceded']=out['team_goals_conceded_while_on_pitch']
+    out['cbit_candidate']=out['blocks']+out['tackles_won']+out['interceptions_candidate']+out['clearances_candidate']
+    out['mapping_confidence']={
+        'blocks':'exact-mirror','tackles_won':'strong-pair-and-ui-check',
+        'interceptions_candidate':'working-high','clearances_candidate':'working-high',
+        'possession_won_candidate':'working-high',
+    }
+    return out
+
+
+def _rich_scan_stats(buf:bytes,start:int,end:int):
+    out=[];p=start
+    while p<end-214:
+        if buf[p]==2:
+            r=_rich_stat_record_at(buf,p)
+            if r:
+                out.append(r);p+=140;continue
+        p+=1
+    return out
+
+
+def _rich_pick_two_squads(stats:list[dict[str,Any]]):
+    if len(stats)<40:return None
+    candidates=[]
+    for j in range(19,len(stats)-20):
+        gap=stats[j+1]['offset']-stats[j]['offset']
+        left=stats[j-19:j+1];right=stats[j+1:j+21]
+        max_l=max((left[k+1]['offset']-left[k]['offset'] for k in range(19)),default=0)
+        max_r=max((right[k+1]['offset']-right[k]['offset'] for k in range(19)),default=0)
+        if gap>800 and max_l<1200 and max_r<1200:candidates.append((gap,j,left,right))
+    if not candidates:return None
+    _,_,left,right=min(candidates,key=lambda x:x[2][0]['offset'])
+    return left,right
+
+
+def _rich_decorate(rows:list[dict[str,Any]]):
+    result=[]
+    for idx,r0 in enumerate(rows):
+        r=dict(r0);starter=idx<11
+        if starter:
+            r['appearance']='Started'
+            if r['sub_off']:
+                r['minutes']=r['sub_off'];r['appearance']+=f", off {r['sub_off']}'"
+            elif r['red_cards'] and r['sent_off_minute']:
+                r['minutes']=r['sent_off_minute'];r['appearance']+=f", sent off {r['sent_off_minute']}'"
+            else:r['minutes']=90
+        else:
+            if r['sub_on']:
+                r['appearance']=f"On {r['sub_on']}'";r['minutes']=max(0,90-r['sub_on'])
+            else:
+                r['appearance']='Unused';r['minutes']=0;r['rating']=None
+        result.append(r)
+    return result
+
+
+
+def _rich_header(buf:bytes,comp_pos:int,rich_team_names:dict[int,str],competition_text:bytes):
+    p=comp_pos+len(competition_text)
+    short,p2=_rich_read_lp_utf8(buf,p,80)
+    # FM stores a second competition label immediately after the long label. Accept the
+    # label generically; team identity and league fixture matching provide the validation.
+    if not short:return None
+    stadium=None;stadium_end=None
+    for q in range(p2,min(p2+120,len(buf)-8)):
+        text,nxt=_rich_read_lp_utf8(buf,q,80)
+        if text and len(text)>=3 and nxt+12<len(buf) and buf[nxt:nxt+2]==b'\x03\x02':
+            stadium=text;stadium_end=nxt;break
+    if not stadium:return None
+    q=stadium_end
+    if buf[q:q+2]!=b'\x03\x02' or buf[q+6]!=2:return None
+    home_tid=u32(buf,q+7)
+    marker=buf.find(b'\x00\x03\x02',q+11,q+70)
+    if marker<0 or buf[marker+7]!=2:return None
+    away_tid=u32(buf,marker+8)
+    home=rich_team_names.get(home_tid);away=rich_team_names.get(away_tid)
+    if not home or not away:return None
+    return {'stadium':stadium,'home':home,'away':away,'home_tid':home_tid,'away_tid':away_tid,'competition_short':short}
+
+
+def _rich_extract_member(buf:bytes,rich_team_names:dict[int,str],source_member:str):
+    matches=[]
+    for canonical,spec in SUPPORTED_LEAGUES.items():
+        for long_name in spec['long_names']:
+            competition=long_name.encode('utf-8')
+            comps=[];p=0
+            while True:
+                p=buf.find(competition,p)
+                if p<0:break
+                comps.append(p);p+=1
+            for i,pos in enumerate(comps):
+                header=_rich_header(buf,pos,rich_team_names,competition)
+                if not header:continue
+                nextpos=comps[i+1] if i+1<len(comps) else min(len(buf),pos+120_000)
+                end=min(nextpos,pos+120_000)
+                stats=_rich_scan_stats(buf,pos,end)
+                squads=_rich_pick_two_squads(stats)
+                if not squads:continue
+                hs,as_=squads
+                first_stat=min(hs[0]['offset'],as_[0]['offset'])
+                if first_stat<pos or first_stat-pos>5000:continue
+                home=_rich_decorate(hs);away=_rich_decorate(as_)
+                matches.append({**header,'competition':canonical,'competition_code':spec['code'],
+                    'home_score':sum(x['goals'] for x in home)+sum(x['own_goals'] for x in away),
+                    'away_score':sum(x['goals'] for x in away)+sum(x['own_goals'] for x in home),
+                    'home_players':home,'away_players':away,'offset':pos,'source_member':source_member})
+    # De-duplicate if a generic label appears inside a longer label.
+    out=[];seen=set()
+    for m in matches:
+        k=(m['competition'],m['home_tid'],m['away_tid'],m['home_score'],m['away_score'],
+           tuple(x['player_id'] for x in m['home_players']),tuple(x['player_id'] for x in m['away_players']))
+        if k in seen:continue
+        seen.add(k);out.append(m)
+    return out
+
+def rich_extract_named(save_path:Path,all_clubs:dict[int,Club])->list[dict[str,Any]]:
+    # Rich match copies live across labelled save members (news, play-fixture manager,
+    # and transient APM/SCM snapshots). Scan members one-at-a-time so the importer
+    # never needs the legacy ~500 MB whole-save decompression.
+    rich_team_names={c.uid+1:normalize_club_name(c.short or c.name) for c in all_clubs.values()}
+    _save,items=read_manifest(save_path)
+    raw=[]
+    for member in items:
+        if member.plain_len<=0 or member.plain_len>30_000_000:continue
+        buf=extract_member(save_path,member)
+        if b'Sky Bet Championship' not in buf:continue
+        raw.extend(_rich_extract_member(buf,rich_team_names,member.name))
+    ded=[];seen=set()
+    for m in raw:
+        key=(m['home'],m['away'],m['home_score'],m['away_score'],
+             tuple(x['player_id'] for x in m['home_players']),tuple(x['player_id'] for x in m['away_players']))
+        if key in seen:continue
+        seen.add(key);ded.append(m)
+    return ded
+
+def normalize_club_name(name:str)->str:
+    repl={'West Ham United':'West Ham Utd','Queens Park Rangers':'QPR','Sheffield United':'Sheffield Utd','West Bromwich Albion':'West Brom'}
+    return repl.get(name,name)
+
+
+def score_player(row:dict[str,Any],pos:str)->dict[str,Any]:
+    mins=row.get('minutes',0) or 0
+    app=2 if mins>=60 else 1 if mins>0 else 0
+    goals=row.get('goals',0) or 0; assists=row.get('assists',0) or 0
+    goal_pts=goals*({'GK':10,'DEF':6,'MID':5,'FWD':4}[pos])
+    assist_pts=assists*3
+    gc=row.get('team_goals_conceded_while_on_pitch',row.get('goals_conceded',0)) or 0
+    cs=0
+    if mins>=60 and gc==0: cs={'GK':4,'DEF':4,'MID':1,'FWD':0}[pos]
+    saves=row.get('saves',0) or 0
+    save_pts=(saves//3) if pos=='GK' else 0
+    gc_pts=-(gc//2) if pos in ('GK','DEF') and mins>0 else 0
+    reds=(row.get('red_cards',0) or 0); yellows=(row.get('yellow_cards',0) or 0); card_pts=(-3*reds) if reds else (-yellows)
+    pen_pts=-2*(row.get('penalties_missed',0) or 0)
+    og_pts=-2*(row.get('own_goals',0) or 0)
+    cbit=(row.get('blocks',0) or 0)+(row.get('tackles_won',0) or 0)+(row.get('interceptions_candidate',0) or 0)+(row.get('clearances_candidate',0) or 0)
+    recovery=row.get('possession_won_candidate',0) or 0
+    def_actions=cbit if pos=='DEF' else cbit+recovery
+    threshold=10 if pos=='DEF' else 12
+    def_pts=2 if pos!='GK' and def_actions>=threshold else 0
+    base=app+goal_pts+assist_pts+cs+save_pts+gc_pts+card_pts+pen_pts+og_pts+def_pts
+    # Transparent FM-derived BPS proxy: rank only; not claimed as official FPL BPS.
+    rating=float(row.get('rating') or 0)
+    proxy=round(rating*10 + goals*18 + assists*9 + cs*4 + saves*2 + def_actions*0.5 + base,1) if mins else 0.0
+    return {'appearance_pts':app,'goal_pts':goal_pts,'assist_pts':assist_pts,'clean_sheet_pts':cs,'save_pts':save_pts,'gc_pts':gc_pts,'card_pts':card_pts+pen_pts+og_pts,'defcon_actions':def_actions,'defcon_pts':def_pts,'base_points':base,'bps_proxy':proxy}
+
+
+def award_bonus(players:list[dict[str,Any]]):
+    active=[p for p in players if p.get('minutes',0)>0]
+    active.sort(key=lambda x:(x['bps_proxy'],x.get('rating') or 0,x.get('goals',0),x.get('assists',0)),reverse=True)
+    # Simple 3/2/1 proxy ranking. Ties intentionally resolve deterministically rather than emulating official BPS tie rules.
+    for p in players:p['bonus']=0
+    for pts,p in zip((3,2,1),active[:3]):p['bonus']=pts
+    for p in players:p['fpl_points']=p['base_points']+p['bonus']
+
+
+
+def _position_strengths(p:dict[str,Any]):
+    ps=p.get('positions') or {};v=lambda k:float(ps.get(k,0) or 0)
+    return {'GK':v('GK'),'DEF':max(v('SW'),v('DL'),v('DC'),v('DR'),v('WBL'),v('WBR')),
+            'MID':max(v('DM'),v('ML'),v('MC'),v('MR'),v('AML'),v('AMC'),v('AMR')),'FWD':v('ST')}
+
+def infer_hybrid_positions_from_match_markers(rich:list[dict[str,Any]],players_by_eid:dict[int,dict[str,Any]]):
+    """Self-calibrate FM's retained match-position marker from unambiguous players.
+
+    Marker 4 is already proven as goalkeeper. Other marker meanings can vary across
+    retained objects, so never hard-code them: learn a marker->FPL band mapping only
+    when the save itself gives a strong, repeated correlation. Then use that mapping
+    solely to resolve genuine DEF/MID hybrids; ordinary positions are left untouched.
+    """
+    marker_counts=collections.defaultdict(collections.Counter)
+    for m in rich:
+        for key in ('home_players','away_players'):
+            for r in m.get(key,[]):
+                p=players_by_eid.get(int(r.get('player_id') or 0));marker=int(r.get('match_position_marker') or 0)
+                if not p or not marker or marker==4 or float(r.get('minutes') or 0)<=0:continue
+                strengths=_position_strengths(p);order=sorted(strengths.items(),key=lambda x:x[1],reverse=True)
+                if order[0][1]<15 or order[0][1]-order[1][1]<3:continue
+                marker_counts[marker][order[0][0]]+=1
+    marker_roles={4:'GK'}
+    for marker,c in marker_counts.items():
+        total=sum(c.values())
+        if total<8:continue
+        role,n=c.most_common(1)[0]
+        if n/total>=0.80:marker_roles[marker]=role
+    usage=collections.defaultdict(collections.Counter)
+    for m in rich:
+        for key in ('home_players','away_players'):
+            for r in m.get(key,[]):
+                if float(r.get('minutes') or 0)<=0:continue
+                role=marker_roles.get(int(r.get('match_position_marker') or 0))
+                if role:usage[int(r.get('player_id') or 0)][role]+=1
+    changed=[]
+    for eid,c in usage.items():
+        p=players_by_eid.get(eid)
+        if not p:continue
+        st=_position_strengths(p)
+        if max(st['DEF'],st['MID'])<15:continue
+        dm=c['DEF']+c['MID']
+        if dm<2:continue
+        if c['MID']/dm>=0.80 and p.get('pos')!='MID':p['pos']='MID';p['position_source']='observed_midfield_usage_v63';changed.append(eid)
+        elif c['DEF']/dm>=0.80 and p.get('pos')!='DEF':p['pos']='DEF';p['position_source']='observed_defensive_usage_v63';changed.append(eid)
+    return {'marker_roles':marker_roles,'hybrid_players_reclassified':changed}
+
+def join_rich_matches(rich:list[dict[str,Any]],fixtures:list[dict[str,Any]],players_by_eid:dict[int,dict[str,Any]]):
+    infer_hybrid_positions_from_match_markers(rich,players_by_eid)
+    # Rich headers use another team-id namespace, so bind by normalized club names and the exact played schedule.
+    by_pair=collections.defaultdict(list)
+    for f in fixtures:
+        if f['status']=='played': by_pair[(f['home'],f['away'])].append(f)
+    out=[]
+    for mid,m in enumerate(rich,1):
+        home=normalize_club_name(m['home']); away=normalize_club_name(m['away'])
+        candidates=by_pair.get((home,away),[])
+        if m.get('date'):
+            dated=[f for f in candidates if f.get('date')==m.get('date')]
+            if dated:candidates=dated
+        # Score disambiguates the return fixture when needed.
+        candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates
+        if len(candidates)!=1: continue
+        fix=candidates[0]
+        mm={'id':mid,'match_id':mid,'fixture_id':fix['fixture_id'],'gameweek':fix['gameweek'],'date':fix['date'],'home':home,'away':away,'home_score':fix['home_score'],'away_score':fix['away_score'],'status':'played','source':'fm_rich_stats'}
+        allp=[]
+        for side,key,club,opp,venue in [('home','home_players',home,away,'H'),('away','away_players',away,home,'A')]:
+            arr=[]
+            for r in m[key]:
+                eid=int(r['player_id']); canon=players_by_eid.get(eid)
+                pos=canon['pos'] if canon else ('GK' if r.get('is_goalkeeper_match_role') else 'MID')
+                name=canon['name'] if canon else r.get('player',f'FM Player {eid}')
+                row=dict(r); row.update({'player_id':str(eid),'name':name,'club':club,'pos':pos,'opponent':opp,'venue':venue,'home':home,'away':away,'score':f"{fix['home_score']}-{fix['away_score']}",'gameweek':fix['gameweek'],'match_id':mid})
+                row.update(score_player(row,pos)); arr.append(row);allp.append(row)
+            mm[side+'_players']=arr
+        award_bonus(allp)
+        # bonus/fpl point fields are shared row dicts referenced in arrays.
+        out.append(mm)
+    return out
+
+
+def build_players(squads:dict[int,list[int]], selected_clubs:dict[int,Club], people:dict[int,Person], rich:list[dict[str,Any]]|None=None):
+    memberships=collections.defaultdict(list)
+    for ceid,eids in squads.items():
+        for eid in eids: memberships[eid].append(ceid)
+    # Resolve duplicate list membership from actual current-season rich match participation when available.
+    played_club={}
+    if rich:
+        name_to_eid={normalize_club_name(c.name):eid for eid,c in selected_clubs.items()}
+        name_to_eid.update({normalize_club_name(c.short):eid for eid,c in selected_clubs.items()})
+        for m in rich:
+            for side,key in [('home','home_players'),('away','away_players')]:
+                ceid=name_to_eid.get(normalize_club_name(m[side]))
+                if ceid is None:continue
+                for r in m[key]: played_club[int(r['player_id'])]=ceid
+    out=[]; unresolved=[]; ambiguous=[]
+    for eid,clubs in sorted(memberships.items()):
+        person=people.get(eid)
+        if not person:
+            unresolved.append(eid);continue
+        ceid=clubs[0]
+        if len(clubs)>1:
+            if played_club.get(eid) in clubs: ceid=played_club[eid]
+            else: ambiguous.append({'player_eid':eid,'club_eids':clubs})
+        c=selected_clubs[ceid]
+        pos=fantasy_position(person.positions)
+        out.append({'id':str(eid),'pid':str(eid),'name':person.display_name,'display_name':person.display_name,'public_name':person.display_name,'legal_name':person.name,'first_name':getattr(person,'first_name',None),'surname_name':getattr(person,'surname_name',None),'common_name':person.common_name,'first_name_id':getattr(person,'first_name_id',None),'surname_name_id':getattr(person,'surname_name_id',None),'common_name_id':getattr(person,'common_name_id',None),'identity_components_preserved':True,'name_component_evidence':{'legal_full':person.name,'first':getattr(person,'first_name',None),'surname_family':getattr(person,'surname_name',None),'common_known_as':person.common_name,'first_pool_id':getattr(person,'first_name_id',None),'surname_pool_id':getattr(person,'surname_name_id',None),'common_pool_id':getattr(person,'common_name_id',None),'nickname':None,'shirt_name':None,'preferred_short_name':None,'schema':'person_string_pools_v1'},'name_resolution_evidence':{'resolved_display':getattr(person,'display_name',None),'display_equals_legal':bool(getattr(person,'display_name',None) and getattr(person,'display_name',None)==person.name),'d
+### def _rich_decorate
+    'save_component_1':c[50],'save_component_2':c[51],'save_component_3':c[52],
+        'save_component_legacy_1':c[50],'save_component_legacy_2':c[51],'save_component_legacy_3':c[52],
+        'blocks':c[55],'assists':c[56],
+        'yellow_cards':c[63],'red_cards':c[64],'sub_off':c[67],'sub_on':c[71],
+        'sent_off_minute':c[74],'match_position_marker':c[77],
+        'passes_attempted':c[86],'passes_completed':c[87],
+        'tackles_attempted':c[92],'tackles_won':c[93],'key_tackles_candidate':c[94],
+        'headers_attempted':c[95],'headers_won':c[96],
+        'interceptions_candidate':c[97],'clearances_candidate':c[98],
+        'team_goals_while_on_pitch':c[145],'team_goals_conceded_while_on_pitch':c[146],
+        'possession_won_candidate':c[151],'possession_lost_candidate':c[152],
+        'shots_on_target_faced':c[157],
+        'rating_raw':rating,'rating':round(rating/100,1),'offset':p,
+    }
+    out['saves']=max(0,out['shots_on_target_faced']-out['goalkeeper_goals_conceded_from_sot'])
+    out['penalties_missed']=max(0,out['penalties_taken']-out['penalties_scored'])
+    out['is_goalkeeper_match_role']=out['match_position_marker']==4
+    out['goals_conceded']=out['team_goals_conceded_while_on_pitch']
+    out['cbit_candidate']=out['blocks']+out['tackles_won']+out['interceptions_candidate']+out['clearances_candidate']
+    out['mapping_confidence']={
+        'blocks':'exact-mirror','tackles_won':'strong-pair-and-ui-check',
+        'interceptions_candidate':'working-high','clearances_candidate':'working-high',
+        'possession_won_candidate':'working-high',
+    }
+    return out
+
+
+def _rich_scan_stats(buf:bytes,start:int,end:int):
+    out=[];p=start
+    while p<end-214:
+        if buf[p]==2:
+            r=_rich_stat_record_at(buf,p)
+            if r:
+                out.append(r);p+=140;continue
+        p+=1
+    return out
+
+
+def _rich_pick_two_squads(stats:list[dict[str,Any]]):
+    if len(stats)<40:return None
+    candidates=[]
+    for j in range(19,len(stats)-20):
+        gap=stats[j+1]['offset']-stats[j]['offset']
+        left=stats[j-19:j+1];right=stats[j+1:j+21]
+        max_l=max((left[k+1]['offset']-left[k]['offset'] for k in range(19)),default=0)
+        max_r=max((right[k+1]['offset']-right[k]['offset'] for k in range(19)),default=0)
+        if gap>800 and max_l<1200 and max_r<1200:candidates.append((gap,j,left,right))
+    if not candidates:return None
+    _,_,left,right=min(candidates,key=lambda x:x[2][0]['offset'])
+    return left,right
+
+
+def _rich_decorate(rows:list[dict[str,Any]]):
+    result=[]
+    for idx,r0 in enumerate(rows):
+        r=dict(r0);starter=idx<11
+        if starter:
+            r['appearance']='Started'
+            if r['sub_off']:
+                r['minutes']=r['sub_off'];r['appearance']+=f", off {r['sub_off']}'"
+            elif r['red_cards'] and r['sent_off_minute']:
+                r['minutes']=r['sent_off_minute'];r['appearance']+=f", sent off {r['sent_off_minute']}'"
+            else:r['minutes']=90
+        else:
+            if r['sub_on']:
+                r['appearance']=f"On {r['sub_on']}'";r['minutes']=max(0,90-r['sub_on'])
+            else:
+                r['appearance']='Unused';r['minutes']=0;r['rating']=None
+        result.append(r)
+    return result
+
+
+
+def _rich_header(buf:bytes,comp_pos:int,rich_team_names:dict[int,str],competition_text:bytes):
+    p=comp_pos+len(competition_text)
+    short,p2=_rich_read_lp_utf8(buf,p,80)
+    # FM stores a second competition label immediately after the long label. Accept the
+    # label generically; team identity and league fixture matching provide the validation.
+    if not short:return None
+    stadium=None;stadium_end=None
+    for q in range(p2,min(p2+120,len(buf)-8)):
+        text,nxt=_rich_read_lp_utf8(buf,q,80)
+        if text and len(text)>=3 and nxt+12<len(buf) and buf[nxt:nxt+2]==b'\x03\x02':
+            stadium=text;stadium_end=nxt;break
+    if not stadium:return None
+    q=stadium_end
+    if buf[q:q+2]!=b'\x03\x02' or buf[q+6]!=2:return None
+    home_tid=u32(buf,q+7)
+    marker=buf.find(b'\x00\x03\x02',q+11,q+70)
+    if marker<0 or buf[marker+7]!=2:return None
+    away_tid=u32(buf,marker+8)
+    home=rich_team_names.get(home_tid);away=rich_team_names.get(away_tid)
+    if not home or not away:return None
+    return {'stadium':stadium,'home':home,'away':away,'home_tid':home_tid,'away_tid':away_tid,'competition_short':short}
+
+
+def _rich_extract_member(buf:bytes,rich_team_names:dict[int,str],source_member:str):
+    matches=[]
+    for canonical,spec in SUPPORTED_LEAGUES.items():
+        for long_name in spec['long_names']:
+            competition=long_name.encode('utf-8')
+            comps=[];p=0
+            while True:
+                p=buf.find(competition,p)
+                if p<0:break
+                comps.append(p);p+=1
+            for i,pos in enumerate(comps):
+                header=_rich_header(buf,pos,rich_team_names,competition)
+                if not header:continue
+                nextpos=comps[i+1] if i+1<len(comps) else min(len(buf),pos+120_000)
+                end=min(nextpos,pos+120_000)
+                stats=_rich_scan_stats(buf,pos,end)
+                squads=_rich_pick_two_squads(stats)
+                if not squads:continue
+                hs,as_=squads
+                first_stat=min(hs[0]['offset'],as_[0]['offset'])
+                if first_stat<pos or first_stat-pos>5000:continue
+                home=_rich_decorate(hs);away=_rich_decorate(as_)
+                matches.append({**header,'competition':canonical,'competition_code':spec['code'],
+                    'home_score':sum(x['goals'] for x in home)+sum(x['own_goals'] for x in away),
+                    'away_score':sum(x['goals'] for x in away)+sum(x['own_goals'] for x in home),
+                    'home_players':home,'away_players':away,'offset':pos,'source_member':source_member})
+    # De-duplicate if a generic label appears inside a longer label.
+    out=[];seen=set()
+    for m in matches:
+        k=(m['competition'],m['home_tid'],m['away_tid'],m['home_score'],m['away_score'],
+           tuple(x['player_id'] for x in m['home_players']),tuple(x['player_id'] for x in m['away_players']))
+        if k in seen:continue
+        seen.add(k);out.append(m)
+    return out
+
+def rich_extract_named(save_path:Path,all_clubs:dict[int,Club])->list[dict[str,Any]]:
+    # Rich match copies live across labelled save members (news, play-fixture manager,
+    # and transient APM/SCM snapshots). Scan members one-at-a-time so the importer
+    # never needs the legacy ~500 MB whole-save decompression.
+    rich_team_names={c.uid+1:normalize_club_name(c.short or c.name) for c in all_clubs.values()}
+    _save,items=read_manifest(save_path)
+    raw=[]
+    for member in items:
+        if member.plain_len<=0 or member.plain_len>30_000_000:continue
+        buf=extract_member(save_path,member)
+        if b'Sky Bet Championship' not in buf:continue
+        raw.extend(_rich_extract_member(buf,rich_team_names,member.name))
+    ded=[];seen=set()
+    for m in raw:
+        key=(m['home'],m['away'],m['home_score'],m['away_score'],
+             tuple(x['player_id'] for x in m['home_players']),tuple(x['player_id'] for x in m['away_players']))
+        if key in seen:continue
+        seen.add(key);ded.append(m)
+    return ded
+
+def normalize_club_name(name:str)->str:
+    repl={'West Ham United':'West Ham Utd','Queens Park Rangers':'QPR','Sheffield United':'Sheffield Utd','West Bromwich Albion':'West Brom'}
+    return repl.get(name,name)
+
+
+def score_player(row:dict[str,Any],pos:str)->dict[str,Any]:
+    mins=row.get('minutes',0) or 0
+    app=2 if mins>=60 else 1 if mins>0 else 0
+    goals=row.get('goals',0) or 0; assists=row.get('assists',0) or 0
+    goal_pts=goals*({'GK':10,'DEF':6,'MID':5,'FWD':4}[pos])
+    assist_pts=assists*3
+    gc=row.get('team_goals_conceded_while_on_pitch',row.get('goals_conceded',0)) or 0
+    cs=0
+    if mins>=60 and gc==0: cs={'GK':4,'DEF':4,'MID':1,'FWD':0}[pos]
+    saves=row.get('saves',0) or 0
+    save_pts=(saves//3) if pos=='GK' else 0
+    gc_pts=-(gc//2) if pos in ('GK','DEF') and mins>0 else 0
+    reds=(row.get('red_cards',0) or 0); yellows=(row.get('yellow_cards',0) or 0); card_pts=(-3*reds) if reds else (-yellows)
+    pen_pts=-2*(row.get('penalties_missed',0) or 0)
+    og_pts=-2*(row.get('own_goals',0) or 0)
+    cbit=(row.get('blocks',0) or 0)+(row.get('tackles_won',0) or 0)+(row.get('interceptions_candidate',0) or 0)+(row.get('clearances_candidate',0) or 0)
+    recovery=row.get('possession_won_candidate',0) or 0
+    def_actions=cbit if pos=='DEF' else cbit+recovery
+    threshold=10 if pos=='DEF' else 12
+    def_pts=2 if pos!='GK' and def_actions>=threshold else 0
+    base=app+goal_pts+assist_pts+cs+save_pts+gc_pts+card_pts+pen_pts+og_pts+def_pts
+    # Transparent FM-derived BPS proxy: rank only; not claimed as official FPL BPS.
+    rating=float(row.get('rating') or 0)
+    proxy=round(rating*10 + goals*18 + assists*9 + cs*4 + saves*2 + def_actions*0.5 + base,1) if mins else 0.0
+    return {'appearance_pts':app,'goal_pts':goal_pts,'assist_pts':assist_pts,'clean_sheet_pts':cs,'save_pts':save_pts,'gc_pts':gc_pts,'card_pts':card_pts+pen_pts+og_pts,'defcon_actions':def_actions,'defcon_pts':def_pts,'base_points':base,'bps_proxy':proxy}
+
+
+def award_bonus(players:list[dict[str,Any]]):
+    active=[p for p in players if p.get('minutes',0)>0]
+    active.sort(key=lambda x:(x['bps_proxy'],x.get('rating') or 0,x.get('goals',0),x.get('assists',0)),reverse=True)
+    # Simple 3/2/1 proxy ranking. Ties intentionally resolve deterministically rather than emulating official BPS tie rules.
+    for p in players:p['bonus']=0
+    for pts,p in zip((3,2,1),active[:3]):p['bonus']=pts
+    for p in players:p['fpl_points']=p['base_points']+p['bonus']
+
+
+
+def _position_strengths(p:dict[str,Any]):
+    ps=p.get('positions') or {};v=lambda k:float(ps.get(k,0) or 0)
+    return {'GK':v('GK'),'DEF':max(v('SW'),v('DL'),v('DC'),v('DR'),v('WBL'),v('WBR')),
+            'MID':max(v('DM'),v('ML'),v('MC'),v('MR'),v('AML'),v('AMC'),v('AMR')),'FWD':v('ST')}
+
+def infer_hybrid_positions_from_match_markers(rich:list[dict[str,Any]],players_by_eid:dict[int,dict[str,Any]]):
+    """Self-calibrate FM's retained match-position marker from unambiguous players.
+
+    Marker 4 is already proven as goalkeeper. Other marker meanings can vary across
+    retained objects, so never hard-code them: learn a marker->FPL band mapping only
+    when the save itself gives a strong, repeated correlation. Then use that mapping
+    solely to resolve genuine DEF/MID hybrids; ordinary positions are left untouched.
+    """
+    marker_counts=collections.defaultdict(collections.Counter)
+    for m in rich:
+        for key in ('home_players','away_players'):
+            for r in m.get(key,[]):
+                p=players_by_eid.get(int(r.get('player_id') or 0));marker=int(r.get('match_position_marker') or 0)
+                if not p or not marker or marker==4 or float(r.get('minutes') or 0)<=0:continue
+                strengths=_position_strengths(p);order=sorted(strengths.items(),key=lambda x:x[1],reverse=True)
+                if order[0][1]<15 or order[0][1]-order[1][1]<3:continue
+                marker_counts[marker][order[0][0]]+=1
+    marker_roles={4:'GK'}
+    for marker,c in marker_counts.items():
+        total=sum(c.values())
+        if total<8:continue
+        role,n=c.most_common(1)[0]
+        if n/total>=0.80:marker_roles[marker]=role
+    usage=collections.defaultdict(collections.Counter)
+    for m in rich:
+        for key in ('home_players','away_players'):
+            for r in m.get(key,[]):
+                if float(r.get('minutes') or 0)<=0:continue
+                role=marker_roles.get(int(r.get('match_position_marker') or 0))
+                if role:usage[int(r.get('player_id') or 0)][role]+=1
+    changed=[]
+    for eid,c in usage.items():
+        p=players_by_eid.get(eid)
+        if not p:continue
+        st=_position_strengths(p)
+        if max(st['DEF'],st['MID'])<15:continue
+        dm=c['DEF']+c['MID']
+        if dm<2:continue
+        if c['MID']/dm>=0.80 and p.get('pos')!='MID':p['pos']='MID';p['position_source']='observed_midfield_usage_v63';changed.append(eid)
+        elif c['DEF']/dm>=0.80 and p.get('pos')!='DEF':p['pos']='DEF';p['position_source']='observed_defensive_usage_v63';changed.append(eid)
+    return {'marker_roles':marker_roles,'hybrid_players_reclassified':changed}
+
+def join_rich_matches(rich:list[dict[str,Any]],fixtures:list[dict[str,Any]],players_by_eid:dict[int,dict[str,Any]]):
+    infer_hybrid_positions_from_match_markers(rich,players_by_eid)
+    # Rich headers use another team-id namespace, so bind by normalized club names and the exact played schedule.
+    by_pair=collections.defaultdict(list)
+    for f in fixtures:
+        if f['status']=='played': by_pair[(f['home'],f['away'])].append(f)
+    out=[]
+    for mid,m in enumerate(rich,1):
+        home=normalize_club_name(m['home']); away=normalize_club_name(m['away'])
+        candidates=by_pair.get((home,away),[])
+        if m.get('date'):
+            dated=[f for f in candidates if f.get('date')==m.get('date')]
+            if dated:candidates=dated
+        # Score disambiguates the return fixture when needed.
+        candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates
+        if len(candidates)!=1: continue
+        fix=candidates[0]
+        mm={'id':mid,'match_id':mid,'fixture_id':fix['fixture_id'],'gameweek':fix['gameweek'],'date':fix['date'],'home':home,'away':away,'home_score':fix['home_score'],'away_score':fix['away_score'],'status':'played','source':'fm_rich_stats'}
+        allp=[]
+        for side,key,club,opp,venue in [('home','home_players',home,away,'H'),('away','away_players',away,home,'A')]:
+            arr=[]
+            for r in m[key]:
+                eid=int(r['player_id']); canon=players_by_eid.get(eid)
+                pos=canon['pos'] if canon else ('GK' if r.get('is_goalkeeper_match_role') else 'MID')
+                name=canon['name'] if canon else r.get('player',f'FM Player {eid}')
+                row=dict(r); row.update({'player_id':str(eid),'name':name,'club':club,'pos':pos,'opponent':opp,'venue':venue,'home':home,'away':away,'score':f"{fix['home_score']}-{fix['away_score']}",'gameweek':fix['gameweek'],'match_id':mid})
+                row.update(score_player(row,pos)); arr.append(row);allp.append(row)
+            mm[side+'_players']=arr
+        award_bonus(allp)
+        # bonus/fpl point fields are shared row dicts referenced in arrays.
+        out.append(mm)
+    return out
+
+
+def build_players(squads:dict[int,list[int]], selected_clubs:dict[int,Club], people:dict[int,Person], rich:list[dict[str,Any]]|None=None):
+    memberships=collections.defaultdict(list)
+    for ceid,eids in squads.items():
+        for eid in eids: memberships[eid].append(ceid)
+    # Resolve duplicate list membership from actual current-season rich match participation when available.
+    played_club={}
+    if rich:
+        name_to_eid={normalize_club_name(c.name):eid for eid,c in selected_clubs.items()}
+        name_to_eid.update({normalize_club_name(c.short):eid for eid,c in selected_clubs.items()})
+        for m in rich:
+            for side,key in [('home','home_players'),('away','away_players')]:
+                ceid=name_to_eid.get(normalize_club_name(m[side]))
+                if ceid is None:continue
+                for r in m[key]: played_club[int(r['player_id'])]=ceid
+    out=[]; unresolved=[]; ambiguous=[]
+    for eid,clubs in sorted(memberships.items()):
+        person=people.get(eid)
+        if not person:
+            unresolved.append(eid);continue
+        ceid=clubs[0]
+        if len(clubs)>1:
+            if played_club.get(eid) in clubs: ceid=played_club[eid]
+            else: ambiguous.append({'player_eid':eid,'club_eids':clubs})
+        c=selected_clubs[ceid]
+        pos=fantasy_position(person.positions)
+        out.append({'id':str(eid),'pid':str(eid),'name':person.display_name,'display_name':person.display_name,'public_name':person.display_name,'legal_name':person.name,'first_name':getattr(person,'first_name',None),'surname_name':getattr(person,'surname_name',None),'common_name':person.common_name,'first_name_id':getattr(person,'first_name_id',None),'surname_name_id':getattr(person,'surname_name_id',None),'common_name_id':getattr(person,'common_name_id',None),'identity_components_preserved':True,'name_component_evidence':{'legal_full':person.name,'first':getattr(person,'first_name',None),'surname_family':getattr(person,'surname_name',None),'common_known_as':person.common_name,'first_pool_id':getattr(person,'first_name_id',None),'surname_pool_id':getattr(person,'surname_name_id',None),'common_pool_id':getattr(person,'common_name_id',None),'nickname':None,'shirt_name':None,'preferred_short_name':None,'schema':'person_string_pools_v1'},'name_resolution_evidence':{'resolved_display':getattr(person,'display_name',None),'display_equals_legal':bool(getattr(person,'display_name',None) and getattr(person,'display_name',None)==person.name),'display_equals_common':bool(getattr(person,'display_name',None) and person.common_name and getattr(person,'display_name',None)==person.common_name),'display_contains_common':bool(getattr(person,'display_name',None) and person.common_name and person.common_name.casefold() in getattr(person,'display_name',None).casefold()),'display_contains_surname':bool(getattr(person,'display_name',None) and getattr(person,'surname_name',None) and getattr(person,'surname_name',None).casefold() in getattr(person,'display_name',None).casefold()),'source':'preserved_components_plus_current_resolver'},'preferred_name':person.common_name,'first_name':person.first_name,'surname':person.surname,'football_surname':person.surname,'legal_full_name':person.name,'club':normalize_club_name(c.short or c.name),'club_full':c.name,'club_eid':ceid,'pos':pos,'positions':{POSITION_NAMES[i]:v for i,v in enumerate(person.positions or [])},'ca':person.current_ability,'pa':person.potential_ability,'price':price_from_ca(pos,person.current_ability),'apps':0,'minutes':0,'goals':0,'assists':0,'yc':0,'rc':0,'saves':0,'gc':0,'starts':0,'avg_rating':0.0,'fantasy_points':0,'points':0,'form_points':0.0,'form':0.0,'history':[],'weekly_points':{},'visible':True,'available':True,'unresolved':False})
+    return out,unresolved,ambiguous
+
+
+def aggregate_player_history(players:list[dict[str,Any]],matches:list[dict[str,Any]]):
+    b
+### def infer_hybrid_positions_from_match_markers
+y]:
+    mins=row.get('minutes',0) or 0
+    app=2 if mins>=60 else 1 if mins>0 else 0
+    goals=row.get('goals',0) or 0; assists=row.get('assists',0) or 0
+    goal_pts=goals*({'GK':10,'DEF':6,'MID':5,'FWD':4}[pos])
+    assist_pts=assists*3
+    gc=row.get('team_goals_conceded_while_on_pitch',row.get('goals_conceded',0)) or 0
+    cs=0
+    if mins>=60 and gc==0: cs={'GK':4,'DEF':4,'MID':1,'FWD':0}[pos]
+    saves=row.get('saves',0) or 0
+    save_pts=(saves//3) if pos=='GK' else 0
+    gc_pts=-(gc//2) if pos in ('GK','DEF') and mins>0 else 0
+    reds=(row.get('red_cards',0) or 0); yellows=(row.get('yellow_cards',0) or 0); card_pts=(-3*reds) if reds else (-yellows)
+    pen_pts=-2*(row.get('penalties_missed',0) or 0)
+    og_pts=-2*(row.get('own_goals',0) or 0)
+    cbit=(row.get('blocks',0) or 0)+(row.get('tackles_won',0) or 0)+(row.get('interceptions_candidate',0) or 0)+(row.get('clearances_candidate',0) or 0)
+    recovery=row.get('possession_won_candidate',0) or 0
+    def_actions=cbit if pos=='DEF' else cbit+recovery
+    threshold=10 if pos=='DEF' else 12
+    def_pts=2 if pos!='GK' and def_actions>=threshold else 0
+    base=app+goal_pts+assist_pts+cs+save_pts+gc_pts+card_pts+pen_pts+og_pts+def_pts
+    # Transparent FM-derived BPS proxy: rank only; not claimed as official FPL BPS.
+    rating=float(row.get('rating') or 0)
+    proxy=round(rating*10 + goals*18 + assists*9 + cs*4 + saves*2 + def_actions*0.5 + base,1) if mins else 0.0
+    return {'appearance_pts':app,'goal_pts':goal_pts,'assist_pts':assist_pts,'clean_sheet_pts':cs,'save_pts':save_pts,'gc_pts':gc_pts,'card_pts':card_pts+pen_pts+og_pts,'defcon_actions':def_actions,'defcon_pts':def_pts,'base_points':base,'bps_proxy':proxy}
+
+
+def award_bonus(players:list[dict[str,Any]]):
+    active=[p for p in players if p.get('minutes',0)>0]
+    active.sort(key=lambda x:(x['bps_proxy'],x.get('rating') or 0,x.get('goals',0),x.get('assists',0)),reverse=True)
+    # Simple 3/2/1 proxy ranking. Ties intentionally resolve deterministically rather than emulating official BPS tie rules.
+    for p in players:p['bonus']=0
+    for pts,p in zip((3,2,1),active[:3]):p['bonus']=pts
+    for p in players:p['fpl_points']=p['base_points']+p['bonus']
+
+
+
+def _position_strengths(p:dict[str,Any]):
+    ps=p.get('positions') or {};v=lambda k:float(ps.get(k,0) or 0)
+    return {'GK':v('GK'),'DEF':max(v('SW'),v('DL'),v('DC'),v('DR'),v('WBL'),v('WBR')),
+            'MID':max(v('DM'),v('ML'),v('MC'),v('MR'),v('AML'),v('AMC'),v('AMR')),'FWD':v('ST')}
+
+def infer_hybrid_positions_from_match_markers(rich:list[dict[str,Any]],players_by_eid:dict[int,dict[str,Any]]):
+    """Self-calibrate FM's retained match-position marker from unambiguous players.
+
+    Marker 4 is already proven as goalkeeper. Other marker meanings can vary across
+    retained objects, so never hard-code them: learn a marker->FPL band mapping only
+    when the save itself gives a strong, repeated correlation. Then use that mapping
+    solely to resolve genuine DEF/MID hybrids; ordinary positions are left untouched.
+    """
+    marker_counts=collections.defaultdict(collections.Counter)
+    for m in rich:
+        for key in ('home_players','away_players'):
+            for r in m.get(key,[]):
+                p=players_by_eid.get(int(r.get('player_id') or 0));marker=int(r.get('match_position_marker') or 0)
+                if not p or not marker or marker==4 or float(r.get('minutes') or 0)<=0:continue
+                strengths=_position_strengths(p);order=sorted(strengths.items(),key=lambda x:x[1],reverse=True)
+                if order[0][1]<15 or order[0][1]-order[1][1]<3:continue
+                marker_counts[marker][order[0][0]]+=1
+    marker_roles={4:'GK'}
+    for marker,c in marker_counts.items():
+        total=sum(c.values())
+        if total<8:continue
+        role,n=c.most_common(1)[0]
+        if n/total>=0.80:marker_roles[marker]=role
+    usage=collections.defaultdict(collections.Counter)
+    for m in rich:
+        for key in ('home_players','away_players'):
+            for r in m.get(key,[]):
+                if float(r.get('minutes') or 0)<=0:continue
+                role=marker_roles.get(int(r.get('match_position_marker') or 0))
+                if role:usage[int(r.get('player_id') or 0)][role]+=1
+    changed=[]
+    for eid,c in usage.items():
+        p=players_by_eid.get(eid)
+        if not p:continue
+        st=_position_strengths(p)
+        if max(st['DEF'],st['MID'])<15:continue
+        dm=c['DEF']+c['MID']
+        if dm<2:continue
+        if c['MID']/dm>=0.80 and p.get('pos')!='MID':p['pos']='MID';p['position_source']='observed_midfield_usage_v63';changed.append(eid)
+        elif c['DEF']/dm>=0.80 and p.get('pos')!='DEF':p['pos']='DEF';p['position_source']='observed_defensive_usage_v63';changed.append(eid)
+    return {'marker_roles':marker_roles,'hybrid_players_reclassified':changed}
+
+def join_rich_matches(rich:list[dict[str,Any]],fixtures:list[dict[str,Any]],players_by_eid:dict[int,dict[str,Any]]):
+    infer_hybrid_positions_from_match_markers(rich,players_by_eid)
+    # Rich headers use another team-id namespace, so bind by normalized club names and the exact played schedule.
+    by_pair=collections.defaultdict(list)
+    for f in fixtures:
+        if f['status']=='played': by_pair[(f['home'],f['away'])].append(f)
+    out=[]
+    for mid,m in enumerate(rich,1):
+        home=normalize_club_name(m['home']); away=normalize_club_name(m['away'])
+        candidates=by_pair.get((home,away),[])
+        if m.get('date'):
+            dated=[f for f in candidates if f.get('date')==m.get('date')]
+            if dated:candidates=dated
+        # Score disambiguates the return fixture when needed.
+        candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates
+        if len(candidates)!=1: continue
+        fix=candidates[0]
+        mm={'id':mid,'match_id':mid,'fixture_id':fix['fixture_id'],'gameweek':fix['gameweek'],'date':fix['date'],'home':home,'away':away,'home_score':fix['home_score'],'away_score':fix['away_score'],'status':'played','source':'fm_rich_stats'}
+        allp=[]
+        for side,key,club,opp,venue in [('home','home_players',home,away,'H'),('away','away_players',away,home,'A')]:
+            arr=[]
+            for r in m[key]:
+                eid=int(r['player_id']); canon=players_by_eid.get(eid)
+                pos=canon['pos'] if canon else ('GK' if r.get('is_goalkeeper_match_role') else 'MID')
+                name=canon['name'] if canon else r.get('player',f'FM Player {eid}')
+                row=dict(r); row.update({'player_id':str(eid),'name':name,'club':club,'pos':pos,'opponent':opp,'venue':venue,'home':home,'away':away,'score':f"{fix['home_score']}-{fix['away_score']}",'gameweek':fix['gameweek'],'match_id':mid})
+                row.update(score_player(row,pos)); arr.append(row);allp.append(row)
+            mm[side+'_players']=arr
+        award_bonus(allp)
+        # bonus/fpl point fields are shared row dicts referenced in arrays.
+        out.append(mm)
+    return out
+
+
+def build_players(squads:dict[int,list[int]], selected_clubs:dict[int,Club], people:dict[int,Person], rich:list[dict[str,Any]]|None=None):
+    memberships=collections.defaultdict(list)
+    for ceid,eids in squads.items():
+        for eid in eids: memberships[eid].append(ceid)
+    # Resolve duplicate list membership from actual current-season rich match participation when available.
+    played_club={}
+    if rich:
+        name_to_eid={normalize_club_name(c.name):eid for eid,c in selected_clubs.items()}
+        name_to_eid.update({normalize_club_name(c.short):eid for eid,c in selected_clubs.items()})
+        for m in rich:
+            for side,key in [('home','home_players'),('away','away_players')]:
+                ceid=name_to_eid.get(normalize_club_name(m[side]))
+                if ceid is None:continue
+                for r in m[key]: played_club[int(r['player_id'])]=ceid
+    out=[]; unresolved=[]; ambiguous=[]
+    for eid,clubs in sorted(memberships.items()):
+        person=people.get(eid)
+        if not person:
+            unresolved.append(eid);continue
+        ceid=clubs[0]
+        if len(clubs)>1:
+            if played_club.get(eid) in clubs: ceid=played_club[eid]
+            else: ambiguous.append({'player_eid':eid,'club_eids':clubs})
+        c=selected_clubs[ceid]
+        pos=fantasy_position(person.positions)
+        out.append({'id':str(eid),'pid':str(eid),'name':person.display_name,'display_name':person.display_name,'public_name':person.display_name,'legal_name':person.name,'first_name':getattr(person,'first_name',None),'surname_name':getattr(person,'surname_name',None),'common_name':person.common_name,'first_name_id':getattr(person,'first_name_id',None),'surname_name_id':getattr(person,'surname_name_id',None),'common_name_id':getattr(person,'common_name_id',None),'identity_components_preserved':True,'name_component_evidence':{'legal_full':person.name,'first':getattr(person,'first_name',None),'surname_family':getattr(person,'surname_name',None),'common_known_as':person.common_name,'first_pool_id':getattr(person,'first_name_id',None),'surname_pool_id':getattr(person,'surname_name_id',None),'common_pool_id':getattr(person,'common_name_id',None),'nickname':None,'shirt_name':None,'preferred_short_name':None,'schema':'person_string_pools_v1'},'name_resolution_evidence':{'resolved_display':getattr(person,'display_name',None),'display_equals_legal':bool(getattr(person,'display_name',None) and getattr(person,'display_name',None)==person.name),'display_equals_common':bool(getattr(person,'display_name',None) and person.common_name and getattr(person,'display_name',None)==person.common_name),'display_contains_common':bool(getattr(person,'display_name',None) and person.common_name and person.common_name.casefold() in getattr(person,'display_name',None).casefold()),'display_contains_surname':bool(getattr(person,'display_name',None) and getattr(person,'surname_name',None) and getattr(person,'surname_name',None).casefold() in getattr(person,'display_name',None).casefold()),'source':'preserved_components_plus_current_resolver'},'preferred_name':person.common_name,'first_name':person.first_name,'surname':person.surname,'football_surname':person.surname,'legal_full_name':person.name,'club':normalize_club_name(c.short or c.name),'club_full':c.name,'club_eid':ceid,'pos':pos,'positions':{POSITION_NAMES[i]:v for i,v in enumerate(person.positions or [])},'ca':person.current_ability,'pa':person.potential_ability,'price':price_from_ca(pos,person.current_ability),'apps':0,'minutes':0,'goals':0,'assists':0,'yc':0,'rc':0,'saves':0,'gc':0,'starts':0,'avg_rating':0.0,'fantasy_points':0,'points':0,'form_points':0.0,'form':0.0,'history':[],'weekly_points':{},'visible':True,'available':True,'unresolved':False})
+    return out,unresolved,ambiguous
+
+
+def aggregate_player_history(players:list[dict[str,Any]],matches:list[dict[str,Any]]):
+    byid={int(p['pid']):p for p in players}
+    for m in matches:
+        for key in ('home_players','away_players'):
+            for r in m[key]:
+                p=byid.get(int(r['player_id']))
+                if not p:continue
+                h={k:r.get(k) for k in ['match_id','opponent','venue','score','home','away','minutes','goals','assists','yellow_cards','red_cards','rating','goals_conceded','saves','appearance_pts','goal_pts','assist_pts','clean_sheet_pts','save_pts','gc_pts','card_pts','defcon_actions','defcon_pts','bonus','bps_proxy','fpl_points','gameweek','own_goals','penalties_missed','match_position_marker']};h['date']=m.get('date')
+                h['yc']=h.pop('yellow_cards') or 0;h['rc']=h.pop('red_cards') or 0;h['gc']=h.pop('goals_conceded') or 0
+                p['history'].append(h)
+                mins=r.get('minutes',0) or 0
+                p['apps']+=1 if mins>0 else 0;p['minutes']+=mins;p['goals']+=r.get('goals',0) or 0;p['assists']+=r.get('assists',0) or 0;p['yc']+=r.get('yellow_cards',0) or 0;p['rc']+=r.get('red_cards',0) or 0;p['saves']+=r.get('saves',0) or 0;p['gc']+=r.get('team_goals_conceded_while_on_pitch',0) or 0;p['starts']+=1 if str(r.get('appearance','')).startswith('Started') else 0
+                p['fantasy_points']+=r.get('fpl_points',0) or 0;p['weekly_points'][str(r['gameweek'])]=p['weekly_points'].get(str(r['gameweek']),0)+(r.get('fpl_points',0) or 0)
+    for p in players:
+        ratings=[h['rating'] for h in p['history'] if h.get('rating')]
+        p['avg_rating']=round(sum(ratings)/len(ratings),2) if ratings else 0.0
+        recent=sorted(p['history'],key=lambda h:h['gameweek'])[-4:]
+        p['form_points']=round(sum(h.get('fpl_points',0) for h in recent)/len(recent),1) if recent else 0.0
+        p['points']=p['fantasy_points'];p['form']=p['form_points']
+        card_rows=[h for h in p['history'] if int(h.get('yc',0) or 0)>0 or int(h.get('rc',0) or 0)>0]
+        card_rows.sort(key=lambda h:(str(h.get('date') or ''),int(h.get('gameweek') or 0)))
+        _hist_rows=list(p.get('history') or [])
+        _hist_gws=sorted({int(h.get('gameweek') or 0) for h in _hist_rows if int(h.get('gameweek') or 0)>0})
+        _hist_dates=sorted({str(h.get('date')) for h in _hist_rows if h.get('date')})
+        p['retained_history_evidence']={
+            'decoded_rows':len(_hist_rows),
+            'decoded_gameweeks':_hist_gws,
+            'first_decoded_date':(_hist_dates[0] if _hist_dates else None),
+            'last_decoded_date':(_hist_dates[-1] if _hist_dates else None),
+            'history_is_partial_or_unknown':True,
+            'zero_stats_are_observed_only_within_decoded_rows':True,
+            'source':'decoded_rich_history'
+        }
+        p['discipline_evidence']={
+            'yellow_cards':int(p.get('yc',0) or 0),'red_cards':int(p.get('rc',0) or 0),
+            'history_rows':len(p.get('history') or []),
+            'last_card_date':(card_rows[-1].get('date') if card_rows else None),
+            'last_card_gameweek':(card_rows[-1].get('gameweek') if card_rows else None),
+            'source':'decoded_rich_history'
+        }
+
+
+
+
+
+def gameweek_schedule_meta(fixtures:list[dict[str,Any]], total_gameweeks:int|None=None)->dict[str,Any]:
+    max_gw=int(total_gameweeks or max((int(f.get('round_gameweek') or f.get('gameweek') or 0) for f in fixtures),default=46))
+    total=collections.Counter(int(f['gameweek']) for f in fixtures)
+    played=collections.Counter(int(f['gameweek']) for f in fixtures if f['status']=='played')
+    fully=[gw for gw in range(1,max_gw+1) if total[gw]>0 and played[gw]==total[gw]]
+    contiguous=0;fullset=set(fully)
+    for gw in range(1,max_gw+1):
+        if gw in fullset:contiguous=gw
+        else:break
+    latest_result=max((int(f['gameweek']) for f in fixtures if f['status']=='played'),default=0)
+    club_names=sorted({x for f in fixtures for x in (f.get('home'),f.get('away')) if x})
+    doubles={};blanks={}
+    for gw in range(1,max_gw+1):
+        apps=collections.Counter()
+        for f in fixtures:
+            if int(f['gameweek'])!=gw:continue
+            if f.get('home'):apps[f['home']]+=1
+            if f.get('away'):apps[f['away']]+=1
+        dg=sorted(c for c,n in apps.items() if n>1);bg=sorted(c for c in club_names if apps[c]==0)
+        if dg:doubles[str(gw)]=dg
+        if bg:blanks[str(gw)]=bg
+    return {'fixture_counts':{str(gw):total[gw] for gw in range(1,max_gw+1)},
+            'played_counts':{str(gw):played[gw] for gw in range(1,max_gw+1)},
+            'fully_completed':fully,'completed_contiguous':contiguous,'latest_result':latest_result,
+            'double_gameweek_clubs':doubles,'blank_gameweek_clubs':blanks,'total_gameweeks':max_gw}
+
+def build_table(fixtures:list[dict[str,Any]]) -> list[dict[str,Any]]:
+    clubs=sorted({x for f in fixtures for x in (f['home'],f['away'])})
+    st={c:{'club':c,'P':0,'W':0,'D':0,'L':0,'GF':0,'GA':0,'adjustment':(-4 if c=='Southampton' else 0)} for c in clubs}
+    for f in fixtures:
+        if f['status']!='played':continue
+        h,a=f['home'],f['away'];hg,ag=int(f['home_score']),int(f['away_score'])
+        sh,sa=st[h],st[a]
+        for x in (sh,sa):x['P']+=1
+        sh['GF']+=hg;sh['GA']+=ag;sa['GF']+=ag;sa['GA']+=hg
+        if hg>ag:sh['W']+=1;sa['L']+=1
+        elif ag>hg:sa['W']+=1;sh['L']+=1
+        else:sh['D']+=1;sa['D']+=1
+    rows=[]
+    for x in st.values():
+        x['GD']=x['GF']-x['GA'];x['Pts']=x['W']*3+x['D']+x['adjustment'];rows.append(x)
+    rows.sort(key=lambda x:(x['Pts'],x['GD'],x['GF']),reverse=True)
+    for i,x in enumerate(rows,1):x['position']=i
+    return rows
+
+
+def build_star_teams(players:list[dict[str,Any]],latest_gw:int)->dict[str,dict[str,Any]]:
+    out={}
+    formations=[]
+    for d in range(3,6):
+        for m in range(2,6):
+            f=10-d-m
+            if 1<=f<=3:formations.append((d,m,f))
+    for gw in range(1,max(1,latest_gw)+1):
+        bypos={pos:sorted((p for p in players if p.get('pos')==pos),key=lambda p:(int(p.get('weekly_points',{}).get(str(gw),0)),p.get('fantasy_points',0)),reverse=True) for pos in ('GK','DEF','MID','FWD')}
+        best=None
+        for d,m,f in formations:
+            picks=bypos['GK'][:1]+bypos['DEF'][:d]+bypos['MID'][:m]+bypos['FWD'][:f]
+            if len(picks)!=11 or len({p['id'] for p in picks})!=11:continue
+            pts=sum(int(p.get('weekly_points',{}).get(str(gw),0)) for p in picks)
+            if best is None or pts>best[0]:best=(pts,[p['id'] for p in picks],{'GK':1,'DEF':d,'MID':m,'FWD':f})
+        if best:out[str(gw)]={'points':best[0],'ids':best[1],'formation':best[2]}
+    return out
+
+def _build_payload(save_path:Path,fingerprint:str,db,fix:bytes,include_rich:bool=True)->dict[str,Any]:
+    all_clubs=scan_clubs(db)
+    rich_raw=rich_extract_named(save_path,all_clubs) if include_rich else []
+    comp_counts=collections.Counter(m.get('competition') for m in rich_raw if m.get('competition'))
+    requested_league=preferred_league if preferred_league in SUPPORTED_LEAGUES else None
+    preselect_rich=[m for m in rich_raw if (not requested_league or m.get('competition')==requested_league)]
+    expected_names={normalize_club_name(m[k]) for m in preselect_rich for k in ('home','away')} if (requested_league and preselect_rich) else None
+    fixtures,fixture_info=select_championship_fixtures(fix,all_clubs,expected_names,requested_league)
+    expected_league=fixture_info['competition']
+    rich_raw=[m for m in rich_raw if m.get('competition')==expected_league]
+    team_ids={x for f in fixtures for x in (f['home_tid'],f['away_tid'])}
+    shif
