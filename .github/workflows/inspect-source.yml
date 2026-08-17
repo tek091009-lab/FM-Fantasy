@@ -18,24 +18,16 @@ jobs:
           from pathlib import Path
           s=Path('/tmp/app.html').read_text(errors='replace')
           print('DECODED_LENGTH',len(s))
-          needles=['Gameweek Chips','Combined points','Total Gameweeks','Average points','id="teamPage"','id="starPage"','id="starXIPage"','teamGrid','rightPanel','chipsPanel','pitchCard','starGrid','starSide','sidePanel']
+          needles=['syncManagerProgressFromHistory','fmProcessCompletedGameweeks','gameweekLineups','completedGameweek','managerGameweekPoints','scoreGameweek','finalize','finalise','pointsHistory']
           for n in needles:
               print('\n===== NEEDLE:',n,'=====')
               start=0; count=0
-              while count<6:
+              while count<10:
                   i=s.find(n,start)
                   if i<0: break
-                  a=max(0,i-1200); b=min(len(s),i+1800)
-                  print(s[a:b].replace('\n',' '))
+                  a=max(0,i-2200); b=min(len(s),i+4200)
+                  print(s[a:b])
                   print('\n---')
                   start=i+len(n); count+=1
               if count==0: print('NO MATCH')
-          print('\n===== PAGE ID / GRID CLASS CANDIDATES =====')
-          import re
-          for m in re.finditer(r'<[^>]+id=["\'](?:teamPage|star[^"\']*Page)["\'][^>]*>',s,re.I): print(m.group(0))
-          print('\n===== CSS AROUND teamPage / starPage =====')
-          for n in ['#teamPage','.teamGrid','#starPage','#starXIPage','.starGrid','.sideCard','.rightPanel']:
-              print('\n###',n)
-              for m in list(re.finditer(re.escape(n),s))[:8]:
-                  print(s[max(0,m.start()-500):min(len(s),m.start()+1000)].replace('\n',' '))
           PY
