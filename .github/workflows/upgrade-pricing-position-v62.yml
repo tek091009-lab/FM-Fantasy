@@ -1,0 +1,33 @@
+name: Upgrade pricing and position v6.2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/upgrade_pricing_position_v62.py
+      - .github/workflows/upgrade-pricing-position-v62.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Patch embedded importer
+        run: python scripts/upgrade_pricing_position_v62.py
+      - name: Verify generated app
+        run: |
+          git diff --check
+          test -n "$(git status --short app/)"
+      - name: Commit generated production bundle
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/part* app/fix*
+          git commit -m "Apply v6.2 availability-aware pricing and observed positions"
+          git push origin HEAD:main
