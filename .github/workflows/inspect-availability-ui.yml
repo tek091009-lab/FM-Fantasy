@@ -1,0 +1,27 @@
+name: Inspect availability UI
+on:
+  push:
+    paths:
+      - '.github/workflows/inspect-availability-ui.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print availability evidence hooks
+        shell: bash
+        run: |
+          echo '===== availabilityevidence.js ====='
+          cat availabilityevidence.js || true
+          echo '\n===== importer availability refs ====='
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          for i,l in enumerate(html.splitlines(),1):
+            if re.search(r'injur|suspend|availability|status_flag|expected.back|return.date',l,re.I):
+              print(f'{i:05d}: {l[:2200]}')
+          PY
