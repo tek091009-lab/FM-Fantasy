@@ -1,0 +1,30 @@
+name: Inspect player price model
+on:
+  push:
+    paths:
+      - '.github/workflows/inspect-price-model.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect decoded price logic
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          lines=html.splitlines()
+          needles=['launch_price','price_change','priceDelta','current_price','price =','price:','pricing','market pricing','rise','fall','selling','sell','purchase','bought','price_history']
+          for n in needles:
+            hits=[i for i,l in enumerate(lines) if n.lower() in l.lower()]
+            if not hits: continue
+            print('\n===== '+n+f' ({len(hits)}) =====')
+            for i in hits[:30]:
+              for j in range(max(0,i-5),min(len(lines),i+12)): print(f'{j+1:05d}: {lines[j]}')
+              print('---')
+          PY
