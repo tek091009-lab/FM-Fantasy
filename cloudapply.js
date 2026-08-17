@@ -1,7 +1,9 @@
 (()=>{
  let done=false,timer=null,tries=0;
+ const CLEAR_KEY='fmFantasyCloudDatabaseCleared';
+ const wasCleared=()=>{try{return localStorage.getItem(CLEAR_KEY)==='1'||sessionStorage.getItem(CLEAR_KEY)==='1'}catch(_){return false}};
  async function applyCloudWorld(){
-   if(done||!window.FMCloud?.ready?.())return;
+   if(done||wasCleared()||!window.FMCloud?.ready?.())return;
    try{
      const payload=await window.FMCloud.loadWorld();
      if(!payload)return;
@@ -17,7 +19,7 @@
      console.info('FM Fantasy shared world applied',{players:payload.players?.length||0,fixtures:payload.fixtures?.length||0});
    }catch(e){console.error('FM Fantasy shared world apply failed',e)}
  }
- window.addEventListener('fmcloudready',()=>setTimeout(applyCloudWorld,0));
- timer=setInterval(()=>{tries++;applyCloudWorld();if(done||tries>40)clearInterval(timer)},500);
- setTimeout(applyCloudWorld,50);
+ window.addEventListener('fmcloudready',()=>{if(!wasCleared())setTimeout(applyCloudWorld,0)});
+ timer=setInterval(()=>{tries++;if(!wasCleared())applyCloudWorld();if(done||tries>40||wasCleared())clearInterval(timer)},500);
+ if(!wasCleared())setTimeout(applyCloudWorld,50);
 })();
