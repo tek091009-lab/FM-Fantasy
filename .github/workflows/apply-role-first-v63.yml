@@ -1,4 +1,4 @@
-name: Patch bundled News renderer
+name: Inspect current pricing and position model
 on:
   push:
     paths:
@@ -6,51 +6,31 @@ on:
 permissions:
   contents: write
 jobs:
-  patch:
+  inspect:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch real News renderer and toggle
+      - name: Extract current importer model snippets
         run: |
           python - <<'PY'
           from pathlib import Path
-          import base64,gzip
+          import base64,gzip,re
           parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
-          packed=''.join(p.read_text().strip() for p in parts)
-          html=gzip.decompress(base64.b64decode(packed)).decode('utf-8')
-
-          old="function renderNews(){const n=state.news;"
-          new="function renderNews(){const _newsCleared=(()=>{try{return localStorage.getItem('fmFantasyCloudDatabaseCleared')==='1'||sessionStorage.getItem('fmFantasyCloudDatabaseCleared')==='1'}catch(_){return false}})();const n=_newsCleared?null:state.news;"
-          if old not in html: raise SystemExit('renderNews marker missing')
-          html=html.replace(old,new,1)
-
-          old2="renderNewsCard('newsInjuries','Injuries',n?.injuries||state.activeStatuses?.injuries,'status');renderNewsCard('newsSuspensions','Suspensions',n?.suspensions||state.activeStatuses?.suspensions,'status')"
-          new2="renderNewsCard('newsInjuries','Injuries',_newsCleared?[]:(n?.injuries||state.activeStatuses?.injuries),'status');renderNewsCard('newsSuspensions','Suspensions',_newsCleared?[]:(n?.suspensions||state.activeStatuses?.suspensions),'status')"
-          if old2 not in html: raise SystemExit('status fallback marker missing')
-          html=html.replace(old2,new2,1)
-
-          old3="function applyImportedPayload(payload,mode='load'){"
-          new3="function applyImportedPayload(payload,mode='load'){try{if(payload&&Array.isArray(payload.players)&&payload.players.length){localStorage.removeItem('fmFantasyCloudDatabaseCleared');sessionStorage.removeItem('fmFantasyCloudDatabaseCleared')}}catch(_){}"
-          if old3 not in html: raise SystemExit('applyImportedPayload marker missing')
-          html=html.replace(old3,new3,1)
-
-          old4="if(x=e.target.closest('[data-news-toggle]')){const el=$(x.dataset.newsToggle),open=el&&!el.classList.contains('newsHidden');if(el)el.classList.toggle('newsHidden');x.textContent=open?`View all ${x.dataset.newsCount}`:'Show preview only';return}"
-          new4="if(x=e.target.closest('[data-news-toggle]')){if(window.FMNewsView?.openToggle?.(x))return;const el=$(x.dataset.newsToggle),open=el&&!el.classList.contains('newsHidden');if(el)el.classList.toggle('newsHidden');x.textContent=open?`View all ${x.dataset.newsCount}`:'Show preview only';return}"
-          if old4 not in html: raise SystemExit('news toggle handler marker missing')
-          html=html.replace(old4,new4,1)
-
-          if "_newsCleared?[]" not in html or "FMNewsView?.openToggle" not in html: raise SystemExit('verification failed')
-          out=base64.b64encode(gzip.compress(html.encode('utf-8'),compresslevel=9,mtime=0)).decode()
-          step=(len(out)+len(parts)-1)//len(parts)
-          for i,p in enumerate(parts): p.write_text(out[i*step:(i+1)*step]+'\n')
-          if ''.join(p.read_text().strip() for p in parts)!=out: raise SystemExit('repack mismatch')
-          print('patched real News renderer + real View all handler')
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8','replace')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
+          py=base64.b64decode(m.group(1)).decode('utf-8','replace')
+          out=[]
+          for needle in ['def reprice_players','def _calibrate_observed_hybrid_positions','marker_roles','observed_midfield_usage_v63','def aggregate_player_history']:
+              out.append('\n### '+needle+'\n')
+              pos=py.find(needle)
+              if pos>=0: out.append(py[max(0,pos-1000):min(len(py),pos+12000)])
+              else: out.append('NOT FOUND')
+          Path('_model_diag.txt').write_text(''.join(out))
           PY
-      - name: Commit production bundle
+      - name: Commit diagnostic
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add app/
-          git diff --cached --quiet && exit 0
-          git commit -m "Fix bundled News clear state and View all"
+          git add _model_diag.txt
+          git commit -m "Inspect current pricing and position source" || exit 0
           git push
