@@ -1,0 +1,64 @@
+name: Apply availability and pricing v6.1
+
+on:
+  push:
+    paths:
+      - 'scripts/upgrade_availability_pricing_v61.py'
+      - '.github/workflows/apply-availability-pricing-v61.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch production bundle
+        run: python scripts/upgrade_availability_pricing_v61.py .
+      - name: Verify production bundle
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
+          if not m:raise SystemExit('FM source not found')
+          py=base64.b64decode(m.group(1)).decode('utf-8')
+          compile(py,'fm_importer.py','exec')
+          required_py=[
+            '_structural_availability_from_fs',
+            'injury_manager.dat',
+            'discipline.dat',
+            'fpl-shaped-v61-tiered-distribution',
+            "p['ban_games_remaining']=games",
+            "elif pos=='GK':",
+            "elif pos=='DEF':",
+            "elif pos=='MID':",
+            'else: # FWD',
+            "c['position_price_rank']=i+1",
+          ]
+          missing=[x for x in required_py if x not in py]
+          if missing:raise SystemExit('missing python invariants '+repr(missing))
+          required_html=[
+            'function fmInferActiveSuspensions(payload){',
+            "status=String(p.suspension_status??'').toLowerCase()",
+            'p.banned_until??p.suspension_until??null',
+            'function fmInferActiveInjuries(payload){',
+            'playerStatusCorner(p)',
+            'playerStatusBoxes(p)',
+          ]
+          missing=[x for x in required_html if x not in html]
+          if missing:raise SystemExit('missing UI invariants '+repr(missing))
+          print('v6.1 availability + all-position pricing checks passed')
+          PY
+      - name: Commit production bundle
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/part* app/fix*
+          git commit -m 'Tighten pricing tiers and surface structural suspensions' || exit 0
+          git push
