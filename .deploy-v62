@@ -2,3 +2,4 @@ Trigger GitHub Pages from production bundle commit 03bb0c73f4bff279096c6a1faeb22
 Fresh Pages run after GitHub 503 / duplicate-artifact retry issue.
 Retry after Pages outage at 18:58 UK time.
 Retry cloud-clear fix after failed Pages publish at 19:11 UK time.
+Deploy verified role-band transfer-aware pricing bundle 4370c6f61c6c99aa78bc0acc143d5e66896b0a96.
