@@ -1,0 +1,3 @@
+apply_rc=1
+availability save-date anchor missing
+verify_rc=99
