@@ -1,0 +1,34 @@
+name: Unify history fixture consumption identity
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/upgrade_history_decoder_v58.py'
+      - '.github/workflows/upgrade-history-fixture-consumption-v58.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch embedded importer
+        run: python scripts/upgrade_history_decoder_v58.py
+      - name: Verify generated importer
+        run: |
+          git diff --check
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('scripts/history_recovery_v53.pyfrag').read_text()
+          assert "int(f.get('fixture_id') or 0) in used_fixtures" not in s
+          assert s.count('fixture_identity(f) in used_fixtures') >= 4
+          assert 'def fixture_identity(f):' in s
+          print('canonical fixture-consumption checks passed')
+          PY
+      - name: Commit production upgrade
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/history_recovery_v53.pyfrag app/part* app/fix*
+          git commit -m "Unify history fixture consumption identity"
+          git push origin HEAD:main
