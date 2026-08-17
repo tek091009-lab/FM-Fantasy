@@ -16,10 +16,12 @@ if count != 2:
 s=s.replace(old,"fixture_identity(f) in used_fixtures")
 
 # Protect the invariant so future decoder upgrades cannot silently mix key types again.
-if "int(f.get('fixture_id') or 0) in used_fixtures" in s:
+if old in s:
     raise RuntimeError('raw fixture-id used_fixtures guard remains')
-if s.count('fixture_identity(f) in used_fixtures') < 4:
-    raise RuntimeError('not all history recovery paths use canonical fixture identity')
+if s.count('fixture_identity(f) in used_fixtures') != 2:
+    raise RuntimeError('proposal guards were not converted to canonical fixture identity')
+if s.count('fid=fixture_identity(f)') < 2:
+    raise RuntimeError('loop-level canonical fixture identity checks are missing')
 
 p.write_text(s)
 subprocess.check_call([sys.executable,str(Path(__file__).with_name('upgrade_history_decoder.py'))])
