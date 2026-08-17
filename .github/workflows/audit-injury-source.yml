@@ -1,0 +1,54 @@
+name: Audit injury source
+on:
+  push:
+    paths:
+      - '.github/workflows/audit-injury-source.yml'
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode importer and status logic
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          out=[]
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
+          if not m: raise SystemExit('FM_PY_SOURCE_B64 not found')
+          py=base64.b64decode(m.group(1)).decode('utf-8')
+          needles=['injury_manager.dat','injury.dat','injury_status','injury_evidence','availability_save_date','injured_players','discipline.dat','suspended_players','suspension']
+          for n in needles:
+              out.append('\n===== PY '+n+' =====')
+              start=0;count=0
+              while count<20:
+                  i=py.lower().find(n.lower(),start)
+                  if i<0:break
+                  a=max(0,i-2500);b=min(len(py),i+5200)
+                  out.append(py[a:b]);out.append('\n---');start=i+len(n);count+=1
+              if count==0:out.append('NO MATCH')
+          for n in ['fmInferActiveInjuries','fmInferActiveSuspensions','playerStatusBadge','injury_evidence_structural','injury_status']:
+              out.append('\n===== JS '+n+' =====')
+              start=0;count=0
+              while count<15:
+                  i=html.lower().find(n.lower(),start)
+                  if i<0:break
+                  out.append(html[max(0,i-2200):min(len(html),i+5000)]);out.append('\n---');start=i+len(n);count+=1
+              if count==0:out.append('NO MATCH')
+          Path('_injury_source_audit.txt').write_text('\n'.join(out),encoding='utf-8')
+          PY
+      - name: Commit audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add _injury_source_audit.txt
+          git commit -m 'Record injury source audit' || exit 0
+          git push
