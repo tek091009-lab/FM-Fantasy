@@ -6,10 +6,19 @@ def _structural_availability_from_fs(players:list[dict[str,Any]],fixtures:list[d
     """
     fixtures=fixtures or []
     byid={int(p.get('pid') or p.get('id') or 0):p for p in players}
-    out={'decoder':'structural-v1','save_date':None,'injury_records':0,'injured_players':0,
+    out={'decoder':'structural-v2-fixture-floor','save_date':None,'injury_records':0,'injured_players':0,
          'suspension_records':0,'suspended_players':0,'injury_source':'injury_manager.dat',
          'suspension_source':'discipline.dat'}
     save_date=None
+    # Dates inside injury_manager.dat describe injury windows, not necessarily the current
+    # save date. The latest played league fixture is a hard lower bound for the save timeline.
+    # Never allow an older injury-table date to move the availability clock backwards.
+    fixture_dates=[]
+    for f in fixtures:
+        if f.get('status')!='played' or not f.get('date'):continue
+        try:fixture_dates.append(dt.date.fromisoformat(str(f['date'])[:10]))
+        except Exception:pass
+    fixture_floor=max(fixture_dates) if fixture_dates else None
 
     ip=Path('/tmp/injury_manager.dat')
     if ip.exists():
@@ -32,11 +41,12 @@ def _structural_availability_from_fs(players:list[dict[str,Any]],fixtures:list[d
                                 if d:future.append(d)
                             if past:save_date=max(past)
                             if save_date is None and future:save_date=min(future)
+                            if fixture_floor and (save_date is None or fixture_floor>save_date):save_date=fixture_floor
                             seen=set();recs=0
                             for i in range(c2):
                                 o=s2+i*14
                                 earliest=_fm_struct_date(u32(b,o+1));full=_fm_struct_date(u32(b,o+5));eid=u32(b,o+9)
-                                if not full or not save_date or full<save_date:continue
+                                if not full or not save_date or full<=save_date:continue
                                 p=byid.get(int(eid))
                                 if not p:continue
                                 days=max(0,(full-save_date).days)
@@ -49,13 +59,7 @@ def _structural_availability_from_fs(players:list[dict[str,Any]],fixtures:list[d
                             out['injury_records']=recs;out['injured_players']=len(seen)
         except Exception as e:out['injury_error']=str(e)[:220]
 
-    if save_date is None:
-        ds=[]
-        for f in fixtures:
-            if f.get('status')!='played' or not f.get('date'):continue
-            try:ds.append(dt.date.fromisoformat(str(f['date'])[:10]))
-            except Exception:pass
-        if ds:save_date=max(ds)
+    if fixture_floor and (save_date is None or fixture_floor>save_date):save_date=fixture_floor
     out['save_date']=save_date.isoformat() if save_date else None
 
     dp=Path('/tmp/discipline.dat')
@@ -74,7 +78,7 @@ def _structural_availability_from_fs(players:list[dict[str,Any]],fixtures:list[d
             seen=set();recs=0
             for s in starts:
                 eid=u32(b,s+1);expiry=_fm_struct_date(u32(b,s+14));p=byid.get(int(eid))
-                if not p or not expiry or (save_date and expiry<save_date):continue
+                if not p or not expiry or (save_date and expiry<=save_date):continue
                 # A row in discipline.dat is itself evidence of an active FM ban.
                 # Count unplayed league fixtures through the expiry date where possible,
                 # including a same-day fixture when the save was taken before kick-off.
