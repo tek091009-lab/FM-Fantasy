@@ -1,4 +1,4 @@
-name: Apply transfer-aware role-first pricing v6.3
+name: Inspect bundled News source
 on:
   push:
     paths:
@@ -6,32 +6,31 @@ on:
 permissions:
   contents: write
 jobs:
-  patch:
+  inspect:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply v6.3 patch
-        run: python scripts/upgrade_role_first_pricing_v63.py
-      - name: Verify generated bundle
+      - name: Extract News source
         run: |
           python - <<'PY'
           from pathlib import Path
           import base64,gzip,re
           parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
-          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
-          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
-          py=base64.b64decode(m.group(1)).decode()
-          req=['fpl-shaped-v63-role-bands-transfer-aware','new_arrival_unproven','observed_midfield_usage_v63','current_club_observed_matches','usage_role_floor','usage_role_cap']
-          miss=[x for x in req if x not in py]
-          if miss:raise SystemExit('missing '+repr(miss))
-          compile(py,'fm_importer.py','exec')
-          print('verified v6.3 role-band transfer-aware bundle')
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8','replace')
+          needles=['Show All','View All','renderNews','NEWS','newsList','newsPanel','news']
+          out=[]
+          for needle in needles:
+              out.append('\n### '+needle+'\n')
+              for m in list(re.finditer(re.escape(needle),html,re.I))[:30]:
+                  a=max(0,m.start()-700);b=min(len(html),m.end()+1400)
+                  out.append(html[a:b].replace('\n',' ')+'\n---\n')
+          Path('_news_bundle_diag.txt').write_text(''.join(out))
+          print('diag chars',len(''.join(out)))
           PY
-      - name: Commit production bundle
+      - name: Commit diagnostic
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add app/
-          git diff --cached --quiet && exit 0
-          git commit -m "Build role-band transfer-aware pricing v6.3"
+          git add _news_bundle_diag.txt
+          git commit -m "Inspect bundled News source" || exit 0
           git push
