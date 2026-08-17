@@ -1,0 +1,32 @@
+name: Inspect transfer bank state
+on:
+  push:
+    paths:
+      - '.github/workflows/inspect-transfer-bank-state.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect production transfer code
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          lines=html.splitlines()
+          needles=['bank','inBank','transferBank','Unlimited until first GW played','first GW','firstGameweek','completed_gameweek','current_gameweek','pendingTransfers','pendingOut','pendingIn','confirmTransfers','removePlayer','addPlayer','squadValue','100.0','100000','budget']
+          for needle in needles:
+              print('\n===== NEEDLE',needle,'=====')
+              hits=[i for i,l in enumerate(lines) if needle.lower() in l.lower()]
+              print('HITS',len(hits))
+              for i in hits[:60]:
+                  a=max(0,i-4); b=min(len(lines),i+7)
+                  print(f'--- lines {a+1}-{b} ---')
+                  for j in range(a,b): print(f'{j+1:05d}: {lines[j]}')
+          PY
