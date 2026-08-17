@@ -70,10 +70,6 @@
   }
 
   async function runCoreProgressFinaliser(){
-    /* loadServerImportState lives inside the production bundle and calls the
-       bundle's private fmProcessCompletedGameweeks() directly. External scripts
-       cannot safely call that private scorer themselves, so always enter via
-       this public core path. */
     if(typeof loadServerImportState==='function'){
       await loadServerImportState();
       return true;
@@ -126,6 +122,7 @@
       if(button){button.disabled=true;button.textContent='Refreshing…'}
       repairSequentialState();
       await finaliseOwnManagerProgress(true);
+      if(window.FMCloud?.isCreator?.()&&typeof window.fmCreatorFinaliseWorldManagers==='function')await window.fmCreatorFinaliseWorldManagers();
       if(typeof renderAll==='function')renderAll();
       if(button)button.textContent='Refreshed ✓';
       setTimeout(()=>{if(button){button.disabled=false;button.textContent=oldText}},1200);
@@ -145,7 +142,7 @@
     btn.textContent='↻ Refresh Data';
     btn.className=anchor.className||'';
     btn.style.marginLeft='8px';
-    btn.title='Reload the shared FM world and recalculate any missing completed Gameweek points';
+    btn.title='Reload the shared FM world and recalculate completed Gameweek points for the whole world';
     btn.addEventListener('click',()=>forceRefreshData(btn));
     anchor.insertAdjacentElement('afterend',btn);
   }
