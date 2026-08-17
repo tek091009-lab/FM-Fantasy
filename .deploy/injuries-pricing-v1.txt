@@ -1,0 +1,2 @@
+Deployment marker for the structural injury/suspension decoder and defender premium-price correction.
+The production bundle workflow will update this marker reference after its bot commit if a second user-authored Pages trigger is required.
