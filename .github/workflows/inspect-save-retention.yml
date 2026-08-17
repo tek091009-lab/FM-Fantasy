@@ -1,0 +1,25 @@
+name: Inspect save retention
+on:
+  push:
+    paths:
+      - '.github/workflows/inspect-save-retention.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print importer storage section
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          lines=html.splitlines()
+          for a,b in [(4190,4225),(4288,4325)]:
+            print(f'===== {a}-{b} =====')
+            for i in range(a-1,min(b,len(lines))): print(f'{i+1:05d}: {lines[i]}')
+          PY
