@@ -27,11 +27,13 @@ def safe_fragment()->str:
         raise RuntimeError('cohort single-vote safety patch not applied')
 
     # Some FM schema generations expose no useful fixture_id (or zero for many rows).
-    # The old matcher used fixture_id as the uniqueness key everywhere, so several valid
-    # fixtures could collapse onto key 0. Worse, the single-side bridge could mistake that
-    # collapse for a unique fixture. Use a structural key fallback instead: current fixture
-    # id when present, otherwise the calendar identity already decoded from FM.
+    # Rewrite the consumer sites BEFORE inserting fixture_key. The old implementation
+    # inserted the helper first and then globally replaced its own fid assignment,
+    # producing `fid=fixture_key(f)` inside fixture_key and infinite recursion.
     marker="    used_fixtures=set();used_candidates=set();out=[]\n\n"
+    frag=frag.replace("fid=int(f.get('fixture_id') or 0)","fid=fixture_key(f)")
+    frag=frag.replace("uniq={int(o[0].get('fixture_id') or 0):(o) for o in options}","uniq={fixture_key(o[0]):o for o in options}")
+    frag=frag.replace("if int(f.get('fixture_id') or 0) in used_fixtures:continue","if fixture_key(f) in used_fixtures:continue")
     helper=(
         "    used_fixtures=set();used_candidates=set();out=[]\n\n"
         "    def fixture_key(f):\n"
@@ -43,11 +45,10 @@ def safe_fragment()->str:
     )
     if marker not in frag:raise RuntimeError('fixture identity insertion marker not found')
     frag=frag.replace(marker,helper,1)
-    frag=frag.replace("fid=int(f.get('fixture_id') or 0)","fid=fixture_key(f)")
-    frag=frag.replace("uniq={int(o[0].get('fixture_id') or 0):(o) for o in options}","uniq={fixture_key(o[0]):o for o in options}")
-    frag=frag.replace("if int(f.get('fixture_id') or 0) in used_fixtures:continue","if fixture_key(f) in used_fixtures:continue")
     if "def fixture_key(f):" not in frag or "uniq={fixture_key(o[0]):o for o in options}" not in frag:
         raise RuntimeError('schema-safe fixture key patch not applied')
+    if "def fixture_key(f):\n        fid=fixture_key(f)" in frag:
+        raise RuntimeError('recursive fixture_key regression detected')
     if "int(o[0].get('fixture_id') or 0)" in frag:
         raise RuntimeError('unsafe zero fixture-id uniqueness remains')
     return frag.rstrip()+'\n\n'
@@ -62,8 +63,6 @@ def patch_importer(html:str)->str:
     if start<0 or end<0: raise RuntimeError('history recovery function markers not found')
     frag=safe_fragment()
     py2=py[:start]+frag+py[end:]
-    # Expose every universal-history path in Export Debug. This is intentionally optional
-    # for older payloads: missing counters read as zero and do not alter import behaviour.
     needle="'unlabelled_rich_propagation_matches':member_rich_diag.get('propagation_matches',0),"
     extra=(needle+"'unlabelled_rich_cohort_side_labels':member_rich_diag.get('cohort_side_labels',0),"
            "'unlabelled_rich_fixture_identity_matches':member_rich_diag.get('fixture_identity_matches',0),"
@@ -74,12 +73,9 @@ def patch_importer(html:str)->str:
            "'unlabelled_rich_adaptive_cluster_edges':member_rich_diag.get('adaptive_cluster_edges',0),"
            "'unlabelled_rich_adaptive_cluster_edges_rejected_conflict':member_rich_diag.get('adaptive_cluster_edges_rejected_conflict',0),")
     if needle in py2:
-        # Replace any previous shorter diagnostic expansion as well as the bare needle.
-        old_prefix=needle
         if 'unlabelled_rich_cohort_side_labels' not in py2:
             py2=py2.replace(needle,extra,1)
         else:
-            # Existing builds already contain the first v53 fields; append only new v55/v56 counters.
             anchor="'unlabelled_rich_identity_rounds':member_rich_diag.get('identity_rounds',0),"
             addition=(anchor+"'unlabelled_rich_ambiguous_seed_player_ids':member_rich_diag.get('ambiguous_seed_player_ids',0),"
                       "'unlabelled_rich_transfer_conflict_neutralized_players':member_rich_diag.get('transfer_conflict_neutralized_players',0),"
@@ -87,6 +83,8 @@ def patch_importer(html:str)->str:
                       "'unlabelled_rich_adaptive_cluster_edges_rejected_conflict':member_rich_diag.get('adaptive_cluster_edges_rejected_conflict',0),")
             if anchor in py2 and 'unlabelled_rich_adaptive_cluster_edges' not in py2:
                 py2=py2.replace(anchor,addition,1)
+    if "def fixture_key(f):\n        fid=fixture_key(f)" in py2:
+        raise RuntimeError('recursive fixture_key present in importer')
     compile(py2,'fm_importer.py','exec')
     new_b64=base64.b64encode(py2.encode()).decode()
     html2=html[:m.start(1)]+new_b64+html[m.end(1):]
