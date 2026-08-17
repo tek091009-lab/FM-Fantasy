@@ -1,3 +1,4 @@
-apply_rc=1
-availability save-date anchor missing
-verify_rc=99
+apply_rc=0
+structural availability timeline v2 applied to embedded Python importer
+availability timeline v2 verified
+verify_rc=0
