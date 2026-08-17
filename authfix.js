@@ -8,12 +8,15 @@
  function clearLegacyListeners(){['authLoginTab','authSignupTab','roleUser','roleCreator','authSubmit','authPassword'].forEach(id=>{const el=document.getElementById(id);if(!el||!el.parentNode)return;const c=el.cloneNode(true);el.parentNode.replaceChild(c,el)})}
  function normaliseManagerState(input){
   const out=JSON.parse(JSON.stringify(input||{}));
-  const sharedGw=Number(world?.payload?.meta?.current_gameweek||world?.payload?.meta?.next_gameweek||out.currentGameweek||out.entryGameweek||1)||1;
-  let entry=Number(out.entryGameweek||sharedGw)||sharedGw;if(entry<1)entry=sharedGw;
-  out.entryGameweek=entry;out.currentGameweek=Math.max(Number(out.currentGameweek||sharedGw)||sharedGw,sharedGw);
+  const fallbackGw=Number(out.currentGameweek||out.entryGameweek||1)||1;
+  let entry=Number(out.entryGameweek||fallbackGw)||fallbackGw;if(entry<1)entry=fallbackGw;
+  out.entryGameweek=entry;
   const h=Array.isArray(out.pointsHistory)?out.pointsHistory:[];out.pointsHistory=h.filter(x=>(Number(x?.gw)||0)>=entry);
+  const histDone=out.pointsHistory.length?Math.max(...out.pointsHistory.map(x=>Number(x?.gw)||0)):entry-1;
+  out.completedGameweek=Math.max(entry-1,histDone);
+  out.currentGameweek=Math.max(entry,out.completedGameweek+1);
   out.totalPoints=out.pointsHistory.reduce((n,x)=>n+Number(x?.net??x?.gross??0),0);
-  if(!out.pointsHistory.length)out.firstGameweekPlayed=false;
+  out.firstGameweekPlayed=out.pointsHistory.length>0;
   if(out.gameweekLineups&&typeof out.gameweekLineups==='object'&&!Array.isArray(out.gameweekLineups)){out.gameweekLineups=Object.fromEntries(Object.entries(out.gameweekLineups).filter(([k])=>(Number(k)||0)>=entry))}
   if(Array.isArray(out.leagues)){const uname=String(profile?.username||'').toLowerCase();for(const l of out.leagues){if(!Array.isArray(l?.members))continue;for(const m of l.members){if(m?.own||String(m?.name||'').toLowerCase()===uname){m.entryGameweek=entry;m.points=out.totalPoints;m.pointsHistory=[...out.pointsHistory];m.currentGameweek=out.currentGameweek}}}}
   return out;
