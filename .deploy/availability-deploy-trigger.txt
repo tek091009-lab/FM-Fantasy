@@ -1,0 +1,1 @@
+User-authored deployment trigger for the structural availability and defender pricing update. A post-patch trigger will be added after the production bundle commit.
