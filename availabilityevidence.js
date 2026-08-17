@@ -92,10 +92,12 @@
 
   function namingEvidence(p){
     const existing=p.name_component_evidence&&typeof p.name_component_evidence==='object'?p.name_component_evidence:{};
-    const legal=clean(p.legal_name||p.legal_full_name||p.full_name||existing.legal_name);
-    const first=clean(p.first_name||p.forename||existing.first_name);
-    const surname=clean(p.surname_name||p.football_surname||p.surname||p.family_name||p.last_name||existing.surname_name);
-    const common=clean(p.common_name||p.known_as||p.preferred_name||existing.common_name);
+    // v63 Python canonical keys are legal_full/first/surname_family/common_known_as.
+    // Retain compatibility with earlier evidence aliases rather than replacing them.
+    const legal=clean(p.legal_name||p.legal_full_name||p.full_name||existing.legal_name||existing.legal_full);
+    const first=clean(p.first_name||p.forename||existing.first_name||existing.first);
+    const surname=clean(p.surname_name||p.football_surname||p.surname||p.family_name||p.last_name||existing.surname_name||existing.surname_family);
+    const common=clean(p.common_name||p.known_as||p.preferred_name||existing.common_name||existing.common_known_as);
     const display=clean(p.public_name||p.canonical_display_name||p.football_display_name||p.display_name||p.name);
     const commonSurname=common&&surname&&common.toLowerCase()!==surname.toLowerCase()?`${common} ${surname}`:'';
     const lower=s=>clean(s).toLocaleLowerCase();
@@ -113,6 +115,7 @@
     else if(relation.display_equals_legal)resolvedRelationship='legal_exact';
     else if(relation.display_equals_common)resolvedRelationship='common_only_exact';
     else if(relation.display_contains_common&&relation.display_contains_surname)resolvedRelationship='common_and_surname_present';
+    const existingPoolIds=existing.component_pool_ids&&typeof existing.component_pool_ids==='object'?existing.component_pool_ids:{};
     return {
       legal_name:legal||null,
       first_name:first||null,
@@ -122,24 +125,26 @@
       shirt_name:clean(p.shirt_name||existing.shirt_name)||null,
       preferred_short_name:clean(p.preferred_short_name||existing.preferred_short_name)||null,
       resolved_display_name:display||null,
-      component_pool_ids:existing.component_pool_ids||{
-        first_name:p.first_name_pool_id??null,
-        surname:p.surname_pool_id??p.surname_name_pool_id??null,
-        common_name:p.common_name_pool_id??null
+      component_pool_ids:{
+        first_name:p.first_name_pool_id??p.first_name_id??existingPoolIds.first_name??existing.first_pool_id??null,
+        surname:p.surname_pool_id??p.surname_name_pool_id??p.surname_name_id??existingPoolIds.surname??existing.surname_pool_id??null,
+        common_name:p.common_name_pool_id??p.common_name_id??existingPoolIds.common_name??existing.common_pool_id??null
       },
       preserves_legal_identity_separately:!!legal&&!!display,
       common_plus_surname_candidate:commonSurname||null,
       relationship_evidence:relation,
       resolved_relationship:resolvedRelationship,
-      common_plus_surname_is_validated_by_display:resolvedRelationship==='common_plus_surname_exact'
+      common_plus_surname_is_validated_by_display:resolvedRelationship==='common_plus_surname_exact',
+      canonical_importer_components_consumed:!!(existing.legal_full||existing.first||existing.surname_family||existing.common_known_as),
+      schema:existing.schema||'compatible_name_evidence_v2'
     };
   }
 
   function annotatePlayers(){
     let players;
     try{players=typeof PLAYERS!=='undefined'&&Array.isArray(PLAYERS)?PLAYERS:null}catch(_){players=null}
-    if(!players)return {players:0,injuryObserved:0,suspensionObserved:0,availabilityUnknown:0,availabilityConflicts:0,nameEvidence:0,commonSurnameValidated:0};
-    const stats={players:0,injuryObserved:0,suspensionObserved:0,availabilityUnknown:0,availabilityConflicts:0,nameEvidence:0,commonSurnameValidated:0};
+    if(!players)return {players:0,injuryObserved:0,suspensionObserved:0,availabilityUnknown:0,availabilityConflicts:0,nameEvidence:0,commonSurnameValidated:0,canonicalNameComponentsConsumed:0};
+    const stats={players:0,injuryObserved:0,suspensionObserved:0,availabilityUnknown:0,availabilityConflicts:0,nameEvidence:0,commonSurnameValidated:0,canonicalNameComponentsConsumed:0};
     for(const p of players){
       if(!p||typeof p!=='object')continue;
       const injury=injuryEvidence(p),suspension=suspensionEvidence(p);
@@ -160,12 +165,13 @@
       if(overall==='conflict')stats.availabilityConflicts++;
       if(p.name_component_evidence.resolved_display_name)stats.nameEvidence++;
       if(p.name_component_evidence.common_plus_surname_is_validated_by_display)stats.commonSurnameValidated++;
+      if(p.name_component_evidence.canonical_importer_components_consumed)stats.canonicalNameComponentsConsumed++;
     }
     try{
       if(typeof FM_DEBUG!=='undefined'&&FM_DEBUG){
         FM_DEBUG.availabilityEvidence=stats;
         FM_DEBUG.availabilityEvidencePolicy='Unknown injury/ban state stays unknown; conflicting explicit fields stay conflict; decoded card history alone never creates an active suspension.';
-        FM_DEBUG.nameEvidencePolicy='Legal identity remains separate from football display identity; common/known-as + surname is only marked validated when the resolved display exactly confirms it.';
+        FM_DEBUG.nameEvidencePolicy='Legal identity remains separate from football display identity; v63 canonical name components are consumed when present; common/known-as + surname is only marked validated when the resolved display exactly confirms it.';
       }
     }catch(_){/* debug is optional */}
     return stats;
