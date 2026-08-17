@@ -1,3 +1,4 @@
+# trigger direct-evidence core availability replacement on default branch
 name: Apply core availability truth
 on:
   push:
