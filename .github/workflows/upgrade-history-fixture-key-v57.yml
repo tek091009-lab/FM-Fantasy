@@ -1,0 +1,35 @@
+name: Restore schema-safe history fixture identity
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/upgrade_history_decoder_v57.py'
+      - '.github/workflows/upgrade-history-fixture-key-v57.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch embedded importer
+        run: python scripts/upgrade_history_decoder_v57.py
+      - name: Verify generated importer
+        run: |
+          git diff --check
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('scripts/history_recovery_v53.pyfrag').read_text()
+          assert 'def fixture_identity(f):' in s
+          assert "('struct',int(f.get('home_tid') or 0)" in s
+          assert "fid=int(f.get('fixture_id') or 0)" not in s
+          assert s.count('fid=fixture_identity(f)') >= 2
+          print('schema-safe fixture identity checks passed')
+          PY
+      - name: Commit production upgrade
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/history_recovery_v53.pyfrag app/part* app/fix*
+          git commit -m "Persist schema-safe history fixture identity"
+          git push origin HEAD:main
