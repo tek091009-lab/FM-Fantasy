@@ -1,0 +1,26 @@
+{
+  "counts": {
+    "function fmAvailabilityTruthDate(payload){": 2,
+    "function fmAvailabilityTruthStale(payload){": 2,
+    "function fmInferActiveSuspensions(payload){": 1,
+    "function fmInferActiveInjuries(payload){": 1
+  },
+  "block_found": true,
+  "direct_tokens": {
+    "fmAvailabilityTruthStale": true,
+    "discipline.dat/active-ban-v1": true,
+    "injury_manager.dat/current-window": true
+  },
+  "forbidden": {
+    "5 yellow cards": false,
+    "second-yellow red": false,
+    "fmClubPlayedAfter(payload,p.club,inc.date)": false
+  },
+  "python_tokens": {
+    "structural-v2-fixture-floor": true,
+    "fixture_floor": true,
+    "full<=save_date": true,
+    "expiry<=save_date": true
+  },
+  "ok": false
+}
