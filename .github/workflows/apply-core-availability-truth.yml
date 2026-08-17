@@ -1,4 +1,4 @@
-# trigger direct-evidence core availability replacement on default branch
+# normalize the direct-evidence core availability block exactly once
 name: Apply core availability truth
 on:
   push:
@@ -30,7 +30,9 @@ jobs:
               assert t in block,t
           for bad in ['5 yellow cards','second-yellow red','fmClubPlayedAfter(payload,p.club,inc.date)']:
               assert bad not in block,bad
-          print('core direct-evidence availability truth verified')
+          for d in ['function fmAvailabilityTruthDate(payload){','function fmAvailabilityTruthStale(payload){','function fmInferActiveSuspensions(payload){','function fmInferActiveInjuries(payload){']:
+              assert html.count(d)==1,(d,html.count(d))
+          print('core direct-evidence availability truth verified exactly once')
           PY
       - name: Commit production bundle
         shell: bash
@@ -39,5 +41,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20
-          git commit -m 'Apply core direct-evidence availability truth' || exit 0
+          git commit -m 'Normalize core direct-evidence availability truth' || exit 0
           git push
