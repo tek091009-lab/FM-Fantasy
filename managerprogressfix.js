@@ -12,6 +12,13 @@
     return Number(sharedMeta().completed_gameweek||0);
   }
 
+  function historyCompletedGameweek(){
+    if(typeof state==='undefined')return 0;
+    const entry=Math.max(1,Number(state.entryGameweek||1));
+    const hist=Array.isArray(state.pointsHistory)?state.pointsHistory:[];
+    return hist.length?Math.max(...hist.map(x=>Number(x?.gw)||0),entry-1):entry-1;
+  }
+
   function ensureLineupSnapshot(gw){
     if(typeof state==='undefined'||!state?.teamConfirmed)return;
     if(!state.gameweekLineups||typeof state.gameweekLineups!=='object'||Array.isArray(state.gameweekLineups))state.gameweekLineups={};
@@ -63,31 +70,40 @@
       busy=true;
 
       let target=targetCompletedGameweek();
-      let done=Number(state.completedGameweek||0);
+      let done=historyCompletedGameweek();
       if(!target||target<=done){
         const changed=await refreshSharedWorldIfNeeded(false);
-        if(changed){target=targetCompletedGameweek();done=Number(state.completedGameweek||0)}
+        if(changed){target=targetCompletedGameweek();done=historyCompletedGameweek()}
       }
       if(!target||done>=target)return false;
 
-      for(let gw=done+1;gw<=target;gw++)ensureLineupSnapshot(gw);
+      /* A cloud manager must never be jumped to the shared world's NEXT GW before
+         their missing completed GW has actually been scored. Rewind to the first
+         unscored GW, then let the app's own finaliser advance normally. */
+      const entry=Math.max(1,Number(state.entryGameweek||1));
+      state.completedGameweek=done;
+      state.currentGameweek=Math.max(entry,done+1);
 
-      const fn=typeof window.syncManagerProgressFromHistory==='function'
-        ? window.syncManagerProgressFromHistory
-        : (typeof syncManagerProgressFromHistory==='function'?syncManagerProgressFromHistory:null);
-      if(!fn)return false;
+      for(let gw=state.currentGameweek;gw<=target;gw++)ensureLineupSnapshot(gw);
+
+      const processFn=typeof window.fmProcessCompletedGameweeks==='function'
+        ? window.fmProcessCompletedGameweeks
+        : (typeof fmProcessCompletedGameweeks==='function'?fmProcessCompletedGameweeks:null);
+      if(!processFn){console.warn('Manager progress finaliser unavailable');return false}
 
       const before={done,total:Number(state.totalPoints||0)};
-      fn();
-      await sleep(30);
-      const afterDone=Number(state.completedGameweek||0);
+      const processed=processFn()||[];
+      await sleep(50);
+      const afterDone=historyCompletedGameweek();
 
-      if(afterDone>before.done){
+      if(afterDone>before.done||processed.length){
+        state.completedGameweek=afterDone;
+        state.currentGameweek=Math.max(Number(state.currentGameweek||0),afterDone+1);
         if(typeof save==='function')save();
         window.FMCloud?.queueManagerSave?.(state);
         if(typeof renderAll==='function')renderAll();
         if(typeof renderLeagues==='function')renderLeagues();
-        window.dispatchEvent(new CustomEvent('fmmanagerprogressfinalised',{detail:{from:before.done,to:afterDone,total:Number(state.totalPoints||0)}}));
+        window.dispatchEvent(new CustomEvent('fmmanagerprogressfinalised',{detail:{from:before.done,to:afterDone,total:Number(state.totalPoints||0),processed:processed.length}}));
       }
       return afterDone>=target;
     }catch(e){console.warn('Manager progress finalisation failed',e);return false}
