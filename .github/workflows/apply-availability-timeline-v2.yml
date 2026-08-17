@@ -1,0 +1,38 @@
+name: Apply availability timeline v2
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-availability-timeline-v2.yml'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply importer patch
+        run: python scripts/upgrade_availability_timeline_v1.py
+      - name: Verify decoded importer
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
+          if not m: raise SystemExit('embedded importer missing')
+          py=base64.b64decode(m.group(1)).decode('utf-8')
+          for t in ['structural-v2-fixture-floor','fixture_floor','full<=save_date']:
+              if t not in py: raise SystemExit('missing '+t)
+          print('availability timeline v2 verified')
+          PY
+      - name: Commit production bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20
+          git commit -m 'Apply structural availability timeline v2' || exit 0
+          git push
