@@ -1,3 +1,4 @@
+# trigger structural availability timeline v2 on an existing default-branch workflow
 name: Apply availability timeline v2
 on:
   push:
