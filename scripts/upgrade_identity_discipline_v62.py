@@ -17,38 +17,44 @@ def repack(html:str)->None:
     for p,c in zip(PARTS,chunks): p.write_text(c+'\n')
 
 def patch_python(py:str)->str:
-    # Preserve FM name components at the point where their pool IDs are still available.
-    # Do not alter display_name here: existing canonical football-name normalization remains authoritative.
-    old="        out[eid]=Person(eid,uid,pat,name,cname,positions,ca,pa)"
-    new="""        person_obj=Person(eid,uid,pat,name,cname,positions,ca,pa)
-        person_obj.first_name=fore.get(first)
-        person_obj.surname_name=sur.get(surname)
-        person_obj.common_name_id=None if com==0xFFFFFFFF else com
-        person_obj.first_name_id=first
-        person_obj.surname_name_id=surname
-        out[eid]=person_obj"""
-    if old in py:
-        py=py.replace(old,new,1)
-    elif 'person_obj.first_name=fore.get(first)' not in py:
-        raise RuntimeError('bind_target_people identity anchor not found')
+    # Preserve FM name components where their pool IDs still exist. Match the current
+    # Person constructor structurally so this layers beside newer canonical naming logic.
+    if 'person_obj.first_name=fore.get(first)' not in py:
+        rx=re.compile(r'(?m)^(\s*)out\[eid\]=Person\(([^\n]+)\)\s*$')
+        m=rx.search(py)
+        if not m: raise RuntimeError('bind_target_people Person constructor not found')
+        ind,args=m.group(1),m.group(2)
+        replacement=(f"{ind}person_obj=Person({args})\n"
+                     f"{ind}person_obj.first_name=fore.get(first)\n"
+                     f"{ind}person_obj.surname_name=sur.get(surname)\n"
+                     f"{ind}person_obj.common_name_id=None if com==0xFFFFFFFF else com\n"
+                     f"{ind}person_obj.first_name_id=first\n"
+                     f"{ind}person_obj.surname_name_id=surname\n"
+                     f"{ind}out[eid]=person_obj")
+        py=py[:m.start()]+replacement+py[m.end():]
 
-    # Carry legal and component identities alongside the existing public/display name.
-    # This gives future schema-specific naming decoders evidence without another save scan.
-    anchor="'name':person.display_name,'display_name':person.display_name,'public_name':person.display_name,"
-    addition=("'name':person.display_name,'display_name':person.display_name,'public_name':person.display_name,"
-              "'legal_name':person.name,'first_name':getattr(person,'first_name',None),"
-              "'surname_name':getattr(person,'surname_name',None),'common_name':person.common_name,"
-              "'first_name_id':getattr(person,'first_name_id',None),'surname_name_id':getattr(person,'surname_name_id',None),"
-              "'common_name_id':getattr(person,'common_name_id',None),'identity_components_preserved':True,")
-    if anchor in py:
+    # Carry legal/component identity alongside whichever public/display string the current
+    # production naming strategy already selected. Do not replace or recalculate it.
+    if "'legal_name':person.name" not in py:
+        candidates=[
+            "'name':person.display_name,'display_name':person.display_name,'public_name':person.display_name,",
+            "'name':display_name,'display_name':display_name,'public_name':display_name,",
+            "'name':public_name,'display_name':public_name,'public_name':public_name,"
+        ]
+        anchor=next((a for a in candidates if a in py),None)
+        if not anchor: raise RuntimeError('build_players public-name payload anchor not found')
+        addition=(anchor+"'legal_name':person.name,'first_name':getattr(person,'first_name',None),"
+                  "'surname_name':getattr(person,'surname_name',None),'common_name':person.common_name,"
+                  "'first_name_id':getattr(person,'first_name_id',None),'surname_name_id':getattr(person,'surname_name_id',None),"
+                  "'common_name_id':getattr(person,'common_name_id',None),'identity_components_preserved':True,")
         py=py.replace(anchor,addition,1)
-    elif "'legal_name':person.name" not in py:
-        raise RuntimeError('build_players name payload anchor not found')
 
-    # Export exact discipline evidence already present in decoded rich match history.
-    # This deliberately does NOT infer a ban: competition rules and served-match state remain separate.
-    anchor2="        p['points']=p['fantasy_points'];p['form']=p['form_points']"
-    addition2="""        p['points']=p['fantasy_points'];p['form']=p['form_points']
+    # Export exact discipline evidence already present in decoded match history. No ban is
+    # inferred here: competition-specific thresholds and served-match state remain separate.
+    if "'discipline_evidence'" not in py:
+        anchor2="        p['points']=p['fantasy_points'];p['form']=p['form_points']"
+        if anchor2 not in py: raise RuntimeError('aggregate discipline anchor not found')
+        addition2="""        p['points']=p['fantasy_points'];p['form']=p['form_points']
         card_rows=[h for h in p['history'] if int(h.get('yc',0) or 0)>0 or int(h.get('rc',0) or 0)>0]
         card_rows.sort(key=lambda h:(str(h.get('date') or ''),int(h.get('gameweek') or 0)))
         p['discipline_evidence']={
@@ -58,10 +64,7 @@ def patch_python(py:str)->str:
             'last_card_gameweek':(card_rows[-1].get('gameweek') if card_rows else None),
             'source':'decoded_rich_history'
         }"""
-    if anchor2 in py:
         py=py.replace(anchor2,addition2,1)
-    elif "'discipline_evidence'" not in py:
-        raise RuntimeError('aggregate discipline anchor not found')
 
     for needle in ["'legal_name':person.name","'first_name':getattr(person,'first_name',None)","'surname_name':getattr(person,'surname_name',None)","'common_name':person.common_name","discipline_evidence","last_card_date","identity_components_preserved"]:
         if needle not in py: raise RuntimeError(f'missing invariant {needle}')
