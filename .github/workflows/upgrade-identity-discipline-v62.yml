@@ -1,0 +1,39 @@
+name: Preserve identity components and discipline evidence
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/upgrade_identity_discipline_v62.py'
+      - '.github/workflows/upgrade-identity-discipline-v62.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch embedded importer
+        run: python scripts/upgrade_identity_discipline_v62.py
+      - name: Verify generated importer
+        run: |
+          git diff --check
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
+          assert m
+          py=base64.b64decode(m.group(1)).decode()
+          for needle in ["'legal_name':person.name","'first_name':getattr(person,'first_name',None)","'surname_name':getattr(person,'surname_name',None)","'common_name':person.common_name","discipline_evidence","last_card_date","identity_components_preserved"]:
+              assert needle in py, needle
+          compile(py,'fm_importer.py','exec')
+          print('v62 identity/discipline checks passed')
+          PY
+      - name: Commit production upgrade
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/part* app/fix*
+          git commit -m "Preserve FM identity and discipline evidence"
+          git push origin HEAD:main
