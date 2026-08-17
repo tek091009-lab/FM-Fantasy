@@ -1,0 +1,45 @@
+name: Audit fantasy runtime state
+on:
+  push:
+    paths:
+      - '.github/workflows/audit-runtime-state.yml'
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode and inspect chips/transfers/status
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20 | base64 -d | gzip -dc > /tmp/app.html
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('/tmp/app.html').read_text(errors='replace')
+          out=['DECODED_LENGTH '+str(len(s))]
+          needles=['activeChip','chips:','chips.first','chips.second','triple','bench boost','wildcard','function activateChip','function useChip','function confirmTransfers','function confirmTeam','function save','queueManagerSave','function playerStatusBadge','fmInferActiveInjuries','fmInferActiveSuspensions']
+          for n in needles:
+              out.append('\n===== '+n+' =====')
+              start=0;count=0
+              while count<12:
+                  i=s.lower().find(n.lower(),start)
+                  if i<0:break
+                  out.append(s[max(0,i-1800):min(len(s),i+3600)])
+                  out.append('\n---')
+                  start=i+len(n);count+=1
+              if count==0:out.append('NO MATCH')
+          Path('_runtime_state_audit.txt').write_text('\n'.join(out),encoding='utf-8')
+          PY
+      - name: Commit audit output
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add _runtime_state_audit.txt
+          git commit -m 'Record runtime state audit' || exit 0
+          git push
