@@ -16,28 +16,20 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import base64,gzip,re
-          root=Path('.')
-          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
           html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
           m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
-          if not m:
-              raise SystemExit('FM_PY_SOURCE_B64 not found')
-          py=base64.b64decode(m.group(1)).decode('utf-8')
-          lines=py.splitlines()
-          print('PY_LENGTH',len(py),'LINES',len(lines))
-          needles=['injury','suspension','history','archive','manifest','game_db','Person(','class Person','bind_target_people','build_players','parse_','decode_','container','object','current_date','save_date']
+          if not m: raise SystemExit('FM_PY_SOURCE_B64 not found')
+          py=base64.b64decode(m.group(1)).decode('utf-8'); lines=py.splitlines()
+          needles=['def browser_build_payload_from_fs','recover_unlabelled_rich_members(','join_rich_matches(','infer_hybrid_positions_from_match_markers(','reprice_players(','injury.dat','injured_players','injury_status','injury_evidence_structural','discipline.dat','suspended_players']
+          seen=set()
           for needle in needles:
-              print('\n===== NEEDLE',needle,'=====')
-              hits=[i for i,l in enumerate(lines) if needle.lower() in l.lower()]
-              print('HITS',len(hits))
-              for i in hits[:40]:
-                  a=max(0,i-5); b=min(len(lines),i+9)
-                  print(f'--- lines {a+1}-{b} ---')
+              print('\n===== '+needle+' =====')
+              for i,l in enumerate(lines):
+                  if needle.lower() not in l.lower(): continue
+                  a=max(0,i-18);b=min(len(lines),i+35);key=(a,b)
+                  if key in seen: continue
+                  seen.add(key)
                   for j in range(a,b): print(f'{j+1:05d}: {lines[j]}')
-          print('\n===== DEFINITIONS =====')
-          for i,l in enumerate(lines):
-              if re.match(r'^\s*(?:class|def)\s+',l): print(f'{i+1:05d}: {l}')
-          print('\n===== STRING LITERALS WITH HISTORY / INJURY / SUSPENSION =====')
-          for i,l in enumerate(lines):
-              if re.search(r'["\'][^"\']*(?:injur|suspension|history|medical|ban)[^"\']*["\']',l,re.I): print(f'{i+1:05d}: {l}')
+                  print('---')
           PY
