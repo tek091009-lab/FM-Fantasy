@@ -1,0 +1,2 @@
+Deploy trigger for deterministic current-price transfer bank accounting.
+Production patch commit: 5b4a4676759ebfa45f204d09a2a3bfd9d2c15e37
