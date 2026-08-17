@@ -1,0 +1,42 @@
+name: Add date-aware transfer history evidence
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/upgrade_history_decoder_v61.py'
+      - '.github/workflows/upgrade-history-transfer-temporal-v61.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch embedded importer
+        run: python scripts/upgrade_history_decoder_v61.py
+      - name: Verify generated importer
+        run: |
+          git diff --check
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('scripts/history_recovery_v53.pyfrag').read_text()
+          for needle in [
+            'def fixture_identity(f):',
+            'near_duplicate_candidate_pairs_soft_collapsed',
+            'adaptive_cluster_edges',
+            'transfer_conflict_neutralized_players',
+            'confirmed_temporal_clubs=collections.defaultdict(list)',
+            'def temporal_side_evidence(ids,eid,date_value):',
+            "diagnostics['temporal_transfer_fixture_evidence']+=1",
+            '+temporal'
+          ]:
+            assert needle in s, needle
+          print('v61 date-aware transfer history checks passed')
+          PY
+      - name: Commit production upgrade
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/history_recovery_v53.pyfrag app/part* app/fix*
+          git commit -m "Add date-aware transfer history recovery"
+          git push origin HEAD:main
