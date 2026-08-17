@@ -23,8 +23,6 @@
    const fixtures=Array.isArray(payload?.fixtures)?payload.fixtures:[];
    for(let gw=done+1;gw<=latest;gw++){
      const rows=fixtures.filter(f=>fixtureGw(f)===gw);
-     // A calendar Gameweek with no league fixtures is a valid blank Fantasy GW:
-     // close it on zero points and continue to the next real scoring Gameweek.
      if(!rows.length){done=gw;continue}
      if(rows.every(fixturePlayed)){done=gw;continue}
      break;
@@ -39,9 +37,7 @@
    payload.meta.current_gameweek=target+1;
    payload.meta.next_gameweek=target+1;
    payload.meta.blank_gameweek_progression_fixed=true;
-   try{
-     if(typeof META!=='undefined'&&META){META.completed_gameweek=target;META.current_gameweek=target+1;META.next_gameweek=target+1}
-   }catch(_e){}
+   try{if(typeof META!=='undefined'&&META){META.completed_gameweek=target;META.current_gameweek=target+1;META.next_gameweek=target+1}}catch(_e){}
  }
  function doneGw(st){const entry=Math.max(1,num(st.entryGameweek)||1),h=Array.isArray(st.pointsHistory)?st.pointsHistory:[];return h.length?Math.max(entry-1,...h.map(x=>num(x?.gw))):entry-1;}
  function previousLineup(st,gw){
@@ -51,13 +47,33 @@
    const h=(Array.isArray(st.pointsHistory)?st.pointsHistory:[]).filter(x=>num(x?.gw)<gw&&Array.isArray(x?.starters)).sort((a,b)=>num(b.gw)-num(a.gw));
    return h.length?clone(h[0]):null;
  }
- function lineupFor(st,gw){
+ function recoverPriorWithLockedSquad(st,prior,map,gw){
+   if(!prior)return null;
+   prior.gw=Number(gw);
+   const locked=(Array.isArray(st.lockedSquad)&&st.lockedSquad.length===15?st.lockedSquad:Array.isArray(st.squad)&&st.squad.length===15?st.squad:null);
+   const oldSquad=[...(prior.squad||[])].map(String);
+   if(locked&&oldSquad.length){
+     const now=locked.map(String),outs=oldSquad.filter(id=>!now.includes(id)),ins=now.filter(id=>!oldSquad.includes(id));
+     if(outs.length===ins.length&&outs.length){
+       const remaining=[...ins],pairs=[];
+       for(const out of outs){let ix=remaining.findIndex(id=>pos(map,id)&&pos(map,id)===pos(map,out));if(ix<0)ix=0;const incoming=remaining.splice(ix,1)[0];if(incoming)pairs.push([out,incoming])}
+       const swap=arr=>[...(arr||[])].map(x=>{const p=pairs.find(([o])=>String(o)===String(x));return p?p[1]:String(x)});
+       prior.starters=swap(prior.starters);prior.bench=swap(prior.bench);prior.squad=now;
+     }else if(!outs.length&&!ins.length)prior.squad=now;
+   }
+   const squadSet=new Set((prior.squad||[]).map(String));
+   if(st.captain&&squadSet.has(String(st.captain)))prior.captain=String(st.captain);
+   if(st.vice&&squadSet.has(String(st.vice)))prior.vice=String(st.vice);
+   prior.chip=st.activeChip||prior.chip||null;
+   prior.hit=num(st.transferHitThisGW||prior.hit);
+   return prior;
+ }
+ function lineupFor(st,gw,map){
    const gl=st.gameweekLineups&&typeof st.gameweekLineups==='object'&&!Array.isArray(st.gameweekLineups)?st.gameweekLineups:{};
    const exact=gl[String(gw)]||gl[gw];
    if(exact&&Array.isArray(exact.starters)&&exact.starters.length===11)return clone(exact);
-   if(Array.isArray(st.starters)&&st.starters.length===11)return {gw:Number(gw),squad:[...(st.squad||st.lockedSquad||[])],starters:[...st.starters],bench:[...(st.bench||[])],captain:st.captain||null,vice:st.vice||null,chip:st.activeChip||null,hit:num(st.transferHitThisGW)};
-   const prior=previousLineup(st,gw);if(prior){prior.gw=Number(gw);return prior}
-   return null;
+   if(Array.isArray(st.starters)&&st.starters.length===11)return {gw:Number(gw),squad:[...(st.squad?.length===15?st.squad:st.lockedSquad||[])],starters:[...st.starters],bench:[...(st.bench||[])],captain:st.captain||null,vice:st.vice||null,chip:st.activeChip||null,hit:num(st.transferHitThisGW)};
+   return recoverPriorWithLockedSquad(st,previousLineup(st,gw),map,gw);
  }
  function applyAutosubs(map,lineup,gw){
    const start=[...(lineup.starters||[])].map(String),bench=[...(lineup.bench||[])].map(String);
@@ -118,7 +134,7 @@
        const st=clone(row.state);if(!st.teamConfirmed)continue;
        const entry=Math.max(1,num(st.entryGameweek)||1);let done=doneGw(st);
        for(let gw=Math.max(entry,done+1);gw<=target;gw++){
-         const lineup=lineupFor(st,gw);if(!lineup)break;
+         const lineup=lineupFor(st,gw,map);if(!lineup)break;
          const result=score(map,lineup,gw);if(!result)break;
          applyResult(st,lineup,result,gw);done=gw;
        }
