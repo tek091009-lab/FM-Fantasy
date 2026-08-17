@@ -1,27 +1,32 @@
 (()=>{
  'use strict';
- const VERSION='availability-truth-v1';
+ const VERSION='availability-truth-v2';
  const keysInjury=['injured','injury_status','injury','injury_name','injury_return_date','expected_return_date','injury_expected_back','injury_end_date','return_date','injury_evidence'];
  const keysSusp=['suspended','suspension_status','suspension_remaining','suspension_games_remaining','ban_games_remaining','banned_until','suspension_until','suspension_detail','suspension_evidence'];
  const clean=v=>String(v??'').trim();
  const num=v=>Number(v||0)||0;
  const metaFor=payload=>payload?.meta||(()=>{try{return typeof META!=='undefined'?META:{}}catch(_){return{}}})();
- const saveDate=payload=>clean(metaFor(payload)?.availability_save_date);
+ const truthy=v=>v===true||String(v).toLowerCase()==='true';
+ const refDate=payload=>clean(metaFor(payload)?.availability_reference_date||metaFor(payload)?.availability_save_date);
+ const stale=payload=>truthy(metaFor(payload)?.availability_data_stale);
  const returnDate=p=>clean(p?.injury_return_date??p?.expected_return_date??p?.injury_expected_back??p?.injury_end_date??p?.injury_evidence?.expected_return);
  const suspensionUntil=p=>clean(p?.banned_until??p?.suspension_until??p?.suspension_evidence?.until);
  function injuryValid(p,payload){
-   const src=clean(p?.injury_evidence?.source),sd=saveDate(payload),ret=returnDate(p);
+   if(stale(payload))return false;
+   const src=clean(p?.injury_evidence?.source),rd=refDate(payload),ret=returnDate(p),days=num(p?.injury_evidence?.days_remaining);
    if(!src.startsWith('injury_manager.dat/current-window'))return false;
-   if(sd&&ret&&ret<sd)return false;
-   if(num(p?.injury_evidence?.days_remaining)<0)return false;
+   if(ret&&rd&&ret<=rd)return false;
+   if(!ret&&days<=0)return false;
    return true;
  }
  function suspensionValid(p,payload){
-   const sd=saveDate(payload),until=suspensionUntil(p),src=clean(p?.suspension_evidence?.source).toLowerCase();
+   if(stale(payload))return false;
+   const rd=refDate(payload),until=suspensionUntil(p),src=clean(p?.suspension_evidence?.source).toLowerCase();
    const remaining=Math.max(num(p?.suspension_remaining),num(p?.suspension_games_remaining),num(p?.ban_games_remaining));
    if(remaining>0)return true;
-   if(p?.suspended===true&&until&&(!sd||until>=sd))return true;
-   if(src.includes('current')&&(!until||!sd||until>=sd))return true;
+   if(until&&rd&&until<=rd)return false;
+   if(p?.suspended===true&&until)return true;
+   if(src.includes('current')&&until)return true;
    return false;
  }
  function clearKeys(p,keys){for(const k of keys)try{delete p[k]}catch(_){}}
@@ -36,8 +41,8 @@
    }
    payload.meta=payload.meta||{};
    payload.meta.injured_players=injuries;payload.meta.suspended_players=suspensions;
-   payload.meta.availability_truth_policy='current-save direct evidence only; expired and heuristic-only statuses suppressed';
-   payload.meta.availability_truth_runtime={version:VERSION,injuries,suspensions,suppressed_injuries:suppressedInjuries,suppressed_suspensions:suppressedSuspensions};
+   payload.meta.availability_truth_policy='direct current-save evidence only; stale snapshots and expired dates are suppressed';
+   payload.meta.availability_truth_runtime={version:VERSION,reference_date:refDate(payload)||null,data_stale:stale(payload),injuries,suspensions,suppressed_injuries:suppressedInjuries,suppressed_suspensions:suppressedSuspensions};
    return payload;
  }
  function fmt(v){if(!v)return'';try{const d=new Date(String(v).length<=10?String(v)+'T12:00:00':v);return Number.isNaN(d.getTime())?String(v):d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}catch(_){return String(v)}}
@@ -45,10 +50,8 @@
  function activeSuspensions(payload){sanitizePayload(payload);const out=[];for(const p of payload?.players||[]){if(!suspensionValid(p,payload))continue;const remaining=Math.max(num(p?.suspension_remaining),num(p?.suspension_games_remaining),num(p?.ban_games_remaining)),until=suspensionUntil(p);out.push({pid:String(p.pid),name:(typeof playerName==='function'?playerName(p):p.name),club:p.club,pos:p.pos,detail:`Suspended${remaining?` · ${remaining} match${remaining===1?'':'es'} remaining`:until?` · until ${fmt(until)}`:''}`})}return out}
  function install(){
    try{globalThis.fmInferActiveInjuries=activeInjuries;globalThis.fmInferActiveSuspensions=activeSuspensions}catch(_){ }
-   let payload=window.FMCloud?.getWorld?.()?.payload||null;
-   if(payload)sanitizePayload(payload);
-   try{if(typeof PLAYERS!=='undefined'&&Array.isArray(PLAYERS)){sanitizePayload({players:PLAYERS,meta:metaFor(payload)});}}
-   catch(_){ }
+   const payload=window.FMCloud?.getWorld?.()?.payload||null;if(payload)sanitizePayload(payload);
+   try{if(typeof PLAYERS!=='undefined'&&Array.isArray(PLAYERS))sanitizePayload({players:PLAYERS,meta:metaFor(payload)})}catch(_){ }
    try{if(typeof renderAll==='function')renderAll();else if(typeof renderNews==='function')renderNews()}catch(_){ }
  }
  window.FMAvailabilityTruth={version:VERSION,sanitizePayload,injuryValid,suspensionValid,activeInjuries,activeSuspensions};
