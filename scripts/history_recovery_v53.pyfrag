@@ -322,7 +322,7 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
         for _margin,_score,ci,best in proposals:
             if ci in used_candidates:continue
             _,_,f,rev,leid,reid=best
-            if int(f.get('fixture_id') or 0) in used_fixtures:continue
+            if fixture_identity(f) in used_fixtures:continue
             if register_match(ci,f,rev,leid,reid,'unlabelled_retained_fixture_identity'):
                 added+=1;diagnostics['fixture_identity_matches']+=1
         return added
@@ -350,7 +350,7 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
         proposals.sort(reverse=True)
         added=0
         for _strength,ci,f,rev,leid,reid in proposals:
-            if ci in used_candidates or int(f.get('fixture_id') or 0) in used_fixtures:continue
+            if ci in used_candidates or fixture_identity(f) in used_fixtures:continue
             if register_match(ci,f,rev,leid,reid,'unlabelled_retained_single_side_bridge'):
                 added+=1;diagnostics['single_side_bridge_matches']+=1
         return added
