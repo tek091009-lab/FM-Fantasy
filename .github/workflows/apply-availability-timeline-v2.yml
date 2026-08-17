@@ -1,4 +1,4 @@
-# run once on an existing default-branch workflow and always record the result
+# apply corrected embedded-Python timeline patch and always record the result
 name: Apply availability timeline v2
 on:
   push:
@@ -30,7 +30,7 @@ jobs:
           m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
           assert m,'embedded importer missing'
           py=base64.b64decode(m.group(1)).decode('utf-8')
-          for t in ['structural-v2-fixture-floor','fixture_floor','full<=save_date']:
+          for t in ['structural-v2-fixture-floor','fixture_floor','full<=save_date','expiry<=save_date']:
               assert t in py,'missing '+t
           print('availability timeline v2 verified')
           PY
