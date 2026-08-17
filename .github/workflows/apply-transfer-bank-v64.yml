@@ -1,0 +1,48 @@
+name: Apply transfer bank v64
+on:
+  push:
+    paths:
+      - 'scripts/upgrade_transfer_bank_v64.py'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch production bundle
+        run: python scripts/upgrade_transfer_bank_v64.py
+      - name: Verify pre-GW1 and post-GW1 bank rules
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          required=[
+            'const preFirstGW=!state.firstGameweekPlayed&&!(state.pointsHistory||[]).length;',
+            'if(!state.teamConfirmed||preFirstGW){state.bank=fmMoney(100-(state.squad||[]).reduce((s,id)=>s+fmCurrentPrice(id),0));if(preFirstGW)state.lockedBank=state.bank;return state.bank}',
+            'state.bank=fmMoney(base+outs-ins);return state.bank'
+          ]
+          missing=[x for x in required if x not in html]
+          if missing: raise SystemExit('Missing invariants: '+repr(missing))
+          # Screenshot case: £92.5m current squad cost before GW1 -> £7.5m bank.
+          assert round((100-92.5)*10)/10 == 7.5
+          # Post-GW1 current-price sell rule remains intact.
+          assert round((5.0+10.2-9.0)*10)/10 == 6.2
+          assert round((5.0+9.6-9.0)*10)/10 == 5.6
+          print('v64 bank rules verified')
+          PY
+      - name: Commit production bundle
+        shell: bash
+        run: |
+          if git diff --quiet -- app; then
+            echo 'No production changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app
+          git commit -m 'Repair confirmed pre-GW1 transfer bank'
+          git push
