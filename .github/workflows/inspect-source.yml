@@ -18,14 +18,14 @@ jobs:
           from pathlib import Path
           s=Path('/tmp/app.html').read_text(errors='replace')
           print('DECODED_LENGTH',len(s))
-          needles=['syncManagerProgressFromHistory','fmProcessCompletedGameweeks','gameweekLineups','completedGameweek','managerGameweekPoints','scoreGameweek','finalize','finalise','pointsHistory']
+          needles=['function renderTeam','function renderTransferPitch','function renderMarket','function pby','club_eid','kit','shirt','clubFilter','refreshClubFilters','function applyImportedPayload','fmMergeHistorical','fmDiff','club_full','CLUBS']
           for n in needles:
               print('\n===== NEEDLE:',n,'=====')
               start=0; count=0
-              while count<10:
+              while count<14:
                   i=s.find(n,start)
                   if i<0: break
-                  a=max(0,i-2200); b=min(len(s),i+4200)
+                  a=max(0,i-2600); b=min(len(s),i+5200)
                   print(s[a:b])
                   print('\n---')
                   start=i+len(n); count+=1
