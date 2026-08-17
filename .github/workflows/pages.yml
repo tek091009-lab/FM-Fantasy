@@ -27,16 +27,16 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify live FM Fantasy build
+      - name: Deep-verify live FM Fantasy build
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
           set -euo pipefail
-          url="${PAGE_URL%/}/index.html?sha=${GITHUB_SHA}"
+          base="${PAGE_URL%/}"
           ok=0
-          for i in $(seq 1 12); do
-            body="$(curl -fsSL --max-time 15 "$url" || true)"
+          for attempt in $(seq 1 12); do
+            body="$(curl -fsSL --max-time 20 "$base/index.html?sha=${GITHUB_SHA}" || true)"
             if printf '%s' "$body" | grep -q 'authfix.js?v=12' \
               && printf '%s' "$body" | grep -q 'availabilitytruth.js?v=3' \
               && printf '%s' "$body" | grep -q 'updateguard.js?v=2' \
@@ -51,9 +51,44 @@ jobs:
             sleep 5
           done
           if [ "$ok" -ne 1 ]; then
-            echo 'Live Pages smoke test did not see the final weekly stability build.' >&2
+            echo 'Live index did not expose the final stability scripts.' >&2
             exit 1
           fi
+
+          auth="$(curl -fsSL --max-time 20 "$base/authfix.js?v=12&sha=${GITHUB_SHA}")"
+          availability="$(curl -fsSL --max-time 20 "$base/availabilitytruth.js?v=3&sha=${GITHUB_SHA}")"
+          canonical="$(curl -fsSL --max-time 20 "$base/canonicalpublish.js?v=1&sha=${GITHUB_SHA}")"
+          identity="$(curl -fsSL --max-time 20 "$base/identityguard.js?v=3&sha=${GITHUB_SHA}")"
+          scorer="$(curl -fsSL --max-time 20 "$base/worldscorefix.js?v=5&sha=${GITHUB_SHA}")"
+          draft="$(curl -fsSL --max-time 20 "$base/draftrecovery.js?v=2&sha=${GITHUB_SHA}")"
+
+          printf '%s' "$auth" | grep -q 'fmFantasyWorldVersion'
+          printf '%s' "$auth" | grep -q 'payload_version'
+          printf '%s' "$availability" | grep -q 'availability-truth-v3'
+          printf '%s' "$availability" | grep -q 'discipline.dat/active-ban-v1'
+          printf '%s' "$canonical" | grep -q 'canonical-publish-v1'
+          printf '%s' "$identity" | grep -q 'diagnostic-only'
+          printf '%s' "$scorer" | grep -q 'reconcileUsedChips'
+          printf '%s' "$scorer" | grep -q "includes('triple')"
+          printf '%s' "$draft" | grep -q 'ids(s.squad).length===15'
+
+          : > /tmp/live_parts.b64
+          for i in $(seq -w 0 16); do curl -fsSL --max-time 20 "$base/app/part${i}?sha=${GITHUB_SHA}" >> /tmp/live_parts.b64; done
+          for i in 17 18 19 20; do curl -fsSL --max-time 20 "$base/app/fix${i}?sha=${GITHUB_SHA}" >> /tmp/live_parts.b64; done
+          tr -d '\r\n ' < /tmp/live_parts.b64 | base64 -d | gzip -dc > /tmp/live_app.html
+          python - <<'PY'
+          from pathlib import Path
+          import base64,re
+          html=Path('/tmp/live_app.html').read_text(encoding='utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
+          assert m,'live embedded importer missing'
+          py=base64.b64decode(m.group(1)).decode('utf-8')
+          for token in ['structural-v2-fixture-floor','fixture_floor','full<=save_date','expiry<=save_date']:
+              assert token in py,'live importer missing '+token
+          assert "suspension_evidence_structural" in py
+          assert "discipline.dat/active-ban-v1" in py
+          print('deep live stability verification passed')
+          PY
       - name: Record verified live deployment
         shell: bash
         env:
@@ -61,18 +96,18 @@ jobs:
         run: |
           set -euo pipefail
           stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"authfix\": \"v12-authoritative-cloud\",\n  \"availability_truth\": \"v3-direct-structural-evidence\",\n  \"update_guard\": \"v2\",\n  \"canonical_publish\": \"v1\",\n  \"identity_guard\": \"v3-diagnostic-only\",\n  \"world_scorer\": \"v5-chip-persistence\",\n  \"draft_recovery\": \"v2\",\n  \"capability_consistency\": \"v1\"\n}\n' "$GITHUB_SHA" "$stamp")"
+          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"verification\": \"deep-live-index-scripts-and-embedded-importer\",\n  \"authfix\": \"v12-authoritative-cloud\",\n  \"availability_truth\": \"v3-direct-structural-evidence\",\n  \"embedded_availability_decoder\": \"structural-v2-fixture-floor\",\n  \"update_guard\": \"v2\",\n  \"canonical_publish\": \"v1\",\n  \"identity_guard\": \"v3-diagnostic-only\",\n  \"world_scorer\": \"v5-chip-persistence\",\n  \"draft_recovery\": \"v2\",\n  \"capability_consistency\": \"v1\"\n}\n' "$GITHUB_SHA" "$stamp")"
           content="$(printf '%s' "$json" | base64 -w0)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
             gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" \
-              -f message="Record verified Pages deployment ${GITHUB_SHA::7}" \
+              -f message="Record deeply verified Pages deployment ${GITHUB_SHA::7}" \
               -f content="$content" \
               -f sha="$existing_sha" \
               -f branch=main >/dev/null
           else
             gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" \
-              -f message="Record verified Pages deployment ${GITHUB_SHA::7}" \
+              -f message="Record deeply verified Pages deployment ${GITHUB_SHA::7}" \
               -f content="$content" \
               -f branch=main >/dev/null
           fi
