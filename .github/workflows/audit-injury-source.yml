@@ -1,4 +1,4 @@
-# refresh exact structural availability function from the current production bundle
+# verify structural availability v2 from the current production bundle
 name: Audit injury source
 on:
   push:
@@ -28,8 +28,10 @@ jobs:
           nxt=py.find('\ndef ',start+10)
           if nxt<0:nxt=len(py)
           out=py[start:nxt]
+          for token in ['structural-v2-fixture-floor','fixture_floor','full<=save_date','expiry<=save_date']:
+              if token not in out: raise SystemExit('missing '+token)
           Path('_injury_source_audit.txt').write_text(out,encoding='utf-8')
-          print(out[:1000])
+          print('structural availability v2 production audit passed')
           PY
       - name: Commit audit
         shell: bash
@@ -38,5 +40,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add _injury_source_audit.txt
-          git commit -m 'Refresh structural availability source audit' || exit 0
+          git commit -m 'Verify structural availability v2 source' || exit 0
           git push
