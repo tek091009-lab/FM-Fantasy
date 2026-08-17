@@ -1,0 +1,2 @@
+Deploy marker for confirmed pre-GW1 transfer bank repair.
+Production bundle commit: a4a64169c59a4c5a0c9145b63d6dbe8025087626
