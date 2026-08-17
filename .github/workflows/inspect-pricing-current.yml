@@ -1,0 +1,41 @@
+name: Inspect current pricing
+on:
+  push:
+    paths:
+      - '.github/workflows/inspect-pricing-current.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect embedded pricing code
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
+          if m:
+            py=base64.b64decode(m.group(1)).decode('utf-8')
+            lines=py.splitlines()
+            for i,l in enumerate(lines):
+              if re.search(r'price|pricing|defender|\bDEF\b|position',l,re.I):
+                a=max(0,i-5);b=min(len(lines),i+10)
+                print(f'--- PY {a+1}-{b} ---')
+                for j in range(a,b): print(f'{j+1:05d}: {lines[j]}')
+          else:
+            print('NO PY SOURCE')
+          print('\n===== JS PRICING HITS =====')
+          lines=html.splitlines()
+          for i,l in enumerate(lines):
+            if re.search(r'price.*def|def.*price|pricing|priceBand|basePrice',l,re.I):
+              print(f'{i+1:05d}: {l[:1500]}')
+          print('\n===== RAW SAVE RETENTION HITS =====')
+          for i,l in enumerate(lines):
+            if re.search(r'indexedDB|FileReader|arrayBuffer\(|last.*file|save.*bytes|fmFile|fileBytes',l,re.I):
+              print(f'{i+1:05d}: {l[:1500]}')
+          PY
