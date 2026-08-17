@@ -40,6 +40,7 @@ jobs:
             if printf '%s' "$body" | grep -q 'authfix.js?v=12' \
               && printf '%s' "$body" | grep -q 'availabilitytruth.js?v=2' \
               && printf '%s' "$body" | grep -q 'updateguard.js?v=2' \
+              && printf '%s' "$body" | grep -q 'canonicalpublish.js?v=1' \
               && printf '%s' "$body" | grep -q 'identityguard.js?v=3' \
               && printf '%s' "$body" | grep -q 'worldscorefix.js?v=4' \
               && printf '%s' "$body" | grep -q 'draftrecovery.js?v=2'; then
@@ -59,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"authfix\": \"v12-authoritative-cloud\",\n  \"availability_truth\": \"v2-stale-snapshot-suppression\",\n  \"update_guard\": \"v2\",\n  \"identity_guard\": \"v3-diagnostic-only\",\n  \"world_scorer\": \"v4\",\n  \"draft_recovery\": \"v2\"\n}\n' "$GITHUB_SHA" "$stamp")"
+          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"authfix\": \"v12-authoritative-cloud\",\n  \"availability_truth\": \"v2-stale-snapshot-suppression\",\n  \"update_guard\": \"v2\",\n  \"canonical_publish\": \"v1\",\n  \"identity_guard\": \"v3-diagnostic-only\",\n  \"world_scorer\": \"v4\",\n  \"draft_recovery\": \"v2\"\n}\n' "$GITHUB_SHA" "$stamp")"
           content="$(printf '%s' "$json" | base64 -w0)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
