@@ -1,9 +1,10 @@
 {
-  "verified_live_sha": "31bc2f9c98da1ddc39a7b5936b114c7107ea32c6",
-  "verified_at": "2026-08-17T23:23:44Z",
-  "verification": "deep-live-index-scripts-and-embedded-importer",
+  "verified_live_sha": "2681f01f3ac99fb4f15935cb7fed2d501ce7baea",
+  "verified_at": "2026-08-17T23:31:15Z",
+  "verification": "deep-live-index-scripts-embedded-importer-and-core-availability",
   "authfix": "v12-authoritative-cloud",
   "availability_truth": "v3-direct-structural-evidence",
+  "core_availability_truth": "direct-structural-only-no-card-heuristics",
   "embedded_availability_decoder": "structural-v2-fixture-floor",
   "update_guard": "v2",
   "canonical_publish": "v1",
