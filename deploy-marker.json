@@ -1,6 +1,9 @@
 {
-  "verified_live_sha": "1e7c54ccaa198abde96f416d708395714478e042",
-  "verified_at": "2026-08-17T22:43:46Z",
+  "verified_live_sha": "4c475ce6a923a654eed7e63343e1aaaf1f9d340a",
+  "verified_at": "2026-08-17T22:44:22Z",
+  "authfix": "v12-authoritative-cloud",
+  "availability_truth": "v1-direct-current-save-only",
   "update_guard": "v2",
-  "identity_guard": "v3-diagnostic-only"
+  "identity_guard": "v3-diagnostic-only",
+  "world_scorer": "v4"
 }
