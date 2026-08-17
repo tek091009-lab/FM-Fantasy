@@ -1,0 +1,27 @@
+name: Verify injury structure
+on:
+  push:
+    paths:
+      - '.github/workflows/verify-injury-structure-local.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify deployed bundle decoder shape
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
+          py=base64.b64decode(m.group(1)).decode()
+          required=['_structural_availability_from_fs','injury_manager.dat/current-window-v1','discipline.dat/active-ban-v1','fpl-shaped-v6-premium-defenders-scarce']
+          missing=[x for x in required if x not in py]
+          if missing: raise SystemExit('missing '+repr(missing))
+          print('decoder present')
+          PY
