@@ -14,6 +14,35 @@
  function pos(map,id){return String(map.get(String(id))?.pos||'');}
  function formation(map,ids){const c={GK:0,DEF:0,MID:0,FWD:0};for(const id of ids){const k=pos(map,id);if(k in c)c[k]++}return c;}
  function valid(c){return c.GK===1&&c.DEF>=3&&c.DEF<=5&&c.MID>=2&&c.MID<=5&&c.FWD>=1&&c.FWD<=3;}
+ function fixtureGw(f){return num(f?.gameweek??f?.gw??f?.round_gameweek);}
+ function fixturePlayed(f){return String(f?.status||'').toLowerCase()==='played'||(f?.home_score!==null&&f?.home_score!==undefined&&f?.away_score!==null&&f?.away_score!==undefined);}
+ function resolvedCompletedGameweek(payload){
+   const meta=payload?.meta||{};
+   let done=num(meta.completed_gameweek),latest=Math.max(done,num(meta.latest_gameweek_with_result));
+   if(latest<=done)return done;
+   const fixtures=Array.isArray(payload?.fixtures)?payload.fixtures:[];
+   for(let gw=done+1;gw<=latest;gw++){
+     const rows=fixtures.filter(f=>fixtureGw(f)===gw);
+     // A calendar Gameweek with no league fixtures is a valid blank Fantasy GW:
+     // close it on zero points and continue to the next real scoring Gameweek.
+     if(!rows.length){done=gw;continue}
+     if(rows.every(fixturePlayed)){done=gw;continue}
+     break;
+   }
+   return done;
+ }
+ function normaliseWorldProgress(payload,target){
+   if(!payload?.meta||!target)return;
+   const old=num(payload.meta.completed_gameweek);
+   if(target<=old)return;
+   payload.meta.completed_gameweek=target;
+   payload.meta.current_gameweek=target+1;
+   payload.meta.next_gameweek=target+1;
+   payload.meta.blank_gameweek_progression_fixed=true;
+   try{
+     if(typeof META!=='undefined'&&META){META.completed_gameweek=target;META.current_gameweek=target+1;META.next_gameweek=target+1}
+   }catch(_e){}
+ }
  function doneGw(st){const entry=Math.max(1,num(st.entryGameweek)||1),h=Array.isArray(st.pointsHistory)?st.pointsHistory:[];return h.length?Math.max(entry-1,...h.map(x=>num(x?.gw))):entry-1;}
  function previousLineup(st,gw){
    const gl=st.gameweekLineups&&typeof st.gameweekLineups==='object'&&!Array.isArray(st.gameweekLineups)?st.gameweekLineups:{};
@@ -80,7 +109,8 @@
      if(busy||!window.FMCloud?.ready?.()||!window.FMCloud?.isCreator?.())return false;busy=true;
      const world=window.FMCloud.getWorld?.();if(!world?.id)return false;
      let payload=world.payload;if(force||!payload?.players)payload=await window.FMCloud.loadWorld?.();if(!payload?.players)return false;
-     const target=num(payload.meta?.completed_gameweek);if(!target)return false;
+     const target=resolvedCompletedGameweek(payload);if(!target)return false;
+     normaliseWorldProgress(payload,target);
      const sig=`${world.id}|${target}|${world.updated_at||''}`;if(!force&&sig===lastSig)return true;
      const {data:rows,error}=await client.from('manager_states').select('user_id,state').eq('world_id',world.id);if(error)throw error;
      const map=pmap(payload);let changed=0;
@@ -97,12 +127,13 @@
        }
      }
      lastSig=sig;
-     if(changed){window.dispatchEvent(new CustomEvent('fmworldmanagersscored',{detail:{gameweek:target,managers:changed}}));setTimeout(()=>{if(typeof renderLeagues==='function')renderLeagues()},150)}
+     if(changed){window.dispatchEvent(new CustomEvent('fmworldmanagersscored',{detail:{gameweek:target,managers:changed}}));setTimeout(()=>{if(typeof renderAll==='function')renderAll();if(typeof renderLeagues==='function')renderLeagues()},150)}
      return true;
    }catch(e){console.warn('Creator-wide manager scoring failed',e);return false}finally{busy=false}
  }
  window.fmCreatorFinaliseWorldManagers=()=>finaliseAll(true);
  window.addEventListener('fmcloudready',()=>setTimeout(()=>finaliseAll(false),900));
  window.addEventListener('focus',()=>setTimeout(()=>finaliseAll(false),300));
+ window.addEventListener('fmmanagerprogressfinalised',()=>setTimeout(()=>finaliseAll(false),100));
  setInterval(()=>finaliseAll(false),5000);
 })();
