@@ -1,0 +1,37 @@
+name: Apply transfer-aware role-first pricing v6.3
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-role-first-v63.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply v6.3 patch
+        run: python scripts/upgrade_role_first_pricing_v63.py
+      - name: Verify generated bundle
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
+          py=base64.b64decode(m.group(1)).decode()
+          req=['fpl-shaped-v63-role-first-transfer-aware','new_arrival_unproven','rotation_behind_starter','observed_midfield_usage_v63','current_club_observed_matches']
+          miss=[x for x in req if x not in py]
+          if miss:raise SystemExit('missing '+repr(miss))
+          compile(py,'fm_importer.py','exec')
+          print('verified v6.3 role-first transfer-aware bundle')
+          PY
+      - name: Commit production bundle
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/
+          git diff --cached --quiet && exit 0
+          git commit -m "Build role-first transfer-aware pricing v6.3"
+          git push
