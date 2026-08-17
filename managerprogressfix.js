@@ -19,6 +19,15 @@
     return hist.length?Math.max(...hist.map(x=>Number(x?.gw)||0),entry-1):entry-1;
   }
 
+  function repairSequentialState(){
+    if(typeof state==='undefined')return 0;
+    const entry=Math.max(1,Number(state.entryGameweek||1));
+    const done=historyCompletedGameweek();
+    state.completedGameweek=done;
+    state.currentGameweek=Math.max(entry,done+1);
+    return done;
+  }
+
   function ensureLineupSnapshot(gw){
     if(typeof state==='undefined'||!state?.teamConfirmed)return;
     if(!state.gameweekLineups||typeof state.gameweekLineups!=='object'||Array.isArray(state.gameweekLineups))state.gameweekLineups={};
@@ -52,69 +61,101 @@
       if(error||!data?.updated_at)return false;
       const remote=Date.parse(data.updated_at)||0,local=Date.parse(world.updated_at||0)||0;
       if(!force&&remote<=local)return false;
+      if(remote>local)world.updated_at='';
       const payload=await window.FMCloud.loadWorld?.();
       if(!payload)return false;
       world.payload=payload;world.updated_at=data.updated_at;
-      const apply=typeof window.applyImportedPayload==='function'
-        ? window.applyImportedPayload
-        : (typeof applyImportedPayload==='function'?applyImportedPayload:null);
-      if(apply)await apply(payload,'load');
-      else if(typeof loadServerImportState==='function')await loadServerImportState();
       return true;
     }catch(e){console.warn('Shared world progress refresh failed',e);return false}
   }
 
-  async function finaliseOwnManagerProgress(){
+  async function runCoreProgressFinaliser(){
+    /* loadServerImportState lives inside the production bundle and calls the
+       bundle's private fmProcessCompletedGameweeks() directly. External scripts
+       cannot safely call that private scorer themselves, so always enter via
+       this public core path. */
+    if(typeof loadServerImportState==='function'){
+      await loadServerImportState();
+      return true;
+    }
+    return false;
+  }
+
+  async function finaliseOwnManagerProgress(force=false){
     try{
       if(busy||typeof state==='undefined'||!state?.teamConfirmed)return false;
       busy=true;
 
+      if(force)await refreshSharedWorldIfNeeded(true);
       let target=targetCompletedGameweek();
-      let done=historyCompletedGameweek();
+      let done=repairSequentialState();
       if(!target||target<=done){
         const changed=await refreshSharedWorldIfNeeded(false);
-        if(changed){target=targetCompletedGameweek();done=historyCompletedGameweek()}
+        if(changed){target=targetCompletedGameweek();done=repairSequentialState()}
       }
       if(!target||done>=target)return false;
 
-      /* A cloud manager must never be jumped to the shared world's NEXT GW before
-         their missing completed GW has actually been scored. Rewind to the first
-         unscored GW, then let the app's own finaliser advance normally. */
-      const entry=Math.max(1,Number(state.entryGameweek||1));
+      for(let gw=done+1;gw<=target;gw++)ensureLineupSnapshot(gw);
       state.completedGameweek=done;
-      state.currentGameweek=Math.max(entry,done+1);
+      state.currentGameweek=Math.max(Number(state.entryGameweek||1),done+1);
 
-      for(let gw=state.currentGameweek;gw<=target;gw++)ensureLineupSnapshot(gw);
+      const beforeDone=done;
+      const beforeTotal=Number(state.totalPoints||0);
+      const usedCore=await runCoreProgressFinaliser();
+      if(!usedCore)return false;
+      await sleep(80);
 
-      const processFn=typeof window.fmProcessCompletedGameweeks==='function'
-        ? window.fmProcessCompletedGameweeks
-        : (typeof fmProcessCompletedGameweeks==='function'?fmProcessCompletedGameweeks:null);
-      if(!processFn){console.warn('Manager progress finaliser unavailable');return false}
-
-      const before={done,total:Number(state.totalPoints||0)};
-      const processed=processFn()||[];
-      await sleep(50);
       const afterDone=historyCompletedGameweek();
-
-      if(afterDone>before.done||processed.length){
+      if(afterDone>beforeDone||Number(state.totalPoints||0)!==beforeTotal){
         state.completedGameweek=afterDone;
-        state.currentGameweek=Math.max(Number(state.currentGameweek||0),afterDone+1);
+        state.currentGameweek=Math.max(Number(state.entryGameweek||1),afterDone+1);
         if(typeof save==='function')save();
         window.FMCloud?.queueManagerSave?.(state);
         if(typeof renderAll==='function')renderAll();
         if(typeof renderLeagues==='function')renderLeagues();
-        window.dispatchEvent(new CustomEvent('fmmanagerprogressfinalised',{detail:{from:before.done,to:afterDone,total:Number(state.totalPoints||0),processed:processed.length}}));
+        window.dispatchEvent(new CustomEvent('fmmanagerprogressfinalised',{detail:{from:beforeDone,to:afterDone,total:Number(state.totalPoints||0)}}));
       }
       return afterDone>=target;
     }catch(e){console.warn('Manager progress finalisation failed',e);return false}
     finally{busy=false}
   }
 
-  window.fmFinaliseOwnManagerProgress=finaliseOwnManagerProgress;
-  const kick=()=>setTimeout(finaliseOwnManagerProgress,180);
-  window.addEventListener('fmcloudready',kick);
+  async function forceRefreshData(button){
+    const oldText=button?.textContent||'Refresh Data';
+    try{
+      if(button){button.disabled=true;button.textContent='Refreshing…'}
+      repairSequentialState();
+      await finaliseOwnManagerProgress(true);
+      if(typeof renderAll==='function')renderAll();
+      if(button)button.textContent='Refreshed ✓';
+      setTimeout(()=>{if(button){button.disabled=false;button.textContent=oldText}},1200);
+    }catch(e){
+      console.warn('Manual fantasy refresh failed',e);
+      if(button){button.disabled=false;button.textContent='Refresh failed';setTimeout(()=>button.textContent=oldText,1600)}
+    }
+  }
+
+  function installRefreshButton(){
+    if(document.getElementById('fmForceRefreshDataBtn'))return;
+    const anchor=document.getElementById('updateImportBtn')||document.getElementById('seasonImportBtn')||document.getElementById('exportDebugBtn');
+    if(!anchor?.parentNode)return;
+    const btn=document.createElement('button');
+    btn.id='fmForceRefreshDataBtn';
+    btn.type='button';
+    btn.textContent='↻ Refresh Data';
+    btn.className=anchor.className||'';
+    btn.style.marginLeft='8px';
+    btn.title='Reload the shared FM world and recalculate any missing completed Gameweek points';
+    btn.addEventListener('click',()=>forceRefreshData(btn));
+    anchor.insertAdjacentElement('afterend',btn);
+  }
+
+  window.fmFinaliseOwnManagerProgress=()=>finaliseOwnManagerProgress(false);
+  window.fmForceRefreshFantasyData=()=>forceRefreshData(document.getElementById('fmForceRefreshDataBtn'));
+  const kick=()=>setTimeout(()=>finaliseOwnManagerProgress(false),180);
+  window.addEventListener('fmcloudready',()=>{installRefreshButton();kick()});
   window.addEventListener('focus',()=>{refreshSharedWorldIfNeeded(true).finally(kick)});
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshSharedWorldIfNeeded(true).finally(kick)});
-  setTimeout(finaliseOwnManagerProgress,700);
-  setInterval(finaliseOwnManagerProgress,5000);
+  setTimeout(()=>{installRefreshButton();finaliseOwnManagerProgress(false)},700);
+  setInterval(()=>finaliseOwnManagerProgress(false),5000);
 })();
