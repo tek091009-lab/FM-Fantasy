@@ -1,7 +1,7 @@
 {
   "counts": {
-    "function fmAvailabilityTruthDate(payload){": 2,
-    "function fmAvailabilityTruthStale(payload){": 2,
+    "function fmAvailabilityTruthDate(payload){": 1,
+    "function fmAvailabilityTruthStale(payload){": 1,
     "function fmInferActiveSuspensions(payload){": 1,
     "function fmInferActiveInjuries(payload){": 1
   },
@@ -22,5 +22,5 @@
     "full<=save_date": true,
     "expiry<=save_date": true
   },
-  "ok": false
+  "ok": true
 }
