@@ -1,4 +1,0 @@
-apply_rc=0
-structural availability timeline v2 applied to embedded Python importer
-availability timeline v2 verified
-verify_rc=0
