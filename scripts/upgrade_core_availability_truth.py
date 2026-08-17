@@ -6,10 +6,11 @@ PARTS=[ROOT/'app'/f'part{i:02d}' for i in range(17)]+[ROOT/'app'/f'fix{i}' for i
 packed=''.join(p.read_text().strip() for p in PARTS)
 html=gzip.decompress(base64.b64decode(packed)).decode('utf-8')
 
-start=html.find('function fmInferActiveSuspensions(payload){')
-mid=html.find('function fmInferActiveInjuries(payload){',start+1)
-end=html.find('function fmBuildInitialNews(payload){',mid+1)
-if min(start,mid,end)<0: raise SystemExit('core availability function boundary missing')
+susp=html.find('function fmInferActiveSuspensions(payload){')
+helper=html.find('function fmAvailabilityTruthDate(payload){')
+start=helper if helper>=0 and (susp<0 or helper<susp) else susp
+end=html.find('function fmBuildInitialNews(payload){',max(start,0)+1)
+if start<0 or end<=start: raise SystemExit('core availability function boundary missing')
 
 strict=r'''function fmAvailabilityTruthDate(payload){return String(payload?.meta?.availability_reference_date||payload?.meta?.availability_save_date||'')}
 function fmAvailabilityTruthStale(payload){const v=payload?.meta?.availability_data_stale;return v===true||String(v).toLowerCase()==='true'}
@@ -35,15 +36,16 @@ function fmInferActiveInjuries(payload){
 }
 '''
 html=html[:start]+strict+html[end:]
-for token in ['fmAvailabilityTruthStale','discipline.dat/active-ban-v1','injury_manager.dat/current-window']:
-    if token not in html: raise SystemExit('missing '+token)
-# The old card-count suspension heuristic must be gone from the core availability block.
 block=html[html.find('function fmAvailabilityTruthDate'):html.find('function fmBuildInitialNews(payload){')]
+for token in ['fmAvailabilityTruthStale','discipline.dat/active-ban-v1','injury_manager.dat/current-window']:
+    if token not in block: raise SystemExit('missing '+token)
 for forbidden in ['5 yellow cards','second-yellow red','fmClubPlayedAfter(payload,p.club,inc.date)']:
     if forbidden in block: raise SystemExit('heuristic suspension inference still present: '+forbidden)
+for declaration in ['function fmAvailabilityTruthDate(payload){','function fmAvailabilityTruthStale(payload){','function fmInferActiveSuspensions(payload){','function fmInferActiveInjuries(payload){']:
+    if html.count(declaration)!=1: raise SystemExit(f'expected exactly one {declaration}, got {html.count(declaration)}')
 
 out=base64.b64encode(gzip.compress(html.encode('utf-8'),compresslevel=9,mtime=0)).decode()
 step=(len(out)+len(PARTS)-1)//len(PARTS)
 for i,p in enumerate(PARTS):p.write_text(out[i*step:(i+1)*step]+'\n')
 if ''.join(p.read_text().strip() for p in PARTS)!=out: raise SystemExit('repack mismatch')
-print('core direct-evidence availability truth applied')
+print('core direct-evidence availability truth applied idempotently')
