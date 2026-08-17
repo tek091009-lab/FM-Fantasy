@@ -1,0 +1,40 @@
+name: Preserve naming and retained-history provenance
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/upgrade_evidence_provenance_v63.py'
+      - '.github/workflows/upgrade-evidence-provenance-v63.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch embedded importer
+        run: python scripts/upgrade_evidence_provenance_v63.py
+      - name: Verify generated importer
+        run: |
+          git diff --check
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
+          assert m
+          py=base64.b64decode(m.group(1)).decode()
+          for needle in ["name_component_evidence","name_resolution_evidence","retained_history_evidence","decoded_gameweeks","history_is_partial_or_unknown","identity_components_preserved","discipline_evidence"]:
+              assert needle in py, needle
+          compile(py,'fm_importer.py','exec')
+          print('v63 evidence provenance checks passed')
+          PY
+      - name: Commit production upgrade
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/part* app/fix*
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Preserve importer evidence provenance"
+          git push origin HEAD:main
