@@ -1,4 +1,4 @@
-name: Inspect rich row position fields
+name: Apply v6.4 live fix
 on:
   push:
     paths:
@@ -6,28 +6,17 @@ on:
 permissions:
   contents: write
 jobs:
-  inspect:
+  patch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Extract rich stat parser
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import base64,gzip,re
-          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
-          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8','replace')
-          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
-          py=base64.b64decode(m.group(1)).decode('utf-8','replace')
-          out=[]
-          for needle in ['def _rich_stat_record_at','match_position_marker','is_goalkeeper_match_role','def _rich_decorate','def infer_hybrid_positions_from_match_markers']:
-              pos=py.find(needle);out.append('\n### '+needle+'\n'+(py[max(0,pos-2500):min(len(py),pos+16000)] if pos>=0 else 'NOT FOUND'))
-          Path('_position_parser_diag.txt').write_text(''.join(out))
-          PY
-      - name: Commit diagnostic
+      - name: Apply v6.4 combined production patch
+        run: python scripts/upgrade_v64_livefix.py
+      - name: Commit production bundle
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add _position_parser_diag.txt
-          git commit -m "Inspect rich match position fields" || exit 0
+          git add app/
+          git diff --cached --quiet && exit 0
+          git commit -m "Apply v6.4 pricing position and history recovery"
           git push
