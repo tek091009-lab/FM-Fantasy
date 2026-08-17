@@ -80,13 +80,33 @@ jobs:
           from pathlib import Path
           import base64,re
           html=Path('/tmp/live_app.html').read_text(encoding='utf-8')
+
+          # Embedded FM decoder: current timeline may never move backwards to an old injury-table date.
           m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
           assert m,'live embedded importer missing'
           py=base64.b64decode(m.group(1)).decode('utf-8')
           for token in ['structural-v2-fixture-floor','fixture_floor','full<=save_date','expiry<=save_date']:
               assert token in py,'live importer missing '+token
-          assert "suspension_evidence_structural" in py
-          assert "discipline.dat/active-ban-v1" in py
+          assert 'suspension_evidence_structural' in py
+          assert 'discipline.dat/active-ban-v1' in py
+
+          # Core JS: exactly one strict availability truth implementation and no card-count guesses.
+          declarations=[
+            'function fmAvailabilityTruthDate(payload){',
+            'function fmAvailabilityTruthStale(payload){',
+            'function fmInferActiveSuspensions(payload){',
+            'function fmInferActiveInjuries(payload){'
+          ]
+          for d in declarations:
+              assert html.count(d)==1,f'live core expected exactly one {d}, got {html.count(d)}'
+          start=html.find('function fmAvailabilityTruthDate(payload){')
+          end=html.find('function fmBuildInitialNews(payload){',start)
+          assert start>=0 and end>start,'live core availability block missing'
+          block=html[start:end]
+          for token in ['fmAvailabilityTruthStale','discipline.dat/active-ban-v1','injury_manager.dat/current-window']:
+              assert token in block,'live core availability missing '+token
+          for forbidden in ['5 yellow cards','second-yellow red','fmClubPlayedAfter(payload,p.club,inc.date)']:
+              assert forbidden not in block,'live core still contains heuristic availability logic: '+forbidden
           print('deep live stability verification passed')
           PY
       - name: Record verified live deployment
@@ -96,7 +116,7 @@ jobs:
         run: |
           set -euo pipefail
           stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"verification\": \"deep-live-index-scripts-and-embedded-importer\",\n  \"authfix\": \"v12-authoritative-cloud\",\n  \"availability_truth\": \"v3-direct-structural-evidence\",\n  \"embedded_availability_decoder\": \"structural-v2-fixture-floor\",\n  \"update_guard\": \"v2\",\n  \"canonical_publish\": \"v1\",\n  \"identity_guard\": \"v3-diagnostic-only\",\n  \"world_scorer\": \"v5-chip-persistence\",\n  \"draft_recovery\": \"v2\",\n  \"capability_consistency\": \"v1\"\n}\n' "$GITHUB_SHA" "$stamp")"
+          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"verification\": \"deep-live-index-scripts-embedded-importer-and-core-availability\",\n  \"authfix\": \"v12-authoritative-cloud\",\n  \"availability_truth\": \"v3-direct-structural-evidence\",\n  \"core_availability_truth\": \"direct-structural-only-no-card-heuristics\",\n  \"embedded_availability_decoder\": \"structural-v2-fixture-floor\",\n  \"update_guard\": \"v2\",\n  \"canonical_publish\": \"v1\",\n  \"identity_guard\": \"v3-diagnostic-only\",\n  \"world_scorer\": \"v5-chip-persistence\",\n  \"draft_recovery\": \"v2\",\n  \"capability_consistency\": \"v1\"\n}\n' "$GITHUB_SHA" "$stamp")"
           content="$(printf '%s' "$json" | base64 -w0)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
