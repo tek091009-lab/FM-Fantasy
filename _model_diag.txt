@@ -1,0 +1,775 @@
+
+### def reprice_players
+s')
+    if pos=='GK':return 'Goalkeeper',0.0
+    if pos=='DEF':
+        wing=max(v('DL'),v('DR'),v('WBL'),v('WBR'))/20.0
+        midfield_wide=max(v('ML'),v('MR'),v('AML'),v('AMR'))/20.0
+        cb=v('DC')/20.0
+        attack=_clamp(0.08+0.38*wing+0.20*midfield_wide)
+        label='Wide DEF/MID hybrid' if midfield_wide>=0.75 else ('Attacking full-back / wing-back' if wing>=0.75 and wing>=cb else 'Centre-back / defensive defender')
+        return label,attack
+    if pos=='FWD':return 'Forward',0.98
+    attacking=max(v('AML'),v('AMC'),v('AMR'),v('ST'))/20.0
+    wide=max(v('ML'),v('MR'))/20.0
+    central=v('MC')/20.0; defensive=v('DM')/20.0
+    attack=_clamp(max(attacking,0.72*wide,0.40*central))
+    if defensive>=0.75 and attacking<0.60 and wide<0.70:
+        attack=min(attack,0.28);return 'Defensive midfielder',attack
+    if attacking>=0.75:return 'Attacking midfielder / winger',attack
+    if wide>=0.70:return 'Wide midfielder',attack
+    return 'Central midfielder',max(0.30,attack)
+
+
+
+def reprice_players(players:list[dict[str,Any]], fixtures:list[dict[str,Any]]|None=None)->None:
+    """FPL-shaped v6.3 role-band transfer-aware launch pricing.
+
+    Launch prices are set once at Season / Database Import.  Later Gameweek imports do
+    not re-run this model as the market price; the browser applies small, sustained-form
+    changes from the launch value.  This model therefore focuses on the player's value
+    *at the import date*: quality, role, actual availability, depth and team strength.
+    """
+    if not players:return
+    fixtures=fixtures or []
+    bypos=collections.defaultdict(list)
+    for p in players:bypos[p['pos']].append(p)
+    pct={}
+    for pos,arr in bypos.items():
+        vals=sorted(float(p.get('ca') or 100) for p in arr)
+        for p in arr:
+            ca=float(p.get('ca') or 100);rank=bisect.bisect_right(vals,ca)-1;rel=rank/max(1,len(vals)-1)
+            absolute=_clamp((ca-100.0)/80.0)
+            pct[p['id']]=0.40*rel+0.60*absolute
+
+    club_quality_raw={}
+    for club in {p['club'] for p in players}:
+        vals=sorted((float(p.get('ca') or 90) for p in players if p['club']==club),reverse=True)[:16]
+        club_quality_raw[club]=sum(vals)/max(1,len(vals))
+    qvals=sorted(club_quality_raw.values())
+    club_quality={c:(bisect.bisect_right(qvals,v)-1)/max(1,len(qvals)-1) for c,v in club_quality_raw.items()}
+
+    perf=collections.defaultdict(lambda:{'p':0,'pts':0,'gd':0,'dates':[]})
+    for f in fixtures:
+        if f.get('status')!='played':continue
+        h,a=f.get('home'),f.get('away');hs=int(f.get('home_score') or 0);as_=int(f.get('away_score') or 0);date=f.get('date')
+        if not h or not a:continue
+        for c in (h,a):
+            perf[c]['p']+=1
+            if date:perf[c]['dates'].append(date)
+        perf[h]['gd']+=hs-as_;perf[a]['gd']+=as_-hs
+        if hs>as_:perf[h]['pts']+=3
+        elif hs<as_:perf[a]['pts']+=3
+        else:perf[h]['pts']+=1;perf[a]['pts']+=1
+
+    club_strength={}
+    for c in club_quality:
+        d0=perf[c]
+        if d0['p']>=3:
+            ppg=d0['pts']/(3*d0['p']);gdpg=d0['gd']/d0['p'];live=_clamp(0.74*ppg+0.26*((gdpg+2.0)/4.0))
+            live_weight=0.64 if d0['p']>=5 else 0.48
+            club_strength[c]=(1-live_weight)*club_quality[c]+live_weight*live
+        else:club_strength[c]=club_quality[c]
+
+    club_matches={c:int(perf[c]['p']) for c in club_quality}
+    # Some FM saves expose league results but no retained player-match detail. In that case
+    # '0 minutes' means unknown coverage, not a genuine unused reserve. Never collapse an
+    # entire league to basement prices because match-detail coverage is absent.
+    club_usage_coverage={c:any(float(p.get('minutes') or 0)>0 or bool(p.get('history')) for p in players if p.get('club')==c) for c in club_quality}
+    groups=collections.defaultdict(list)
+    for p in players:groups[(p['club'],p['pos'])].append(p)
+    depth={};group_active={};usage_rank={}
+    for (club,pos),arr in groups.items():
+        ability_order=sorted(arr,key=lambda p:(float(p.get('ca') or 0),float(p.get('pa') or 0)),reverse=True)
+        used_order=sorted(arr,key=lambda p:(float(p.get('minutes') or 0),float(p.get('starts') or 0),float(p.get('ca') or 0)),reverse=True)
+        group_active[(club,pos)]=used_order[0] if used_order else None
+        usage_rank.update({p['id']:i for i,p in enumerate(used_order)})
+        for i,p in enumerate(ability_order):
+            if pos=='GK':d=[1.0,0.35,0.07][min(i,2)] if i<3 else 0.03
+            elif pos=='FWD':d=max(0.18,1.0-0.24*i)
+            elif pos=='DEF':d=max(0.28,1.0-0.12*i)
+            else:d=max(0.25,1.0-0.12*i)
+            depth[p['id']]=d
+
+    raw_scores={}
+    for p in players:
+        q=_clamp(pct.get(p['id'],0.35));role,attack=_role_profile(p);club=p['club'];games=club_matches.get(club,0);d=depth.get(p['id'],0.5)
+        mins=float(p.get('minutes',0) or 0);starts=float(p.get('starts',0) or 0);hist=p.get('history') or []
+        # A recent signing should be judged on fixtures he could actually have played.
+        first_dates=sorted(str(h.get('date')) for h in hist if h.get('date') and float(h.get('minutes') or 0)>0)
+        first_play=first_dates[0] if first_dates else None
+        club_dates=sorted(perf[club]['dates'])
+        available_games=games;late_arrival=False
+        if first_play and club_dates and first_play>club_dates[0]:
+            after=sum(1 for x in club_dates if x>=first_play)
+            # Only use the late-arrival window when the player has clearly participated
+            # in it; this stops pre-transfer league matches making a new signing look unused.
+            if after and len(first_dates)>=min(1,after):
+                available_games=max(1,after);late_arrival=(available_games<games)
+        share=_clamp(mins/(90.0*available_games)) if available_games else 0.0
+        start_share=_clamp(starts/available_games) if available_games else 0.0
+        active=group_active.get((club,p['pos']));ca=float(p.get('ca') or 100);active_ca=float(active.get('ca') or 100) if active else ca
+        absence_excused=bool(p.get('injured') or p.get('suspended') or p.get('injury_status')=='injured' or p.get('suspension_status')=='suspended')
+        expected_exception=absence_excused
+        if available_games>=1 and club_usage_coverage.get(club,False):
+            actual_role=_clamp(0.66*share+0.34*start_share)
+            nailed=_clamp(0.86*actual_role+0.14*d)
+            if expected_exception:nailed=max(0.68,d*0.80)
+        else:nailed=d
+        team=_clamp(club_strength.get(club,0.5));pos=p['pos']
+
+        # Add real attacking output to the positional-role estimate without letting a tiny
+        # sample dominate.  This separates an attacking wing-back/creator from a CB/DM.
+        ga=float(p.get('goals',0) or 0)+float(p.get('assists',0) or 0)
+        ga90=(ga*90.0/mins) if mins>=90 else 0.0
+        output_weight=_clamp(mins/720.0,0.0,0.42)
+        observed_attack=_clamp(ga90/0.62)
+        attack=_clamp((1-output_weight)*attack+output_weight*observed_attack)
+
+        if games>=2 and mins==0 and not expected_exception and club_usage_coverage.get(club,False):
+            raw=min(4.5,3.5+0.42*q+0.20*d);availability='No minutes · basement price'
+        else:
+            availability=('Recent arrival · judged since first appearance' if late_arrival else
+                          ('Expected role exception' if expected_exception else ('Observed role' if games>=2 and club_usage_coverage.get(club,False) else ('Squad-role projection · player match detail unavailable' if games>=2 else 'Pre-season projection'))))
+            if pos=='GK':
+                raw=3.70+0.30*q+0.78*nailed+0.82*team;raw=min(5.5,raw)
+            elif pos=='DEF':
+                # Team quality matters, but attacking threat is required for true premium territory.
+                raw=3.60+0.48*q+0.92*nailed+0.78*attack+1.42*team+0.18*(q**4)
+            elif pos=='MID' and attack<0.34:
+                raw=4.10+0.48*q+1.00*nailed+0.26*attack+0.72*team+0.12*(q**3);raw=min(6.8,raw)
+            elif pos=='MID':
+                raw=4.10+0.72*q+1.18*nailed+1.70*attack+0.82*team+4.15*(q**4)*(0.30+0.70*nailed)*(0.40+0.60*attack)
+                if q>=0.94 and nailed>=0.82 and attack>=0.72 and team>=0.65:raw+=0.8
+                raw=min(15.0,raw)
+            else:
+                raw=4.10+0.76*q+1.28*nailed+1.22*attack+0.92*team+3.85*(q**4)*(0.24+0.76*nailed)
+                if q>=0.95 and nailed>=0.82 and team>=0.58:raw+=0.6
+                raw=min(14.5,raw)
+
+        # Usage beats reputation once there is evidence, but use AVAILABLE games rather
+        # than all club games so a newly-signed starter is not labelled a backup.
+        if available_games>=3 and club_usage_coverage.get(club,False) and not expected_exception:
+            if share<0.15:
+                raw=min(raw,{'GK':4.0,'DEF':4.5,'MID':4.5,'FWD':5.0}[pos]);availability='Rarely used backup'
+            elif share<0.35:
+                raw=min(raw,{'GK':4.5,'DEF':5.0,'MID':5.2,'FWD':5.5}[pos]);availability='Backup / rotation'
+            elif share<0.55:
+                raw-=0.35;availability='Rotation / partial starter'
+
+        # League position/performance should materially separate equivalent players.
+        if games>=3:
+            if pos=='FWD':
+                if team<0.28:raw=min(raw,6.0)
+                elif team<0.45:raw=min(raw,6.5)
+                elif team<0.58:raw=min(raw,7.0)
+            elif pos=='DEF':
+                if team<0.28:raw=min(raw,4.7)
+                elif team<0.42:raw=min(raw,5.2)
+            elif pos=='MID' and attack<0.45 and team<0.45:raw=min(raw,5.5)
+
+        raw_scores[p['id']]=raw
+        p['price_context']={'quality':round(q,3),'nailedness':round(nailed,3),'minutes_share':round(share,3),
+                            'start_share':round(start_share,3),'usage_rank':usage_rank.get(p['id'],0)+1,'role':role,
+                            'attack_profile':round(attack,3),'depth_score':round(d,3),'team_strength':round(team,3),
+                            'observed_matches':games,'available_matches':available_games,'late_arrival':late_arrival,
+                            'first_appearance_date':first_play,'availability_signal':availability,
+                            'zero_minute_exception':expected_exception,'ga_per90':round(ga90,3)}
+
+    # v6.1: the raw FM-derived model decides ordering; positional rank then controls
+    # the shape of the market. Premium prices are deliberately scarce and the middle/
+    # value tiers step down rather than bunching at one high cap.
+    ranked={pos:sorted((p for p in players if p['pos']==pos),key=lambda p:raw_scores[p['id']],reverse=True) for pos in ('GK','DEF','MID','FWD')}
+    for pos,arr in ranked.items():
+        for i,p in enumerate(arr):
+            raw=raw_scores[p['id']];c=p['price_context'];att=float(c['attack_profile']);team=float(c['team_strength']);nailed=float(c['nailedness']);q=float(c['quality'])
+            c['position_price_rank']=i+1
+            if p.get('minutes',0)==0 and c['observed_matches']>=2 and club_usage_coverage.get(p.get('club'),False) and not c['zero_minute_exception']:
+                raw=min(raw,{'GK':4.0,'DEF':4.5,'MID':4.5,'FWD':5.0}[pos])
+            elif p.get('minutes',0)==0 and c['zero_minute_exception']:
+                raw=min(raw,{'GK':5.0,'DEF':5.5,'MID':7.0,'FWD':7.5}[pos])
+            elif pos=='GK':
+                # Two genuine premium keepers, a small £5.0m tier, then normal £4.5m territory.
+                cap=5.5 if i<2 else 5.0 if i<8 else 4.5
+                raw=min(raw,cap)
+            elif pos=='DEF':
+                # £6.0m+ is premium. After the premium group, force distinct £5.5/£5.0/£4.5
+                # ceilings so a strong league cannot turn most starting defenders expensive.
+                if att<0.42:
+                    if i<3 and team>=0.78 and nailed>=0.84:cap=6.0
+                    elif i<18:cap=5.5
+                    elif i<60:cap=5.0
+                    else:cap=4.5
+                    raw=min(raw,cap)
+                elif i==0 and team>=0.70 and att>=0.58:
+                    raw=min(7.5,raw+0.35)
+                elif i<3 and team>=0.58:
+                    raw=min(raw,6.5)
+                elif i<6:
+                    raw=min(raw,6.0)
+                elif i<18:
+                    raw=min(raw,5.5)
+                elif i<60:
+                    raw=min(raw,5.0)
+                else:
+                    raw=min(raw,4.5)
+            elif pos=='MID':
+                if att<0.34:
+                    # Defensive midfielders are priced for fantasy role, not reputation.
+                    if i<8 and q>=0.88 and team>=0.62 and nailed>=0.80:cap=6.0
+                    elif i<45:cap=5.5
+                    else:cap=5.0
+                    raw=min(raw,cap)
+                else:
+                    cap=(15.0 if i<2 else 12.5 if i<5 else 10.5 if i<10 else 9.0 if i<20
+                         else 8.0 if i<40 else 7.0 if i<80 else 6.5 if i<140 else 6.0)
+             
+### def _calibrate_observed_hybrid_positions
+NOT FOUND
+### marker_roles
+r from unambiguous players.
+
+    Marker 4 is already proven as goalkeeper. Other marker meanings can vary across
+    retained objects, so never hard-code them: learn a marker->FPL band mapping only
+    when the save itself gives a strong, repeated correlation. Then use that mapping
+    solely to resolve genuine DEF/MID hybrids; ordinary positions are left untouched.
+    """
+    marker_counts=collections.defaultdict(collections.Counter)
+    for m in rich:
+        for key in ('home_players','away_players'):
+            for r in m.get(key,[]):
+                p=players_by_eid.get(int(r.get('player_id') or 0));marker=int(r.get('match_position_marker') or 0)
+                if not p or not marker or marker==4 or float(r.get('minutes') or 0)<=0:continue
+                strengths=_position_strengths(p);order=sorted(strengths.items(),key=lambda x:x[1],reverse=True)
+                if order[0][1]<15 or order[0][1]-order[1][1]<3:continue
+                marker_counts[marker][order[0][0]]+=1
+    marker_roles={4:'GK'}
+    for marker,c in marker_counts.items():
+        total=sum(c.values())
+        if total<8:continue
+        role,n=c.most_common(1)[0]
+        if n/total>=0.80:marker_roles[marker]=role
+    usage=collections.defaultdict(collections.Counter)
+    for m in rich:
+        for key in ('home_players','away_players'):
+            for r in m.get(key,[]):
+                if float(r.get('minutes') or 0)<=0:continue
+                role=marker_roles.get(int(r.get('match_position_marker') or 0))
+                if role:usage[int(r.get('player_id') or 0)][role]+=1
+    changed=[]
+    for eid,c in usage.items():
+        p=players_by_eid.get(eid)
+        if not p:continue
+        st=_position_strengths(p)
+        if max(st['DEF'],st['MID'])<15:continue
+        dm=c['DEF']+c['MID']
+        if dm<2:continue
+        if c['MID']/dm>=0.80 and p.get('pos')!='MID':p['pos']='MID';p['position_source']='observed_midfield_usage_v63';changed.append(eid)
+        elif c['DEF']/dm>=0.80 and p.get('pos')!='DEF':p['pos']='DEF';p['position_source']='observed_defensive_usage_v63';changed.append(eid)
+    return {'marker_roles':marker_roles,'hybrid_players_reclassified':changed}
+
+def join_rich_matches(rich:list[dict[str,Any]],fixtures:list[dict[str,Any]],players_by_eid:dict[int,dict[str,Any]]):
+    infer_hybrid_positions_from_match_markers(rich,players_by_eid)
+    # Rich headers use another team-id namespace, so bind by normalized club names and the exact played schedule.
+    by_pair=collections.defaultdict(list)
+    for f in fixtures:
+        if f['status']=='played': by_pair[(f['home'],f['away'])].append(f)
+    out=[]
+    for mid,m in enumerate(rich,1):
+        home=normalize_club_name(m['home']); away=normalize_club_name(m['away'])
+        candidates=by_pair.get((home,away),[])
+        if m.get('date'):
+            dated=[f for f in candidates if f.get('date')==m.get('date')]
+            if dated:candidates=dated
+        # Score disambiguates the return fixture when needed.
+        candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates
+        if len(candidates)!=1: continue
+        fix=candidates[0]
+        mm={'id':mid,'match_id':mid,'fixture_id':fix['fixture_id'],'gameweek':fix['gameweek'],'date':fix['date'],'home':home,'away':away,'home_score':fix['home_score'],'away_score':fix['away_score'],'status':'played','source':'fm_rich_stats'}
+        allp=[]
+        for side,key,club,opp,venue in [('home','home_players',home,away,'H'),('away','away_players',away,home,'A')]:
+            arr=[]
+            for r in m[key]:
+                eid=int(r['player_id']); canon=players_by_eid.get(eid)
+                pos=canon['pos'] if canon else ('GK' if r.get('is_goalkeeper_match_role') else 'MID')
+                name=canon['name'] if canon else r.get('player',f'FM Player {eid}')
+                row=dict(r); row.update({'player_id':str(eid),'name':name,'club':club,'pos':pos,'opponent':opp,'venue':venue,'home':home,'away':away,'score':f"{fix['home_score']}-{fix['away_score']}",'gameweek':fix['gameweek'],'match_id':mid})
+                row.update(score_player(row,pos)); arr.append(row);allp.append(row)
+            mm[side+'_players']=arr
+        award_bonus(allp)
+        # bonus/fpl point fields are shared row dicts referenced in arrays.
+        out.append(mm)
+    return out
+
+
+def build_players(squads:dict[int,list[int]], selected_clubs:dict[int,Club], people:dict[int,Person], rich:list[dict[str,Any]]|None=None):
+    memberships=collections.defaultdict(list)
+    for ceid,eids in squads.items():
+        for eid in eids: memberships[eid].append(ceid)
+    # Resolve duplicate list membership from actual current-season rich match participation when available.
+    played_club={}
+    if rich:
+        name_to_eid={normalize_club_name(c.name):eid for eid,c in selected_clubs.items()}
+        name_to_eid.update({normalize_club_name(c.short):eid for eid,c in selected_clubs.items()})
+        for m in rich:
+            for side,key in [('home','home_players'),('away','away_players')]:
+                ceid=name_to_eid.get(normalize_club_name(m[side]))
+                if ceid is None:continue
+                for r in m[key]: played_club[int(r['player_id'])]=ceid
+    out=[]; unresolved=[]; ambiguous=[]
+    for eid,clubs in sorted(memberships.items()):
+        person=people.get(eid)
+        if not person:
+            unresolved.append(eid);continue
+        ceid=clubs[0]
+        if len(clubs)>1:
+            if played_club.get(eid) in clubs: ceid=played_club[eid]
+            else: ambiguous.append({'player_eid':eid,'club_eids':clubs})
+        c=selected_clubs[ceid]
+        pos=fantasy_position(person.positions)
+        out.append({'id':str(eid),'pid':str(eid),'name':person.display_name,'display_name':person.display_name,'public_name':person.display_name,'legal_name':person.name,'first_name':getattr(person,'first_name',None),'surname_name':getattr(person,'surname_name',None),'common_name':person.common_name,'first_name_id':getattr(person,'first_name_id',None),'surname_name_id':getattr(person,'surname_name_id',None),'common_name_id':getattr(person,'common_name_id',None),'identity_components_preserved':True,'name_component_evidence':{'legal_full':person.name,'first':getattr(person,'first_name',None),'surname_family':getattr(person,'surname_name',None),'common_known_as':person.common_name,'first_pool_id':getattr(person,'first_name_id',None),'surname_pool_id':getattr(person,'surname_name_id',None),'common_pool_id':getattr(person,'common_name_id',None),'nickname':None,'shirt_name':None,'preferred_short_name':None,'schema':'person_string_pools_v1'},'name_resolution_evidence':{'resolved_display':getattr(person,'display_name',None),'display_equals_legal':bool(getattr(person,'display_name',None) and getattr(person,'display_name',None)==person.name),'display_equals_common':bool(getattr(person,'display_name',None) and person.common_name and getattr(person,'display_name',None)==person.common_name),'display_contains_common':bool(getattr(person,'display_name',None) and person.common_name and person.common_name.casefold() in getattr(person,'display_name',None).casefold()),'display_contains_surname':bool(getattr(person,'display_name',None) and getattr(person,'surname_name',None) and getattr(person,'surname_name',None).casefold() in getattr(person,'display_name',None).casefold()),'source':'preserved_components_plus_current_resolver'},'preferred_name':person.common_name,'first_name':person.first_name,'surname':person.surname,'football_surname':person.surname,'legal_full_name':person.name,'club':normalize_club_name(c.short or c.name),'club_full':c.name,'club_eid':ceid,'pos':pos,'positions':{POSITION_NAMES[i]:v for i,v in enumerate(person.positions or [])},'ca':person.current_ability,'pa':person.potential_ability,'price':price_from_ca(pos,person.current_ability),'apps':0,'minutes':0,'goals':0,'assists':0,'yc':0,'rc':0,'saves':0,'gc':0,'starts':0,'avg_rating':0.0,'fantasy_points':0,'points':0,'form_points':0.0,'form':0.0,'history':[],'weekly_points':{},'visible':True,'available':True,'unresolved':False})
+    return out,unresolved,ambiguous
+
+
+def aggregate_player_history(players:list[dict[str,Any]],matches:list[dict[str,Any]]):
+    byid={int(p['pid']):p for p in players}
+    for m in matches:
+        for key in ('home_players','away_players'):
+            for r in m[key]:
+                p=byid.get(int(r['player_id']))
+                if not p:continue
+                h={k:r.get(k) for k in ['match_id','opponent','venue','score','home','away','minutes','goals','assists','yellow_cards','red_cards','rating','goals_conceded','saves','appearance_pts','goal_pts','assist_pts','clean_sheet_pts','save_pts','gc_pts','card_pts','defcon_actions','defcon_pts','bonus','bps_proxy','fpl_points','gameweek','own_goals','penalties_missed','match_position_marker']};h['date']=m.get('date')
+                h['yc']=h.pop('yellow_cards') or 0;h['rc']=h.pop('red_cards') or 0;h['gc']=h.pop('goals_conceded') or 0
+                p['history'].append(h)
+                mins=r.get('minutes',0) or 0
+                p['apps']+=1 if mins>0 else 0;p['minutes']+=mins;p['goals']+=r.get('goals',0) or 0;p['assists']+=r.get('assists',0) or 0;p['yc']+=r.get('yellow_cards',0) or 0;p['rc']+=r.get('red_cards',0) or 0;p['saves']+=r.get('saves',0) or 0;p['gc']+=r.get('team_goals_conceded_while_on_pitch',0) or 0;p['starts']+=1 if str(r.get('appearance','')).startswith('Started') else 0
+                p['fantasy_points']+=r.get('fpl_points',0) or 0;p['weekly_points'][str(r['gameweek'])]=p['weekly_points'].get(str(r['gameweek']),0)+(r.get('fpl_points',0) or 0)
+    for p in players:
+        ratings=[h['rating'] for h in p['history'] if h.get('rating')]
+        p['avg_rating']=round(sum(ratings)/len(ratings),2) if ratings else 0.0
+        recent=sorted(p['history'],key=lambda h:h['gameweek'])[-4:]
+        p['form_points']=round(sum(h.get('fpl_points',0) for h in recent)/len(recent),1) if recent else 0.0
+        p['points']=p['fantasy_points'];p['form']=p['form_points']
+        card_rows=[h for h in p['history'] if int(h.get('yc',0) or 0)>0 or int(h.get('rc',0) or 0)>0]
+        card_rows.sort(key=lambda h:(str(h.get('date') or ''),int(h.get('gameweek') or 0)))
+        _hist_rows=list(p.get('history') or [])
+        _hist_gws=sorted({int(h.get('gameweek') or 0) for h in _hist_rows if int(h.get('gameweek') or 0)>0})
+        _hist_dates=sorted({str(h.get('date')) for h in _hist_rows if h.get('date')})
+        p['retained_history_evidence']={
+            'decoded_rows':len(_hist_rows),
+            'decoded_gameweeks':_hist_gws,
+            'first_decoded_date':(_hist_dates[0] if _hist_dates else None),
+            'last_decoded_date':(_hist_dates[-1] if _hist_dates else None),
+            'history_is_partial_or_unknown':True,
+            'zero_stats_are_observed_only_within_decoded_rows':True,
+            'source':'decoded_rich_history'
+        }
+        p['discipline_evidence']={
+            'yellow_cards':int(p.get('yc',0) or 0),'red_cards':int(p.get('rc',0) or 0),
+            'history_rows':len(p.get('history') or []),
+            'last_card_date':(card_rows[-1].get('date') if card_rows else None),
+            'last_card_gameweek':(card_rows[-1].get('gameweek') if card_rows else None),
+            'source':'decoded_rich_history'
+        }
+
+
+
+
+
+def gameweek_schedule_meta(fixtures:list[dict[str,Any]], total_gameweeks:int|None=None)->dict[str,Any]:
+    max_gw=int(total_gameweeks or max((int(f.get('round_gameweek') or f.get('gameweek') or 0) for f in fixtures),default=46))
+    total=collections.Counter(int(f['gameweek']) for f in fixtures)
+    played=collections.Counter(int(f['gameweek']) for f in fixtures if f['status']=='played')
+    fully=[gw for gw in range(1,max_gw+1) if total[gw]>0 and played[gw]==total[gw]]
+    contiguous=0;fullset=set(fully)
+    for gw in range(1,max_gw+1):
+        if gw in fullset:contiguous=gw
+        else:break
+    latest_result=max((int(f['gameweek']) for f in fixtures if f['status']=='played'),default=0)
+    club_names=sorted({x for f in fixtures for x in (f.get('home'),f.get('away')) if x})
+    doubles={};blanks={}
+    for gw in range(1,max_gw+1):
+        apps=collections.Counter()
+        for f in fixtures:
+            if int(f['gameweek'])!=gw:continue
+            if f.get('home'):apps[f['home']]+=1
+            if f.get('away'):apps[f['away']]+=1
+        dg=sorted(c for c,n in apps.items() if n>1);bg=sorted(c for c in club_names if apps[c]==0)
+        if dg:doubles[str(gw)]=dg
+        if bg:blanks[str(gw)]=bg
+    return {'fixture_counts':{str(gw):total[gw] for gw in range(1,max_gw+1)},
+            'played_counts':{str(gw):played[gw] for gw in range(1,max_gw+1)},
+            'fully_completed':fully,'completed_contiguous':contiguous,'latest_result':latest_result,
+            'double_gameweek_clubs':doubles,'blank_gameweek_clubs':blanks,'total_gameweeks':max_gw}
+
+def build_table(fixtures:list[
+### observed_midfield_usage_v63
+0][1]-order[1][1]<3:continue
+                marker_counts[marker][order[0][0]]+=1
+    marker_roles={4:'GK'}
+    for marker,c in marker_counts.items():
+        total=sum(c.values())
+        if total<8:continue
+        role,n=c.most_common(1)[0]
+        if n/total>=0.80:marker_roles[marker]=role
+    usage=collections.defaultdict(collections.Counter)
+    for m in rich:
+        for key in ('home_players','away_players'):
+            for r in m.get(key,[]):
+                if float(r.get('minutes') or 0)<=0:continue
+                role=marker_roles.get(int(r.get('match_position_marker') or 0))
+                if role:usage[int(r.get('player_id') or 0)][role]+=1
+    changed=[]
+    for eid,c in usage.items():
+        p=players_by_eid.get(eid)
+        if not p:continue
+        st=_position_strengths(p)
+        if max(st['DEF'],st['MID'])<15:continue
+        dm=c['DEF']+c['MID']
+        if dm<2:continue
+        if c['MID']/dm>=0.80 and p.get('pos')!='MID':p['pos']='MID';p['position_source']='observed_midfield_usage_v63';changed.append(eid)
+        elif c['DEF']/dm>=0.80 and p.get('pos')!='DEF':p['pos']='DEF';p['position_source']='observed_defensive_usage_v63';changed.append(eid)
+    return {'marker_roles':marker_roles,'hybrid_players_reclassified':changed}
+
+def join_rich_matches(rich:list[dict[str,Any]],fixtures:list[dict[str,Any]],players_by_eid:dict[int,dict[str,Any]]):
+    infer_hybrid_positions_from_match_markers(rich,players_by_eid)
+    # Rich headers use another team-id namespace, so bind by normalized club names and the exact played schedule.
+    by_pair=collections.defaultdict(list)
+    for f in fixtures:
+        if f['status']=='played': by_pair[(f['home'],f['away'])].append(f)
+    out=[]
+    for mid,m in enumerate(rich,1):
+        home=normalize_club_name(m['home']); away=normalize_club_name(m['away'])
+        candidates=by_pair.get((home,away),[])
+        if m.get('date'):
+            dated=[f for f in candidates if f.get('date')==m.get('date')]
+            if dated:candidates=dated
+        # Score disambiguates the return fixture when needed.
+        candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates
+        if len(candidates)!=1: continue
+        fix=candidates[0]
+        mm={'id':mid,'match_id':mid,'fixture_id':fix['fixture_id'],'gameweek':fix['gameweek'],'date':fix['date'],'home':home,'away':away,'home_score':fix['home_score'],'away_score':fix['away_score'],'status':'played','source':'fm_rich_stats'}
+        allp=[]
+        for side,key,club,opp,venue in [('home','home_players',home,away,'H'),('away','away_players',away,home,'A')]:
+            arr=[]
+            for r in m[key]:
+                eid=int(r['player_id']); canon=players_by_eid.get(eid)
+                pos=canon['pos'] if canon else ('GK' if r.get('is_goalkeeper_match_role') else 'MID')
+                name=canon['name'] if canon else r.get('player',f'FM Player {eid}')
+                row=dict(r); row.update({'player_id':str(eid),'name':name,'club':club,'pos':pos,'opponent':opp,'venue':venue,'home':home,'away':away,'score':f"{fix['home_score']}-{fix['away_score']}",'gameweek':fix['gameweek'],'match_id':mid})
+                row.update(score_player(row,pos)); arr.append(row);allp.append(row)
+            mm[side+'_players']=arr
+        award_bonus(allp)
+        # bonus/fpl point fields are shared row dicts referenced in arrays.
+        out.append(mm)
+    return out
+
+
+def build_players(squads:dict[int,list[int]], selected_clubs:dict[int,Club], people:dict[int,Person], rich:list[dict[str,Any]]|None=None):
+    memberships=collections.defaultdict(list)
+    for ceid,eids in squads.items():
+        for eid in eids: memberships[eid].append(ceid)
+    # Resolve duplicate list membership from actual current-season rich match participation when available.
+    played_club={}
+    if rich:
+        name_to_eid={normalize_club_name(c.name):eid for eid,c in selected_clubs.items()}
+        name_to_eid.update({normalize_club_name(c.short):eid for eid,c in selected_clubs.items()})
+        for m in rich:
+            for side,key in [('home','home_players'),('away','away_players')]:
+                ceid=name_to_eid.get(normalize_club_name(m[side]))
+                if ceid is None:continue
+                for r in m[key]: played_club[int(r['player_id'])]=ceid
+    out=[]; unresolved=[]; ambiguous=[]
+    for eid,clubs in sorted(memberships.items()):
+        person=people.get(eid)
+        if not person:
+            unresolved.append(eid);continue
+        ceid=clubs[0]
+        if len(clubs)>1:
+            if played_club.get(eid) in clubs: ceid=played_club[eid]
+            else: ambiguous.append({'player_eid':eid,'club_eids':clubs})
+        c=selected_clubs[ceid]
+        pos=fantasy_position(person.positions)
+        out.append({'id':str(eid),'pid':str(eid),'name':person.display_name,'display_name':person.display_name,'public_name':person.display_name,'legal_name':person.name,'first_name':getattr(person,'first_name',None),'surname_name':getattr(person,'surname_name',None),'common_name':person.common_name,'first_name_id':getattr(person,'first_name_id',None),'surname_name_id':getattr(person,'surname_name_id',None),'common_name_id':getattr(person,'common_name_id',None),'identity_components_preserved':True,'name_component_evidence':{'legal_full':person.name,'first':getattr(person,'first_name',None),'surname_family':getattr(person,'surname_name',None),'common_known_as':person.common_name,'first_pool_id':getattr(person,'first_name_id',None),'surname_pool_id':getattr(person,'surname_name_id',None),'common_pool_id':getattr(person,'common_name_id',None),'nickname':None,'shirt_name':None,'preferred_short_name':None,'schema':'person_string_pools_v1'},'name_resolution_evidence':{'resolved_display':getattr(person,'display_name',None),'display_equals_legal':bool(getattr(person,'display_name',None) and getattr(person,'display_name',None)==person.name),'display_equals_common':bool(getattr(person,'display_name',None) and person.common_name and getattr(person,'display_name',None)==person.common_name),'display_contains_common':bool(getattr(person,'display_name',None) and person.common_name and person.common_name.casefold() in getattr(person,'display_name',None).casefold()),'display_contains_surname':bool(getattr(person,'display_name',None) and getattr(person,'surname_name',None) and getattr(person,'surname_name',None).casefold() in getattr(person,'display_name',None).casefold()),'source':'preserved_components_plus_current_resolver'},'preferred_name':person.common_name,'first_name':person.first_name,'surname':person.surname,'football_surname':person.surname,'legal_full_name':person.name,'club':normalize_club_name(c.short or c.name),'club_full':c.name,'club_eid':ceid,'pos':pos,'positions':{POSITION_NAMES[i]:v for i,v in enumerate(person.positions or [])},'ca':person.current_ability,'pa':person.potential_ability,'price':price_from_ca(pos,person.current_ability),'apps':0,'minutes':0,'goals':0,'assists':0,'yc':0,'rc':0,'saves':0,'gc':0,'starts':0,'avg_rating':0.0,'fantasy_points':0,'points':0,'form_points':0.0,'form':0.0,'history':[],'weekly_points':{},'visible':True,'available':True,'unresolved':False})
+    return out,unresolved,ambiguous
+
+
+def aggregate_player_history(players:list[dict[str,Any]],matches:list[dict[str,Any]]):
+    byid={int(p['pid']):p for p in players}
+    for m in matches:
+        for key in ('home_players','away_players'):
+            for r in m[key]:
+                p=byid.get(int(r['player_id']))
+                if not p:continue
+                h={k:r.get(k) for k in ['match_id','opponent','venue','score','home','away','minutes','goals','assists','yellow_cards','red_cards','rating','goals_conceded','saves','appearance_pts','goal_pts','assist_pts','clean_sheet_pts','save_pts','gc_pts','card_pts','defcon_actions','defcon_pts','bonus','bps_proxy','fpl_points','gameweek','own_goals','penalties_missed','match_position_marker']};h['date']=m.get('date')
+                h['yc']=h.pop('yellow_cards') or 0;h['rc']=h.pop('red_cards') or 0;h['gc']=h.pop('goals_conceded') or 0
+                p['history'].append(h)
+                mins=r.get('minutes',0) or 0
+                p['apps']+=1 if mins>0 else 0;p['minutes']+=mins;p['goals']+=r.get('goals',0) or 0;p['assists']+=r.get('assists',0) or 0;p['yc']+=r.get('yellow_cards',0) or 0;p['rc']+=r.get('red_cards',0) or 0;p['saves']+=r.get('saves',0) or 0;p['gc']+=r.get('team_goals_conceded_while_on_pitch',0) or 0;p['starts']+=1 if str(r.get('appearance','')).startswith('Started') else 0
+                p['fantasy_points']+=r.get('fpl_points',0) or 0;p['weekly_points'][str(r['gameweek'])]=p['weekly_points'].get(str(r['gameweek']),0)+(r.get('fpl_points',0) or 0)
+    for p in players:
+        ratings=[h['rating'] for h in p['history'] if h.get('rating')]
+        p['avg_rating']=round(sum(ratings)/len(ratings),2) if ratings else 0.0
+        recent=sorted(p['history'],key=lambda h:h['gameweek'])[-4:]
+        p['form_points']=round(sum(h.get('fpl_points',0) for h in recent)/len(recent),1) if recent else 0.0
+        p['points']=p['fantasy_points'];p['form']=p['form_points']
+        card_rows=[h for h in p['history'] if int(h.get('yc',0) or 0)>0 or int(h.get('rc',0) or 0)>0]
+        card_rows.sort(key=lambda h:(str(h.get('date') or ''),int(h.get('gameweek') or 0)))
+        _hist_rows=list(p.get('history') or [])
+        _hist_gws=sorted({int(h.get('gameweek') or 0) for h in _hist_rows if int(h.get('gameweek') or 0)>0})
+        _hist_dates=sorted({str(h.get('date')) for h in _hist_rows if h.get('date')})
+        p['retained_history_evidence']={
+            'decoded_rows':len(_hist_rows),
+            'decoded_gameweeks':_hist_gws,
+            'first_decoded_date':(_hist_dates[0] if _hist_dates else None),
+            'last_decoded_date':(_hist_dates[-1] if _hist_dates else None),
+            'history_is_partial_or_unknown':True,
+            'zero_stats_are_observed_only_within_decoded_rows':True,
+            'source':'decoded_rich_history'
+        }
+        p['discipline_evidence']={
+            'yellow_cards':int(p.get('yc',0) or 0),'red_cards':int(p.get('rc',0) or 0),
+            'history_rows':len(p.get('history') or []),
+            'last_card_date':(card_rows[-1].get('date') if card_rows else None),
+            'last_card_gameweek':(card_rows[-1].get('gameweek') if card_rows else None),
+            'source':'decoded_rich_history'
+        }
+
+
+
+
+
+def gameweek_schedule_meta(fixtures:list[dict[str,Any]], total_gameweeks:int|None=None)->dict[str,Any]:
+    max_gw=int(total_gameweeks or max((int(f.get('round_gameweek') or f.get('gameweek') or 0) for f in fixtures),default=46))
+    total=collections.Counter(int(f['gameweek']) for f in fixtures)
+    played=collections.Counter(int(f['gameweek']) for f in fixtures if f['status']=='played')
+    fully=[gw for gw in range(1,max_gw+1) if total[gw]>0 and played[gw]==total[gw]]
+    contiguous=0;fullset=set(fully)
+    for gw in range(1,max_gw+1):
+        if gw in fullset:contiguous=gw
+        else:break
+    latest_result=max((int(f['gameweek']) for f in fixtures if f['status']=='played'),default=0)
+    club_names=sorted({x for f in fixtures for x in (f.get('home'),f.get('away')) if x})
+    doubles={};blanks={}
+    for gw in range(1,max_gw+1):
+        apps=collections.Counter()
+        for f in fixtures:
+            if int(f['gameweek'])!=gw:continue
+            if f.get('home'):apps[f['home']]+=1
+            if f.get('away'):apps[f['away']]+=1
+        dg=sorted(c for c,n in apps.items() if n>1);bg=sorted(c for c in club_names if apps[c]==0)
+        if dg:doubles[str(gw)]=dg
+        if bg:blanks[str(gw)]=bg
+    return {'fixture_counts':{str(gw):total[gw] for gw in range(1,max_gw+1)},
+            'played_counts':{str(gw):played[gw] for gw in range(1,max_gw+1)},
+            'fully_completed':fully,'completed_contiguous':contiguous,'latest_result':latest_result,
+            'double_gameweek_clubs':doubles,'blank_gameweek_clubs':blanks,'total_gameweeks':max_gw}
+
+def build_table(fixtures:list[dict[str,Any]]) -> list[dict[str,Any]]:
+    clubs=sorted({x for f in fixtures for x in (f['home'],f['away'])})
+    st={c:{'club':c,'P':0,'W':0,'D':0,'L':0,'GF':0,'GA':0,'adjustment':(-4 if c=='Southampton' else 0)} for c in clubs}
+    for f in fixtures:
+        if f['status']!='played':continue
+        h,a=f['home'],f['away'];hg,ag=int(f['home_score']),int(f['away_score'])
+        sh,sa=st[h],st[a]
+        for x in (sh,sa):x['P']+=1
+        sh['GF']+=hg;sh['GA']+=ag;sa['GF']+=ag;sa['GA']+=hg
+        if hg>ag:sh['W']+=1;sa['L']+=1
+        elif ag>hg:sa['W']+=1;sh['L']+=1
+        else:sh['D']+=1;sa['D']+=1
+    rows=[]
+    for x in st.values():
+        x['GD']=x['GF']-x['GA'];x['Pts']=x['W']*3+x['D']+x['adjustment'];rows.append(x)
+    rows.sort(key=lambda x:(x['Pts'],x['GD'],x['GF']),reverse=True)
+    for i,x in enumerate(rows,1):x['position']=i
+    return rows
+
+
+def build_star_teams(players:list[dict[s
+### def aggregate_player_history
+one).casefold()),'display_contains_surname':bool(getattr(person,'display_name',None) and getattr(person,'surname_name',None) and getattr(person,'surname_name',None).casefold() in getattr(person,'display_name',None).casefold()),'source':'preserved_components_plus_current_resolver'},'preferred_name':person.common_name,'first_name':person.first_name,'surname':person.surname,'football_surname':person.surname,'legal_full_name':person.name,'club':normalize_club_name(c.short or c.name),'club_full':c.name,'club_eid':ceid,'pos':pos,'positions':{POSITION_NAMES[i]:v for i,v in enumerate(person.positions or [])},'ca':person.current_ability,'pa':person.potential_ability,'price':price_from_ca(pos,person.current_ability),'apps':0,'minutes':0,'goals':0,'assists':0,'yc':0,'rc':0,'saves':0,'gc':0,'starts':0,'avg_rating':0.0,'fantasy_points':0,'points':0,'form_points':0.0,'form':0.0,'history':[],'weekly_points':{},'visible':True,'available':True,'unresolved':False})
+    return out,unresolved,ambiguous
+
+
+def aggregate_player_history(players:list[dict[str,Any]],matches:list[dict[str,Any]]):
+    byid={int(p['pid']):p for p in players}
+    for m in matches:
+        for key in ('home_players','away_players'):
+            for r in m[key]:
+                p=byid.get(int(r['player_id']))
+                if not p:continue
+                h={k:r.get(k) for k in ['match_id','opponent','venue','score','home','away','minutes','goals','assists','yellow_cards','red_cards','rating','goals_conceded','saves','appearance_pts','goal_pts','assist_pts','clean_sheet_pts','save_pts','gc_pts','card_pts','defcon_actions','defcon_pts','bonus','bps_proxy','fpl_points','gameweek','own_goals','penalties_missed','match_position_marker']};h['date']=m.get('date')
+                h['yc']=h.pop('yellow_cards') or 0;h['rc']=h.pop('red_cards') or 0;h['gc']=h.pop('goals_conceded') or 0
+                p['history'].append(h)
+                mins=r.get('minutes',0) or 0
+                p['apps']+=1 if mins>0 else 0;p['minutes']+=mins;p['goals']+=r.get('goals',0) or 0;p['assists']+=r.get('assists',0) or 0;p['yc']+=r.get('yellow_cards',0) or 0;p['rc']+=r.get('red_cards',0) or 0;p['saves']+=r.get('saves',0) or 0;p['gc']+=r.get('team_goals_conceded_while_on_pitch',0) or 0;p['starts']+=1 if str(r.get('appearance','')).startswith('Started') else 0
+                p['fantasy_points']+=r.get('fpl_points',0) or 0;p['weekly_points'][str(r['gameweek'])]=p['weekly_points'].get(str(r['gameweek']),0)+(r.get('fpl_points',0) or 0)
+    for p in players:
+        ratings=[h['rating'] for h in p['history'] if h.get('rating')]
+        p['avg_rating']=round(sum(ratings)/len(ratings),2) if ratings else 0.0
+        recent=sorted(p['history'],key=lambda h:h['gameweek'])[-4:]
+        p['form_points']=round(sum(h.get('fpl_points',0) for h in recent)/len(recent),1) if recent else 0.0
+        p['points']=p['fantasy_points'];p['form']=p['form_points']
+        card_rows=[h for h in p['history'] if int(h.get('yc',0) or 0)>0 or int(h.get('rc',0) or 0)>0]
+        card_rows.sort(key=lambda h:(str(h.get('date') or ''),int(h.get('gameweek') or 0)))
+        _hist_rows=list(p.get('history') or [])
+        _hist_gws=sorted({int(h.get('gameweek') or 0) for h in _hist_rows if int(h.get('gameweek') or 0)>0})
+        _hist_dates=sorted({str(h.get('date')) for h in _hist_rows if h.get('date')})
+        p['retained_history_evidence']={
+            'decoded_rows':len(_hist_rows),
+            'decoded_gameweeks':_hist_gws,
+            'first_decoded_date':(_hist_dates[0] if _hist_dates else None),
+            'last_decoded_date':(_hist_dates[-1] if _hist_dates else None),
+            'history_is_partial_or_unknown':True,
+            'zero_stats_are_observed_only_within_decoded_rows':True,
+            'source':'decoded_rich_history'
+        }
+        p['discipline_evidence']={
+            'yellow_cards':int(p.get('yc',0) or 0),'red_cards':int(p.get('rc',0) or 0),
+            'history_rows':len(p.get('history') or []),
+            'last_card_date':(card_rows[-1].get('date') if card_rows else None),
+            'last_card_gameweek':(card_rows[-1].get('gameweek') if card_rows else None),
+            'source':'decoded_rich_history'
+        }
+
+
+
+
+
+def gameweek_schedule_meta(fixtures:list[dict[str,Any]], total_gameweeks:int|None=None)->dict[str,Any]:
+    max_gw=int(total_gameweeks or max((int(f.get('round_gameweek') or f.get('gameweek') or 0) for f in fixtures),default=46))
+    total=collections.Counter(int(f['gameweek']) for f in fixtures)
+    played=collections.Counter(int(f['gameweek']) for f in fixtures if f['status']=='played')
+    fully=[gw for gw in range(1,max_gw+1) if total[gw]>0 and played[gw]==total[gw]]
+    contiguous=0;fullset=set(fully)
+    for gw in range(1,max_gw+1):
+        if gw in fullset:contiguous=gw
+        else:break
+    latest_result=max((int(f['gameweek']) for f in fixtures if f['status']=='played'),default=0)
+    club_names=sorted({x for f in fixtures for x in (f.get('home'),f.get('away')) if x})
+    doubles={};blanks={}
+    for gw in range(1,max_gw+1):
+        apps=collections.Counter()
+        for f in fixtures:
+            if int(f['gameweek'])!=gw:continue
+            if f.get('home'):apps[f['home']]+=1
+            if f.get('away'):apps[f['away']]+=1
+        dg=sorted(c for c,n in apps.items() if n>1);bg=sorted(c for c in club_names if apps[c]==0)
+        if dg:doubles[str(gw)]=dg
+        if bg:blanks[str(gw)]=bg
+    return {'fixture_counts':{str(gw):total[gw] for gw in range(1,max_gw+1)},
+            'played_counts':{str(gw):played[gw] for gw in range(1,max_gw+1)},
+            'fully_completed':fully,'completed_contiguous':contiguous,'latest_result':latest_result,
+            'double_gameweek_clubs':doubles,'blank_gameweek_clubs':blanks,'total_gameweeks':max_gw}
+
+def build_table(fixtures:list[dict[str,Any]]) -> list[dict[str,Any]]:
+    clubs=sorted({x for f in fixtures for x in (f['home'],f['away'])})
+    st={c:{'club':c,'P':0,'W':0,'D':0,'L':0,'GF':0,'GA':0,'adjustment':(-4 if c=='Southampton' else 0)} for c in clubs}
+    for f in fixtures:
+        if f['status']!='played':continue
+        h,a=f['home'],f['away'];hg,ag=int(f['home_score']),int(f['away_score'])
+        sh,sa=st[h],st[a]
+        for x in (sh,sa):x['P']+=1
+        sh['GF']+=hg;sh['GA']+=ag;sa['GF']+=ag;sa['GA']+=hg
+        if hg>ag:sh['W']+=1;sa['L']+=1
+        elif ag>hg:sa['W']+=1;sh['L']+=1
+        else:sh['D']+=1;sa['D']+=1
+    rows=[]
+    for x in st.values():
+        x['GD']=x['GF']-x['GA'];x['Pts']=x['W']*3+x['D']+x['adjustment'];rows.append(x)
+    rows.sort(key=lambda x:(x['Pts'],x['GD'],x['GF']),reverse=True)
+    for i,x in enumerate(rows,1):x['position']=i
+    return rows
+
+
+def build_star_teams(players:list[dict[str,Any]],latest_gw:int)->dict[str,dict[str,Any]]:
+    out={}
+    formations=[]
+    for d in range(3,6):
+        for m in range(2,6):
+            f=10-d-m
+            if 1<=f<=3:formations.append((d,m,f))
+    for gw in range(1,max(1,latest_gw)+1):
+        bypos={pos:sorted((p for p in players if p.get('pos')==pos),key=lambda p:(int(p.get('weekly_points',{}).get(str(gw),0)),p.get('fantasy_points',0)),reverse=True) for pos in ('GK','DEF','MID','FWD')}
+        best=None
+        for d,m,f in formations:
+            picks=bypos['GK'][:1]+bypos['DEF'][:d]+bypos['MID'][:m]+bypos['FWD'][:f]
+            if len(picks)!=11 or len({p['id'] for p in picks})!=11:continue
+            pts=sum(int(p.get('weekly_points',{}).get(str(gw),0)) for p in picks)
+            if best is None or pts>best[0]:best=(pts,[p['id'] for p in picks],{'GK':1,'DEF':d,'MID':m,'FWD':f})
+        if best:out[str(gw)]={'points':best[0],'ids':best[1],'formation':best[2]}
+    return out
+
+def _build_payload(save_path:Path,fingerprint:str,db,fix:bytes,include_rich:bool=True)->dict[str,Any]:
+    all_clubs=scan_clubs(db)
+    rich_raw=rich_extract_named(save_path,all_clubs) if include_rich else []
+    comp_counts=collections.Counter(m.get('competition') for m in rich_raw if m.get('competition'))
+    requested_league=preferred_league if preferred_league in SUPPORTED_LEAGUES else None
+    preselect_rich=[m for m in rich_raw if (not requested_league or m.get('competition')==requested_league)]
+    expected_names={normalize_club_name(m[k]) for m in preselect_rich for k in ('home','away')} if (requested_league and preselect_rich) else None
+    fixtures,fixture_info=select_championship_fixtures(fix,all_clubs,expected_names,requested_league)
+    expected_league=fixture_info['competition']
+    rich_raw=[m for m in rich_raw if m.get('competition')==expected_league]
+    team_ids={x for f in fixtures for x in (f['home_tid'],f['away_tid'])}
+    shift=fixture_info['fixture_to_club_shift']
+    selected={tid-shift:all_clubs[tid-shift] for tid in team_ids}
+    # Second retained-match pass, AFTER league selection. This cannot change the chosen
+    # competition or club set; it only attempts to recover richer player history for the
+    # selected clubs (notably some Premier League saves).
+    selected_aliases=selected_rich_team_aliases(selected)
+    selected_names={normalize_club_name(c.short or c.name) for c in selected.values()}
+    post_raw=[]
+    for i,name in enumerate(rich_names):
+        p=Path(f'/tmp/rich_{i}.bin')
+        if not p.exists(): continue
+        buf=p.read_bytes()
+        for m in _rich_extract_member(buf,selected_aliases,name):
+            if m.get('competition')!=fixture_info['competition']: continue
+            if normalize_club_name(m.get('home','')) not in selected_names or normalize_club_name(m.get('away','')) not in selected_names: continue
+            post_raw.append(m)
+        p.unlink(missing_ok=True)
+    post_recovered=0
+    if post_raw:
+        combined=[];seen_post=set()
+        for m in list(rich_raw)+post_raw:
+            key=(m.get('competition'),m.get('home'),m.get('away'),m.get('home_score'),m.get('away_score'),
+                 tuple(x.get('player_id') for x in m.get('home_players',[])),tuple(x.get('player_id') for x in m.get('away_players',[])))
+            if key in seen_post: continue
+            seen_post.add(key);combined.append(m)
+        post_recovered=max(0,len(combined)-len(rich_raw));rich_raw=combined
+    fixture_name={tid:normalize_club_name(selected[tid-shift].short or selected[tid-shift].name) for tid in team_ids}
+    for i,f in enumerate(sorted(fixtures,key=lambda x:(x['gameweek'],x['date'],x['home_tid'],x['away_tid'])),1):
+        f['fixture_id']=i;f['home']=fixture_name[f['home_tid']];f['away']=fixture_name[f['away_tid']]
+    results=scan_completed_results(db,fixtures)
+    # First recover senior squads independently. If separate retained match-detail files are
+    # missing, use grounded completed-result anchors inside game_db.dat to recover old player rows.
+    squads,squad_diag=scan_first_team_squads(db,selected,rich_raw)
+    game_db_rich,game_db_rich_diag=recover_game_db_rich_matches(
+        db,fixtures,selected,squads,shift,fixture_info['competition'])
+    if game_db_rich:
+        existing={(normalize_club_name(m.get('home','')),normalize_club_name(m.get('away','')),
+                   int(m.get('home_score') or 0),int(m.get('away_score') or 0)) for m in rich_raw}
+        for m in game_db_rich:
+            k=(normalize_club_name(m.get('home','')),normalize_club_name(m.get('away','')),
+               int(m.get('home_score') or 0),int(m.get('away_score') or 0))
+            if k not in existing:
+                rich_raw.append(m);existing.add(k)
+        # Re-run squad selection with recovered participation as extra identity evidence.
+        squads,squad_diag=scan_first_team_squads(db,selected,rich_raw)
+    target_eids={p for vals in squads.values() for p in vals}
+    for m in rich_raw:
+        for key in ('home_players','away_players'):
+            for r in m.get(key,[]):target_eids.add(int(r['player_id']))
+    people=bind_target_people(db,target_eids)
+    players,unresolved,ambiguous=build_players(squads,selected,people,rich_raw)
+    pbyeid={int(p['pid']):p for p in players}
+    rich_matches=join_rich_matches(rich_raw,fixtures,pbyeid) if rich_raw else []
+    aggregate_player_history(players,rich_matches)
+    availability_diag=_structural_availability_from_fs(players,fixtures)
+    reprice_players(players,fixtures)
+    fixtures.sort(key=lambda x:(x['gameweek'],x['date'],x['fixture_id']))
+    sched=gameweek_schedule_meta(fixtures,fixture_info['total_gameweeks'])
+    current=sched['completed_contiguous']
+    table=build_table(fixtures)
+    star_teams=build_star_teams(players,current)
+    meta={'fingerprint':fingerprint,'competition':fixture_info['competition'],'competition_code':fixture_info['competition_code'],'competition_fixture_id':fixture_info['competition_id'],'fixture_season_start':fixture_info['season_start'],'fixture_to_club_shift':shift,'fixture_candidates_considered':fixture_info['candidate_groups'],'fixture_exact_candidates':fixture_info['exact_candidate_groups'],'fixture_rich_name_overlap':fixture_info['rich_name_overlap'],'rich_competition_counts':
