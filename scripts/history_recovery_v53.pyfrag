@@ -181,10 +181,22 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
 
     used_fixtures=set();used_candidates=set();out=[]
 
+    def fixture_identity(f):
+        raw=int(f.get('fixture_id') or 0)
+        if raw>0:return ('id',raw)
+        # Alternate FM schema generations may omit/zero fixture_id. Calendar structure is
+        # already authoritative at this point, so use a composite identity rather than
+        # collapsing every such fixture onto key 0. Include score because this recovery
+        # operates only on played fixtures and include GW/date when available to separate
+        # repeated opponents/doubles.
+        return ('struct',int(f.get('home_tid') or 0),int(f.get('away_tid') or 0),
+                str(f.get('date') or ''),int(f.get('gameweek') or f.get('round') or 0),
+                int(f.get('home_score') or 0),int(f.get('away_score') or 0))
+
     def candidate_fixture_options(ci,leid=None,reid=None):
         c=cached[ci];lhg,lag=score_of(c);opts=[]
         for heid,aeid,hs,as_,f in played:
-            fid=int(f.get('fixture_id') or 0)
+            fid=fixture_identity(f)
             if fid in used_fixtures:continue
             if hs==lhg and as_==lag:
                 if (leid is None or heid==leid) and (reid is None or aeid==reid):opts.append((f,False,heid,aeid))
@@ -194,7 +206,7 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
 
     def register_match(ci,f,rev,leid,reid,source_kind):
         if ci in used_candidates:return False
-        fid=int(f.get('fixture_id') or 0)
+        fid=fixture_identity(f)
         if fid in used_fixtures:return False
         c=cached[ci];left,right=c['left'],c['right']
         H,A=(right,left) if rev else (left,right)
@@ -281,7 +293,7 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
             lmap={eid:(sc,direct) for sc,direct,eid in ls};rmap={eid:(sc,direct) for sc,direct,eid in rs}
             lhg,lag=score_of(c);rank=[]
             for heid,aeid,hs,as_,f in played:
-                fid=int(f.get('fixture_id') or 0)
+                fid=fixture_identity(f)
                 if fid in used_fixtures:continue
                 for rev in (False,True):
                     if not rev:
