@@ -21,7 +21,8 @@ jobs:
           from pathlib import Path
           s=Path('scripts/history_recovery_v53.pyfrag').read_text()
           assert "int(f.get('fixture_id') or 0) in used_fixtures" not in s
-          assert s.count('fixture_identity(f) in used_fixtures') >= 4
+          assert s.count('fixture_identity(f) in used_fixtures') == 2
+          assert s.count('fid=fixture_identity(f)') >= 2
           assert 'def fixture_identity(f):' in s
           print('canonical fixture-consumption checks passed')
           PY
