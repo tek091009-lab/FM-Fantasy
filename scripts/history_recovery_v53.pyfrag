@@ -21,7 +21,7 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
         'identity_rounds':0,'ambiguous_seed_player_ids':0,'transfer_conflict_neutralized_players':0,
         'adaptive_cluster_edges':0,'adaptive_cluster_edges_rejected_conflict':0,
         'near_duplicate_candidate_pairs_collapsed':0,'near_duplicate_candidate_pairs_soft_collapsed':0,
-        'temporal_transfer_fixture_evidence':0
+        'temporal_transfer_fixture_evidence':0,'variable_squad_size_candidate_pairs':0
     }
     club_sets={eid:set(int(x) for x in squads.get(eid,[])) for eid in selected_clubs}
     membership_owners=collections.defaultdict(set)
@@ -36,6 +36,8 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
         if f.get('status')!='played':continue
         heid=int(f['home_tid'])-int(fixture_shift);aeid=int(f['away_tid'])-int(fixture_shift)
         played.append((heid,aeid,int(f.get('home_score') or 0),int(f.get('away_score') or 0),f))
+    played_score_pairs={(hs,as_) for _h,_a,hs,as_,_f in played}
+    played_score_pairs|={(as_,hs) for _h,_a,hs,as_,_f in played}
 
     cached=[];seen_pairs=set();seen_side_pair_signatures=set()
     for i,name in enumerate(rich_names):
@@ -47,8 +49,9 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
         diagnostics['stat_records']+=len(stats)
         if len(stats)<40:continue
         diagnostics['members_with_stats']+=1
-        pairs=_rich_candidate_squad_pairs(stats)
+        pairs=_rich_candidate_squad_pairs(stats,played_score_pairs)
         diagnostics['candidate_pairs']+=len(pairs)
+        diagnostics['variable_squad_size_candidate_pairs']+=sum(1 for left,right in pairs if len(left)!=20 or len(right)!=20)
         for left,right in pairs:
             pk=(name,left[0]['offset'],left[-1]['offset'],right[0]['offset'],right[-1]['offset'])
             if pk in seen_pairs:continue
