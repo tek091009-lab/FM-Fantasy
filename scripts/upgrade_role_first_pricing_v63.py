@@ -9,11 +9,31 @@ if not m: raise SystemExit('FM_PY_SOURCE_B64 missing')
 py=base64.b64decode(m.group(1)).decode('utf-8')
 
 # Role first: actual usage is a hard pricing constraint. Quality/CA/team strength may
-# separate players only inside the band permitted by their observed role.
+# separate players only inside the band permitted by their observed role. New arrivals
+# are judged only on matches they were actually at the current club for.
 needle="""            raw_scores[p['id']]=raw
             c['distribution_cap']=round(raw,2)
 """
 replacement="""            obs=max(0,int(c.get('observed_matches') or 0))
+            arrival=None
+            for _k in ('club_join_date','joined_date','date_joined','transfer_date','arrival_date','signed_date'):
+                _v=p.get(_k)
+                if not _v:continue
+                try:arrival=dt.date.fromisoformat(str(_v)[:10]);break
+                except Exception:pass
+            if arrival and p.get('club'):
+                eligible=set()
+                for _f in fixtures:
+                    if _f.get('status')!='played' or p.get('club') not in (_f.get('home'),_f.get('away')):continue
+                    try:_fd=dt.date.fromisoformat(str(_f.get('date') or '')[:10])
+                    except Exception:continue
+                    if _fd>=arrival:eligible.add(_fd)
+                obs=len(eligible)
+                c['current_club_observed_matches']=obs
+                c['arrival_date']=arrival.isoformat()
+                c['new_arrival']=obs<2
+            else:
+                c['new_arrival']=False
             mins=max(0.0,float(p.get('minutes') or 0))
             minute_share=min(1.0,mins/max(1.0,obs*90.0)) if obs else 0.0
             absence_excused=bool(p.get('injured') or p.get('suspended') or p.get('injury_status')=='injured' or p.get('suspension_status')=='suspended')
@@ -29,6 +49,8 @@ replacement="""            obs=max(0,int(c.get('observed_matches') or 0))
                     role='starter';role_cap={'GK':6.0,'DEF':8.0,'MID':15.0,'FWD':14.0}[pos]
                 raw=min(raw,role_cap)
                 c['usage_role']=role;c['usage_role_cap']=role_cap
+            elif c.get('new_arrival'):
+                c['usage_role']='new_arrival_unproven'
             elif absence_excused:
                 c['usage_role']='absence_excused'
             else:
@@ -41,19 +63,21 @@ py=py.replace(needle,replacement,1)
 
 # Same club + same fantasy position: if one available player is clearly the established
 # starter by usage, a materially lower-usage alternative cannot cost more than him.
+# Newly arrived players are excluded until they have >=2 eligible club matches.
 anchor="""    # Round to FPL-style half-million prices.
 """
 guard="""    by_club_pos={}
     for p in players:by_club_pos.setdefault((p.get('club'),p.get('pos')),[]).append(p)
     for (_club,_pos),arr in by_club_pos.items():
         def _usage(x):
-            c=x.get('price_context') or {};obs=max(0,int(c.get('observed_matches') or 0));mins=max(0.0,float(x.get('minutes') or 0))
+            c=x.get('price_context') or {};obs=max(0,int(c.get('current_club_observed_matches',c.get('observed_matches') or 0)));mins=max(0.0,float(x.get('minutes') or 0))
             return min(1.0,mins/max(1.0,obs*90.0)) if obs else 0.0
         available=[x for x in arr if not (x.get('injured') or x.get('suspended') or x.get('injury_status')=='injured' or x.get('suspension_status')=='suspended')]
-        available.sort(key=_usage,reverse=True)
-        if not available:continue
-        leader=available[0];lu=_usage(leader);leader_raw=raw_scores.get(leader['id'],0.0)
-        for p in available[1:]:
+        established=[x for x in available if not (x.get('price_context') or {}).get('new_arrival')]
+        established.sort(key=_usage,reverse=True)
+        if not established:continue
+        leader=established[0];lu=_usage(leader);leader_raw=raw_scores.get(leader['id'],0.0)
+        for p in established[1:]:
             u=_usage(p)
             if lu>=0.60 and lu-u>=0.20:
                 floor={'GK':4.0,'DEF':4.0,'MID':4.5,'FWD':4.5}[p['pos']]
@@ -85,9 +109,9 @@ new="""        st=_position_strengths(p)
 if old not in py: raise SystemExit('v62 hybrid block missing')
 py=py.replace(old,new,1)
 
-py=py.replace("'pricing_model':'fpl-shaped-v62-availability-aware'","'pricing_model':'fpl-shaped-v63-role-first'")
-py=py.replace('FPL-shaped v6.2 launch pricing.','FPL-shaped v6.3 role-first launch pricing.')
-for req in ['observed_minute_share','rotation_behind_starter','observed_midfield_usage_v63','usage_role_cap']:
+py=py.replace("'pricing_model':'fpl-shaped-v62-availability-aware'","'pricing_model':'fpl-shaped-v63-role-first-transfer-aware'")
+py=py.replace('FPL-shaped v6.2 launch pricing.','FPL-shaped v6.3 role-first transfer-aware launch pricing.')
+for req in ['observed_minute_share','rotation_behind_starter','observed_midfield_usage_v63','usage_role_cap','new_arrival_unproven','current_club_observed_matches']:
     if req not in py:raise SystemExit('missing '+req)
 compile(py,'fm_importer.py','exec')
 
@@ -96,4 +120,4 @@ packed=base64.b64encode(gzip.compress(html.encode('utf-8'),compresslevel=9,mtime
 step=(len(packed)+len(PARTS)-1)//len(PARTS)
 for i,p in enumerate(PARTS):p.write_text(packed[i*step:(i+1)*step]+'\n')
 if ''.join(p.read_text().strip() for p in PARTS)!=packed:raise SystemExit('repack mismatch')
-print('v6.3 role-first pricing + observed deployment classification applied')
+print('v6.3 role-first transfer-aware pricing + observed deployment classification applied')
