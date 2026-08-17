@@ -2,9 +2,11 @@ name: Deploy FM Fantasy to GitHub Pages
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'deploy-marker.json'
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 concurrency:
@@ -25,3 +27,45 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+      - name: Verify live FM Fantasy build
+        shell: bash
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          url="${PAGE_URL%/}/index.html?sha=${GITHUB_SHA}"
+          ok=0
+          for i in $(seq 1 12); do
+            body="$(curl -fsSL --max-time 15 "$url" || true)"
+            if printf '%s' "$body" | grep -q 'updateguard.js?v=2' && printf '%s' "$body" | grep -q 'identityguard.js?v=3'; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo 'Live Pages smoke test did not see the expected stability build.' >&2
+            exit 1
+          fi
+      - name: Record verified live deployment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"update_guard\": \"v2\",\n  \"identity_guard\": \"v3-diagnostic-only\"\n}\n' "$GITHUB_SHA" "$stamp")"
+          content="$(printf '%s' "$json" | base64 -w0)"
+          existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$existing_sha" ]; then
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" \
+              -f message="Record verified Pages deployment ${GITHUB_SHA::7}" \
+              -f content="$content" \
+              -f sha="$existing_sha" \
+              -f branch=main >/dev/null
+          else
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" \
+              -f message="Record verified Pages deployment ${GITHUB_SHA::7}" \
+              -f content="$content" \
+              -f branch=main >/dev/null
+          fi
