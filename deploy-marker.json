@@ -1,6 +1,6 @@
 {
-  "verified_live_sha": "0b1348528ca5d3a6b9a00eebaebc85fc43546a5b",
-  "verified_at": "2026-08-17T22:52:46Z",
+  "verified_live_sha": "71f4e4361561585ff288f650e73377eeaab02f6e",
+  "verified_at": "2026-08-17T22:57:56Z",
   "authfix": "v12-authoritative-cloud",
   "availability_truth": "v2-stale-snapshot-suppression",
   "update_guard": "v2",
