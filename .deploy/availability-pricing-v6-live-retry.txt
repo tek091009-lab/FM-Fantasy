@@ -1,0 +1,1 @@
+Fresh GitHub Pages deployment trigger after transient Pages 503. Production bundle remains commit 678b0f9 with structural availability and all-position pricing calibration.
