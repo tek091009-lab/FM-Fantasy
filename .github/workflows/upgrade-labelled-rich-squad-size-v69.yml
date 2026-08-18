@@ -1,0 +1,42 @@
+name: Upgrade labelled rich squad size v69
+on:
+  push:
+    paths:
+      - '.github/workflows/upgrade-labelled-rich-squad-size-v69.yml'
+permissions:
+  contents: write
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply v69 labelled retained squad-size fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/upgrade_labelled_rich_squad_size_v69.py
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode('utf-8')
+          assert 'if len(stats)<36:return None' in py
+          assert 'for nl in range(18,23):' in py
+          assert 'Preserve the original 20+20 representation as the first/preferred path.' in py
+          assert "def recover_unlabelled_rich_members(" in py
+          assert "strict_current_db_membership_only_v68" in py
+          compile(py,'fm_importer_v69.py','exec')
+          print('verify_ok=1')
+          PY
+      - name: Commit production importer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20
+          git commit -m 'Apply v69 labelled retained squad-size fallback' || exit 0
+          git pull --rebase origin main
+          git push
