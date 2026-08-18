@@ -1,3 +1,4 @@
+# final reapply after removing conflicting fallback
 name: Apply rich match validation v69
 on:
   push:
@@ -26,8 +27,8 @@ jobs:
           html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
           m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m
           py=base64.b64decode(m.group(1)).decode()
-          req=['named_header_candidate_v69','official-score-plus-strict-current-cohort-v69','rich_fixture_coverage','same_match_both_clubs','strict-db-membership-only-no-history-mutation-v68']
-          bad=["candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates"]
+          req=['def _rich_candidate_twenty_pairs','named_header_candidate_v69','official-score-plus-strict-current-cohort-v69','rich_fixture_coverage','same_match_both_clubs','strict-db-membership-only-no-history-mutation-v68']
+          bad=["candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates",'bounded 18-22 rows per side']
           assert all(x in py for x in req),[x for x in req if x not in py]
           assert all(x not in py for x in bad),[x for x in bad if x in py]
           compile(py,'fm_importer_v69.py','exec')
@@ -42,10 +43,11 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           if [ "$rc" -eq 0 ] && [ "$vrc" -eq 0 ]; then
             git add app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20 _v69_apply_status.txt
-            git commit -m 'Apply v69 official-score and cohort match validation' || true
+            git commit -m 'Reapply strict v69 official-score match validation' || true
           else
             git add _v69_apply_status.txt
-            git commit -m 'Record v69 retained-match safety failure' || true
+            git commit -m 'Record strict v69 reapply failure' || true
           fi
+          git pull --rebase origin main
           git push
           exit $(( rc != 0 || vrc != 0 ))
