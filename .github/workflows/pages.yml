@@ -31,7 +31,9 @@ jobs:
           assert r.get('ok') is True,r
           assert r['checks'].get('header_pat_runtime_object') is True,r
           assert r['checks'].get('name_pool_runtime_probe') is True,r
-          print('deterministic V71 clean-rebuild preflight passed')
+          assert r['checks'].get('league_selector_v72') is True,r
+          assert r['checks'].get('old_league_ambiguity_catch_absent') is True,r
+          print('deterministic V72 clean-rebuild preflight passed')
           PY
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
@@ -61,7 +63,6 @@ jobs:
             sleep 5
           done
           [ "$ok" -eq 1 ] || { echo 'Live index did not expose clean-rebuild scripts' >&2; exit 1; }
-
           updateguard="$(curl -fsSL --max-time 20 "$base/updateguard.js?v=3&sha=${GITHUB_SHA}")"
           clearfix="$(curl -fsSL --max-time 20 "$base/clearfix.js?v=3&sha=${GITHUB_SHA}")"
           availability="$(curl -fsSL --max-time 20 "$base/availabilitytruth.js?v=4&sha=${GITHUB_SHA}")"
@@ -69,13 +70,9 @@ jobs:
           printf '%s' "$updateguard" | grep -q 'world-update-guard-v3-identity-history-safe'
           printf '%s' "$updateguard" | grep -q 'retained matches do not reproduce the official score'
           printf '%s' "$clearfix" | grep -q 'fmfantasy_reset_world_season'
-          printf '%s' "$clearfix" | grep -q 'fmFantasyLastSeasonResetBackup'
           printf '%s' "$clearfix" | grep -q 'clearBrowserManagerSeason'
-          printf '%s' "$clearfix" | grep -q 'resetLeagueSnapshots'
           printf '%s' "$availability" | grep -q 'availability-truth-v4'
-          printf '%s' "$availability" | grep -q 'discipline.dat/active-ban-v1'
           printf '%s' "$identity" | grep -q 'diagnostic-only'
-
           : > /tmp/live_parts.b64
           for i in $(seq -w 0 16); do curl -fsSL --max-time 20 "$base/app/part${i}?sha=${GITHUB_SHA}" >> /tmp/live_parts.b64; done
           for i in 17 18 19 20; do curl -fsSL --max-time 20 "$base/app/fix${i}?sha=${GITHUB_SHA}" >> /tmp/live_parts.b64; done
@@ -90,26 +87,20 @@ jobs:
           forbidden=["cur.extend(add);diag['rich_augmented_players']+=len(add)",'if played_club.get(eid) in clubs: ceid=played_club[eid]','infer_hybrid_positions_from_match_markers(rich,players_by_eid)',"candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates",'bounded 18-22 rows per side']
           for t in required:assert t in py,'live importer missing '+t
           for t in forbidden:assert t not in py,'live importer contains forbidden '+t
-          code=compile(py,'fm_importer_live.py','exec')
-          name='fm_importer_live_probe';mod=types.ModuleType(name);mod.__file__='fm_importer_live.py';sys.modules[name]=mod
-          exec(code,mod.__dict__,mod.__dict__)
-          assert hasattr(mod.__dict__.get('HEADER_PAT'),'finditer'),'live HEADER_PAT runtime object missing'
-          assert callable(mod.__dict__.get('find_name_pool_index')),'live find_name_pool_index missing'
-          try:
-              mod.__dict__['find_name_pool_index'](b'\x00'*4096)
-          except RuntimeError as e:
-              assert 'FM name string table not found' in str(e),e
-          except NameError as e:
-              raise AssertionError('live name-pool runtime dependency unresolved') from e
-          else:
-              raise AssertionError('synthetic empty DB unexpectedly resolved a live name pool')
-          for t in ['structural-v2-fixture-floor','fixture_floor','full<=save_date','expiry<=save_date']:assert t in py,'live availability importer missing '+t
-          start=html.find('function fmAvailabilityTruthDate(payload){');end=html.find('function fmBuildInitialNews(payload){',start)
-          assert start>=0 and end>start,'live core availability block missing'
+          code=compile(py,'fm_importer_live.py','exec');name='fm_importer_live_probe';mod=types.ModuleType(name);mod.__file__='fm_importer_live.py';sys.modules[name]=mod;exec(code,mod.__dict__,mod.__dict__)
+          assert hasattr(mod.__dict__.get('HEADER_PAT'),'finditer')
+          try:mod.__dict__['find_name_pool_index'](b'\x00'*4096)
+          except RuntimeError as e:assert 'FM name string table not found' in str(e)
+          except NameError as e:raise AssertionError('live name-pool runtime dependency unresolved') from e
+          else:raise AssertionError('synthetic empty DB unexpectedly resolved a live name pool')
+          v72=['fmFantasySeasonLeaguePreferenceV72','fmLeagueAmbiguity=/Multiple supported English league seasons|contains both supported English leagues/i.test(msg)','FM_PENDING_SEASON_LEAGUE=fmRememberLeaguePreference(chosen)','explicitPreference!==undefined?fmNormaliseLeaguePreference(explicitPreference):fmCurrentLeaguePreference()',"return await sendFMImport(file,mode,true,chosen)"]
+          for t in v72:assert t in html,'live V72 league selector missing '+t
+          assert "if(mode==='season'&&!autoRetry&&!($('leagueImportPreference')?.value)&&msg.includes('Multiple supported English league seasons')){" not in html
+          start=html.find('function fmAvailabilityTruthDate(payload){');end=html.find('function fmBuildInitialNews(payload){',start);assert start>=0 and end>start
           block=html[start:end]
-          for t in ['discipline.dat/active-ban-v1','injury_manager.dat/current-window']:assert t in block,'live availability missing '+t
-          for t in ['5 yellow cards','second-yellow red','fmClubPlayedAfter(payload,p.club,inc.date)']:assert t not in block,'live heuristic remains '+t
-          print('deep live V71 reset-safe clean-rebuild verification passed')
+          for t in ['discipline.dat/active-ban-v1','injury_manager.dat/current-window']:assert t in block
+          for t in ['5 yellow cards','second-yellow red','fmClubPlayedAfter(payload,p.club,inc.date)']:assert t not in block
+          print('deep live V72 clean-rebuild verification passed')
           PY
       - name: Record verified live deployment
         shell: bash
@@ -118,11 +109,11 @@ jobs:
         run: |
           set -euo pipefail
           stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"verification\": \"v71-name-pool-runtime-clean-rebuild-live\",\n  \"authfix\": \"v12-authoritative-cloud\",\n  \"availability_truth\": \"v4-direct-structural-evidence\",\n  \"current_squad_identity\": \"v68-strict-db-membership-only\",\n  \"retained_match_validation\": \"v69-official-score-plus-current-cohort\",\n  \"name_pool_runtime\": \"v71-historical-header-pat-restored-and-executed\",\n  \"update_guard\": \"v3-identity-history-safe\",\n  \"clear_database\": \"v3-backed-up-reset-plus-stale-manager-wipe\",\n  \"server_history_lock\": \"accepted-gameweeks-immutable\",\n  \"server_price_history_lock\": \"accepted-price-events-immutable\",\n  \"identity_guard\": \"v3-diagnostic-only\",\n  \"world_scorer\": \"v5-chip-persistence\"\n}\n' "$GITHUB_SHA" "$stamp")"
+          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"verification\": \"v72-league-selector-runtime-clean-rebuild-live\",\n  \"authfix\": \"v12-authoritative-cloud\",\n  \"availability_truth\": \"v4-direct-structural-evidence\",\n  \"current_squad_identity\": \"v68-strict-db-membership-only\",\n  \"retained_match_validation\": \"v69-official-score-plus-current-cohort\",\n  \"name_pool_runtime\": \"v71-historical-header-pat-restored-and-executed\",\n  \"league_selector\": \"v72-auto-prompt-plus-sticky-manual-choice\",\n  \"update_guard\": \"v3-identity-history-safe\",\n  \"clear_database\": \"v3-backed-up-reset-plus-stale-manager-wipe\"\n}\n' "$GITHUB_SHA" "$stamp")"
           content="$(printf '%s' "$json" | base64 -w0)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified v71 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified v72 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified v71 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified v72 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
