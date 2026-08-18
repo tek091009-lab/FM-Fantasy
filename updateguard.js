@@ -1,6 +1,6 @@
 (()=>{
 'use strict';
-const VERSION='world-update-guard-v3-identity-history-safe';
+const VERSION='world-update-guard-v4-fixture-club-proof';
 const norm=v=>String(v??'').trim().toLowerCase().replace(/\s+/g,' ');
 const num=v=>Number(v||0)||0;
 const playerId=p=>String(p?.pid??p?.id??'');
@@ -38,10 +38,23 @@ function matchIdentityValid(m){
  const hs=new Set(hi);if(ai.some(x=>hs.has(x)))return false;
  return matchScoreValid(m);
 }
+function validateFixtureClubProof(meta,clubs,errors){
+ if(meta.fixture_club_mapping_policy!=='current-squad-validated-shift-v73'){
+  errors.push('v73 current-squad fixture→club mapping proof is missing');return;
+ }
+ const ev=meta.fixture_club_mapping_evidence;
+ if(!ev||typeof ev!=='object'){errors.push('v73 fixture→club mapping evidence is missing');return}
+ if(num(ev.team_count)!==clubs.length||num(ev.safe_squad_clubs)!==clubs.length){errors.push(`v73 fixture→club proof covers ${num(ev.safe_squad_clubs)}/${clubs.length} safe current squads`);return}
+ const proofNames=new Set(arr(ev.mapped_clubs).map(norm).filter(Boolean));
+ const clubNames=new Set(clubs.map(c=>norm(c?.short_name||c?.name)).filter(Boolean));
+ if(proofNames.size!==clubNames.size||[...clubNames].some(x=>!proofNames.has(x)))errors.push('v73 fixture→club proof does not match the published club set');
+ if(arr(ev.unsafe_squad_names).length)errors.push(`v73 fixture→club proof still contains unsafe squads: ${arr(ev.unsafe_squad_names).join(', ')}`);
+}
 function validate(payload,oldPayload){
  const errors=[],warnings=[];const players=arr(payload?.players),clubs=arr(payload?.clubs),matches=arr(payload?.matches),fixtures=arr(payload?.fixtures),meta=payload?.meta||{};
  if(meta.current_squad_identity_policy!=='strict-db-membership-only-no-history-mutation-v68')errors.push('legacy current-squad identity decoder detected');
  if(meta.rich_match_validation_policy!=='official-score-plus-strict-current-cohort-v69')errors.push('v69 retained-match validation is missing');
+ validateFixtureClubProof(meta,clubs,errors);
  if(players.length<20)errors.push(`player population collapsed to ${players.length}`);
  if(clubs.length<2)errors.push(`club population collapsed to ${clubs.length}`);
  const ids=new Set();let missingIds=0,duplicates=0;
@@ -93,7 +106,7 @@ async function restoreLocal(payload){
  try{if(typeof applyImportedPayload==='function')applyImportedPayload(payload,'load')}catch(_e){}
 }
 function install(){
- const c=window.FMCloud;if(!c||c.__worldUpdateGuardV3||typeof c.publishWorld!=='function')return false;c.__worldUpdateGuardV3=true;
+ const c=window.FMCloud;if(!c||c.__worldUpdateGuardV4||typeof c.publishWorld!=='function')return false;c.__worldUpdateGuardV4=true;
  const original=c.publishWorld.bind(c);
  c.publishWorld=async(payload,...args)=>{
   if(payload==null)return original(payload,...args);
