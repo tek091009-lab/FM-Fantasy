@@ -1,0 +1,42 @@
+name: Apply current squad footer confidence v76
+on:
+  push:
+    paths:
+      - 'scripts/fix_current_squad_footer_confidence_v76.py'
+      - '.github/workflows/apply-current-squad-footer-confidence-v76.yml'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply and verify v76 current squad decoder
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/fix_current_squad_footer_confidence_v76.py | tee _v76_current_squad_status.txt
+          python - <<'PY' | tee -a _v76_current_squad_status.txt
+          from pathlib import Path
+          import ast,base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode()
+          assert "CURRENT_SQUAD_FOOTER_POLICY='positive-structure-first-consensus-only-legacy-v76'" in py
+          assert 'def read_squad_list_legacy(' in py
+          assert "weak_sentinel_consensus_accepted" in py
+          assert "weak_sentinel_singletons_rejected" in py
+          assert "priority={'strict':3,'relaxed_uid':2,'legacy_weak':1}.get(kind,1)" in py
+          compile(py,'fm_importer_v76_verify.py','exec')
+          tree=ast.parse(py)
+          names={n.name for n in ast.walk(tree) if isinstance(n,ast.FunctionDef)}
+          assert {'read_squad_list','read_squad_list_legacy','scan_first_team_squads'} <= names
+          print('verify_ok=1 strong_reader=1 legacy_consensus_fallback=1')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20 _v76_current_squad_status.txt
+          git commit -m 'Require positive current squad block evidence v76' || true
+          git pull --rebase origin main
+          git push
