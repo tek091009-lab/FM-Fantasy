@@ -1,0 +1,2 @@
+v74: patched_legacy_calls=1; browser_defs=1; selector_calls_verified=1; loaded db bytes are handed to every browser selector call
+verify_ok=1 browser_defs=1 selector_calls=1
