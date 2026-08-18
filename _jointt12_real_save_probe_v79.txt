@@ -1,0 +1,52 @@
+ACTUAL SAVE PROBE — jointt12 (v03).fm
+=======================================
+Source file: jointt12 (v03).fm
+Source size: 95,642,414 bytes
+Method: decompressed the real FM save database frame and executed the importer club/current-team scanners against those bytes.
+
+Correct Championship candidate:
+competition_id=206
+fixture_to_club_shift=132
+
+Strict current-team roster sizes from the actual game database:
+Birmingham City 29
+Blackburn Rovers 27
+Bolton Wanderers 28
+Bristol City 26
+Burnley 34
+Cardiff City 31
+Charlton Athletic 35
+Derby County 27
+Lincoln City 27
+Middlesbrough 30
+Millwall 29
+Norwich City 30
+Portsmouth 46
+Preston North End 25
+QPR 29
+Sheffield Utd 30
+Southampton 36
+Stoke City 28
+Swansea City 29
+Watford 31
+West Brom 25
+West Ham Utd 32
+Wolverhampton Wanderers 28
+Wrexham 33
+
+Root cause of the repeated import block:
+Portsmouth WAS decoded by the strict current-team scanner. Its authoritative current-team list contains 46 distinct player EIDs. The old importer hard-coded 45 as the maximum safe roster, so it discarded that correctly-decoded list and reduced the correct mapping from 24/24 to 23/24.
+
+Wrong-shift comparison from the same real database bytes:
+shift=131 -> 22/24 safe; Bishop Auckland=1, Bury=1
+shift=132 -> 24/24 safe under V79; Portsmouth strict current-team roster=46
+shift=138 -> invalid; Bath City=4, Southport=2, Stalybridge Celtic=1
+shift=141 -> invalid; multiple 0-2 player clubs
+
+V79 policy:
+- exact current-team EID + duplicated club UID records: 12-60 allowed
+- weaker compatibility/fallback records: remain capped at 12-45
+- retained match history is not allowed to create/move current club membership
+
+Conclusion:
+The actual save uniquely validates Championship shift 132 at 24/24 without weakening the fallback decoders. The previous Portsmouth-specific fallback work did not address the real issue because the strict 46-player list was already being decoded and then rejected by the 45-player ceiling.
