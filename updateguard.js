@@ -1,6 +1,6 @@
 (()=>{
 'use strict';
-const VERSION='world-update-guard-v4-fixture-club-proof';
+const VERSION='world-update-guard-v5-strict-current-roster';
 const norm=v=>String(v??'').trim().toLowerCase().replace(/\s+/g,' ');
 const num=v=>Number(v||0)||0;
 const playerId=p=>String(p?.pid??p?.id??'');
@@ -54,6 +54,7 @@ function validate(payload,oldPayload){
  const errors=[],warnings=[];const players=arr(payload?.players),clubs=arr(payload?.clubs),matches=arr(payload?.matches),fixtures=arr(payload?.fixtures),meta=payload?.meta||{};
  if(meta.current_squad_identity_policy!=='strict-db-membership-only-no-history-mutation-v68')errors.push('legacy current-squad identity decoder detected');
  if(meta.rich_match_validation_policy!=='official-score-plus-strict-current-cohort-v69')errors.push('v69 retained-match validation is missing');
+ if(meta.current_squad_size_policy!=='strict-current-db-extended-12-60-v79')errors.push('v79 strict current-roster size policy is missing');
  validateFixtureClubProof(meta,clubs,errors);
  if(players.length<20)errors.push(`player population collapsed to ${players.length}`);
  if(clubs.length<2)errors.push(`club population collapsed to ${clubs.length}`);
@@ -64,7 +65,7 @@ function validate(payload,oldPayload){
  let unknownClub=0,eidMismatch=0;const currentClubCounts=new Map();
  for(const p of players){if(!available(p))continue;const nk=norm(p.club),c=clubMap.get(nk);currentClubCounts.set(nk,(currentClubCounts.get(nk)||0)+1);if(!c){unknownClub++;continue}if(p.club_eid!==null&&p.club_eid!==undefined&&String(p.club_eid)!==''&&c.eid!==null&&c.eid!==undefined&&String(p.club_eid)!==String(c.eid))eidMismatch++}
  if(unknownClub)errors.push(`${unknownClub} available players map to no current club`);if(eidMismatch)errors.push(`${eidMismatch} available players have a club-name/club-ID mismatch`);
- for(const c of clubs){const names=[c?.short_name,c?.name].map(norm).filter(Boolean),n=Math.max(...names.map(x=>currentClubCounts.get(x)||0),0);if(n<12||n>45)errors.push(`${c?.short_name||c?.name||'club'} has an unsafe current squad size of ${n}`)}
+ for(const c of clubs){const names=[c?.short_name,c?.name].map(norm).filter(Boolean),n=Math.max(...names.map(x=>currentClubCounts.get(x)||0),0);if(n<12||n>60)errors.push(`${c?.short_name||c?.name||'club'} has an unsafe current squad size of ${n}`)}
  let badMatchIdentity=0,badMatchScore=0;const matchFixtureIds=new Set(),duplicateMatchFixtures=[];
  for(const m of matches){const fid=fixtureId(m);if(fid){if(matchFixtureIds.has(fid))duplicateMatchFixtures.push(fid);matchFixtureIds.add(fid)}const h=arr(m?.home_players),a=arr(m?.away_players);if(h.length<11||h.length>25||a.length<11||a.length>25)badMatchIdentity++;else {const hi=h.map(r=>String(r?.player_id??'')),ai=a.map(r=>String(r?.player_id??'')),hs=new Set(hi);if(hi.some(x=>!x)||ai.some(x=>!x)||new Set(hi).size!==hi.length||new Set(ai).size!==ai.length||ai.some(x=>hs.has(x)))badMatchIdentity++}if(!matchScoreValid(m))badMatchScore++}
  if(badMatchIdentity)errors.push(`${badMatchIdentity} retained matches have impossible player-side identity`);
@@ -106,7 +107,7 @@ async function restoreLocal(payload){
  try{if(typeof applyImportedPayload==='function')applyImportedPayload(payload,'load')}catch(_e){}
 }
 function install(){
- const c=window.FMCloud;if(!c||c.__worldUpdateGuardV4||typeof c.publishWorld!=='function')return false;c.__worldUpdateGuardV4=true;
+ const c=window.FMCloud;if(!c||c.__worldUpdateGuardV5||typeof c.publishWorld!=='function')return false;c.__worldUpdateGuardV5=true;
  const original=c.publishWorld.bind(c);
  c.publishWorld=async(payload,...args)=>{
   if(payload==null)return original(payload,...args);

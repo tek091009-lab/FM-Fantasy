@@ -18,7 +18,7 @@ def main():
             'strict_current_db_membership_only_v68','strict-db-membership-only-no-history-mutation-v68','v68_current-squad-authority_previous-gws-quarantined',
             'def _rich_candidate_twenty_pairs','named_header_candidate_v69','official-score-plus-strict-current-cohort-v69','rich_fixture_coverage','same_match_both_clubs',
             'HEADER_PAT=re.compile','current-squad-validated-shift-v73','def _fixture_to_club_shift_candidates','def _fixture_shift_current_squad_evidence',
-            'every-current-senior-squad-size-12..45-v73','select_championship_fixtures(fix,all_clubs,expected_names,requested_league,db)',
+            'current-db-roster-proof-v79','strict-current-db-extended-12-60-v79','select_championship_fixtures(fix,all_clubs,expected_names,requested_league,db)',
             "'current_squad_identity_policy':'strict-db-membership-only-no-history-mutation-v68'",
             "'rich_match_validation_policy':'official-score-plus-strict-current-cohort-v69'",
             "'fixture_club_mapping_policy':fixture_info.get('fixture_club_mapping_policy')",
@@ -64,7 +64,7 @@ def main():
                 is_correct=set(selected)==set(correct)
                 out={}
                 for i,eid in enumerate(selected):
-                    n=28 if is_correct or i>=2 else 0
+                    n=(46 if (is_correct and eid==388) else (28 if is_correct or i>=2 else 0))
                     out[eid]=list(range(eid*100,eid*100+n))
                 return out,{'policy':'strict_current_db_membership_only_v68','missing_club_eids':[]}
             ns['scan_first_team_squads']=fake_scan
@@ -95,10 +95,10 @@ def main():
         result['checks']['old_league_ambiguity_catch_absent']="if(mode==='season'&&!autoRetry&&!($('leagueImportPreference')?.value)&&msg.includes('Multiple supported English league seasons')){" not in html
 
         ug=(ROOT/'updateguard.js').read_text();cf=(ROOT/'clearfix.js').read_text();idx=(ROOT/'index.html').read_text()
-        result['checks']['update_guard_v4']='world-update-guard-v4-fixture-club-proof' in ug and 'current-squad-validated-shift-v73' in ug
+        result['checks']['update_guard_v5']='world-update-guard-v5-strict-current-roster' in ug and 'current-squad-validated-shift-v73' in ug and 'strict-current-db-extended-12-60-v79' in ug
         result['checks']['backed_reset']='fmfantasy_reset_world_season' in cf and 'fmFantasyLastSeasonResetBackup' in cf
         result['checks']['reset_stale_state_guard']=all(x in cf for x in ['clearBrowserManagerSeason','resetLeagueSnapshots','__fmSeasonResetInProgress','fmRestoreManagerFromCloud'])
-        result['checks']['index_versions']={x:(x in idx) for x in ['availabilitytruth.js?v=4','updateguard.js?v=4','clearfix.js?v=3']}
+        result['checks']['index_versions']={x:(x in idx) for x in ['availabilitytruth.js?v=4','updateguard.js?v=5','clearfix.js?v=3']}
 
         values=[]
         for k,v in result['checks'].items():

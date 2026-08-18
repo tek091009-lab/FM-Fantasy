@@ -20,6 +20,7 @@
     "candidate_function": true,
     "compile": true,
     "embedded_importer": true,
+    "fixture_mapping_v73_runtime": true,
     "forbidden_tokens": {
       "bounded 18-22 rows per side": false,
       "candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates": false,
@@ -27,24 +28,48 @@
       "if played_club.get(eid) in clubs: ceid=played_club[eid]": false,
       "infer_hybrid_positions_from_match_markers(rich,players_by_eid)": false
     },
+    "header_pat_runtime_object": true,
     "index_versions": {
       "availabilitytruth.js?v=4": true,
-      "clearfix.js?v=2": true,
-      "updateguard.js?v=3": true
+      "clearfix.js?v=3": true,
+      "updateguard.js?v=5": true
     },
+    "league_selector_v72": true,
+    "name_pool_function": true,
+    "name_pool_runtime_probe": true,
+    "old_league_ambiguity_catch_absent": true,
     "required_tokens": {
+      "'current_squad_identity_policy':'strict-db-membership-only-no-history-mutation-v68'": true,
+      "'fixture_club_mapping_policy':fixture_info.get('fixture_club_mapping_policy')": true,
+      "'rich_match_validation_policy':'official-score-plus-strict-current-cohort-v69'": true,
+      "HEADER_PAT=re.compile": true,
+      "current-db-roster-proof-v79": true,
+      "current-squad-validated-shift-v73": true,
+      "def _fixture_shift_current_squad_evidence": true,
+      "def _fixture_to_club_shift_candidates": true,
       "def _rich_candidate_twenty_pairs": true,
       "named_header_candidate_v69": true,
       "official-score-plus-strict-current-cohort-v69": true,
       "rich_fixture_coverage": true,
       "same_match_both_clubs": true,
+      "select_championship_fixtures(fix,all_clubs,expected_names,requested_league,db)": true,
+      "strict-current-db-extended-12-60-v79": true,
       "strict-db-membership-only-no-history-mutation-v68": true,
       "strict_current_db_membership_only_v68": true,
       "v68_current-squad-authority_previous-gws-quarantined": true
     },
+    "reset_stale_state_guard": true,
     "synthetic_20x20": true,
-    "update_guard_v3": true
+    "update_guard_v5": true
   },
   "errors": [],
+  "fixture_mapping_v73_detail": {
+    "shift131_safe": 22,
+    "shift132_safe": 24,
+    "shifts": [
+      131,
+      132
+    ]
+  },
   "ok": true
 }
