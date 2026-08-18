@@ -1,15 +1,10 @@
 {
-  "verified_live_sha": "363ae9506b68fa594f1e2a38aa1680a760fe7cd3",
-  "verified_at": "2026-08-18T11:11:19Z",
-  "verification": "v74-fixture-db-handoff-live",
-  "authfix": "v12-authoritative-cloud",
-  "availability_truth": "v4-direct-structural-evidence",
-  "current_squad_identity": "v68-strict-db-membership-only",
-  "retained_match_validation": "v69-official-score-plus-current-cohort",
-  "name_pool_runtime": "v71-historical-header-pat-restored-and-executed",
-  "league_selector": "v72-auto-prompt-plus-sticky-manual-choice",
-  "fixture_club_mapping": "v73-current-squad-validated-shift",
-  "fixture_db_handoff": "v74-loaded-game-db-bytes-to-every-browser-selector-call",
-  "update_guard": "v4-fixture-club-proof",
-  "clear_database": "v3-backed-up-reset-plus-stale-manager-wipe"
+  "verified_live_sha": "3af757cc4b61b04ab73d2a8ebe01c323a7835f4a",
+  "verified_at": "2026-08-18T11:11:30Z",
+  "verification": "v76-dated-append-only-snapshot-live",
+  "current_squad_decoder": "v75-current-db-structural-senior-resolution-no-history",
+  "snapshot_boundary": "append-only-by-snapshot-date-v1",
+  "snapshot_badge": "snapshot-date-v1",
+  "fixture_db_handoff": "v74-loaded-game-db-bytes",
+  "server_history_authority": "supabase-dated-canonical-merge"
 }
