@@ -1,13 +1,14 @@
 {
-  "verified_live_sha": "291b1ed6e9066ca0b741d50320ac6f3013763cdc",
-  "verified_at": "2026-08-18T09:32:46Z",
-  "verification": "v72-league-selector-runtime-clean-rebuild-live",
+  "verified_live_sha": "418d7376b1d1bd6b1f85d2c18ce8b50cdc916d8f",
+  "verified_at": "2026-08-18T09:36:33Z",
+  "verification": "v73-current-squad-fixture-club-proof-live",
   "authfix": "v12-authoritative-cloud",
   "availability_truth": "v4-direct-structural-evidence",
   "current_squad_identity": "v68-strict-db-membership-only",
   "retained_match_validation": "v69-official-score-plus-current-cohort",
   "name_pool_runtime": "v71-historical-header-pat-restored-and-executed",
   "league_selector": "v72-auto-prompt-plus-sticky-manual-choice",
-  "update_guard": "v3-identity-history-safe",
+  "fixture_club_mapping": "v73-current-squad-validated-shift",
+  "update_guard": "v4-fixture-club-proof",
   "clear_database": "v3-backed-up-reset-plus-stale-manager-wipe"
 }
