@@ -1,0 +1,46 @@
+name: Apply V77 single-missing current squad resolver
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/upgrade_single_missing_current_squad_v77.py'
+      - '.github/workflows/apply-v77-single-missing-current-squad.yml'
+permissions:
+  contents: write
+concurrency:
+  group: apply-v77-single-missing-current-squad
+  cancel-in-progress: true
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Apply V77 importer patch
+        run: python scripts/upgrade_single_missing_current_squad_v77.py
+      - name: Verify packed importer
+        run: |
+          python scripts/assert_v76_snapshot_boundary.py
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode()
+          req=["CURRENT_SQUAD_SINGLE_MISSING_POLICY='23-of-24-strong-plus-current-person-proof-v77'",'single_missing_current_db_completion_v77','legacy_exact_uid_header_v77','overlap-with-accepted-current-squad','insufficient-current-person-proof','append-only-by-snapshot-date-v1']
+          for t in req:assert t in py,t
+          compile(py,'fm_importer_v77.py','exec')
+          print('V77 packed importer verified')
+          PY
+      - name: Commit packed app
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/part* app/fix*
+          git commit -m 'Apply V77 single-missing current squad resolver' || exit 0
+          git pull --rebase origin main
+          git push
