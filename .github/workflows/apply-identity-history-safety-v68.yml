@@ -10,16 +10,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply v68 importer safety
+      - name: Apply and verify v68 importer safety with diagnostics
         shell: bash
         run: |
-          set -euo pipefail
-          python scripts/upgrade_identity_history_safety_v68.py
-      - name: Verify decoded importer
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
+          set +e
+          : > _v68_apply_status.txt
+          python scripts/upgrade_identity_history_safety_v68.py >> _v68_apply_status.txt 2>&1
+          rc=$?
+          echo "apply_rc=$rc" >> _v68_apply_status.txt
+          if [ "$rc" -eq 0 ]; then
+            python - <<'PY' >> _v68_apply_status.txt 2>&1
           from pathlib import Path
           import base64,gzip,re
           parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
@@ -31,14 +31,21 @@ jobs:
           assert all(x in py for x in required),[x for x in required if x not in py]
           assert all(x not in py for x in forbidden),[x for x in forbidden if x in py]
           compile(py,'fm_importer_v68.py','exec')
-          print('v68 decoded importer safety verified')
+          print('verify_ok=1')
           PY
-      - name: Commit production bundle
-        shell: bash
-        run: |
-          set -euo pipefail
+            vrc=$?
+          else
+            vrc=99
+          fi
+          echo "verify_rc=$vrc" >> _v68_apply_status.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20
-          git commit -m 'Apply v68 current-squad and history safety' || exit 0
+          if [ "$rc" -eq 0 ] && [ "$vrc" -eq 0 ]; then
+            git add app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20 _v68_apply_status.txt
+            git commit -m 'Apply v68 current-squad and history safety' || true
+          else
+            git add _v68_apply_status.txt
+            git commit -m 'Record v68 importer safety failure' || true
+          fi
           git push
+          exit $(( rc != 0 || vrc != 0 ))
