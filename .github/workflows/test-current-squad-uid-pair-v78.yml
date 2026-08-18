@@ -1,0 +1,21 @@
+name: Test current squad UID pair v78
+on:
+  push:
+    paths:
+      - 'scripts/assert_v78_uid_pair_current_squad.py'
+      - '.github/workflows/test-current-squad-uid-pair-v78.yml'
+permissions:
+  contents: write
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python scripts/assert_v78_uid_pair_current_squad.py | tee _v78_uid_pair_test.txt
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add _v78_uid_pair_test.txt
+          git commit -m 'Record V78 UID-pair regression' || true
+          git pull --rebase origin main
+          git push
