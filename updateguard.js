@@ -1,6 +1,6 @@
 (()=>{
 'use strict';
-const VERSION='world-update-guard-v6-structural-proof';
+const VERSION='world-update-guard-v7-explicit-season-partial';
 const norm=v=>String(v??'').trim().toLowerCase().replace(/\s+/g,' ');
 const num=v=>Number(v||0)||0;
 const playerId=p=>String(p?.pid??p?.id??'');
@@ -61,8 +61,14 @@ function validateFixtureClubProof(meta,clubs,errors,warnings){
  if(!acceptedPolicy)warnings.push('fixture→club proof passed structurally but has no canonical policy marker');
  if(source!=='root')warnings.push('fixture→club proof recovered from the selected current-season candidate diagnostics');
 }
+function activeImportMode(meta){
+ const explicit=norm(meta?.import_mode||meta?.importMode||'');
+ if(explicit)return explicit;
+ try{return norm(window.__FM_IMPORT_MODE_ACTIVE||'')}catch(_e){return ''}
+}
 function validate(payload,oldPayload){
  const errors=[],warnings=[];const players=arr(payload?.players),clubs=arr(payload?.clubs),matches=arr(payload?.matches),fixtures=arr(payload?.fixtures),meta=payload?.meta||{};
+ const importMode=activeImportMode(meta);
  const candidate=selectedCurrentCandidate(meta);
  const squadPolicyOk=meta.current_squad_identity_policy==='strict-db-membership-only-no-history-mutation-v68'
    || candidate?.squad_policy==='strict_current_db_membership_only_v68'
@@ -106,11 +112,12 @@ function validate(payload,oldPayload){
  const missingDetail=newCompletedPlayed.filter(f=>!matchFixtureIds.has(fixtureId(f)));
  if(missingDetail.length){
   const catchupImport=!sameWorld||oldDone===0;
+  const explicitSeason=importMode==='season';
   const declaredPartial=norm(meta.history_coverage_status)==='partial'
     || num(meta.rich_matches_missing)>0
     || (num(meta.played_results)>matches.length&&matches.length>0);
-  if(catchupImport&&declaredPartial&&matches.length){
-   warnings.push(`${missingDetail.length} catch-up fixtures still lack player-level detail; publishing partial history so recovered matches are usable while decoder coverage continues improving`);
+  if((catchupImport||explicitSeason)&&declaredPartial&&matches.length){
+   warnings.push(`${missingDetail.length} historical fixtures still lack player-level detail; ${explicitSeason?'season':'catch-up'} import may publish partial history while recovered matches remain usable`);
   }else{
    errors.push(`${missingDetail.length} newly completed fixtures have no validated player-level match detail`);
   }
@@ -133,7 +140,7 @@ function validate(payload,oldPayload){
    const all=new Set(players.map(playerId));const missing=[...protectedIds].filter(id=>!all.has(id));if(missing.length)errors.push(`current manager has ${missing.length} protected player IDs missing from the new world`)
   }
  }catch(_e){}
- return {ok:!errors.length,version:VERSION,errors,warnings,summary:{players:players.length,clubs:clubs.length,matches:matches.length,completed_gameweek:newDone,current_gameweek:num(meta.current_gameweek),latest_result_gameweek:num(meta.latest_gameweek_with_result),history_status:meta.history_coverage_status||null,rich_matches_missing:num(meta.rich_matches_missing)}};
+ return {ok:!errors.length,version:VERSION,errors,warnings,summary:{players:players.length,clubs:clubs.length,matches:matches.length,completed_gameweek:newDone,current_gameweek:num(meta.current_gameweek),latest_result_gameweek:num(meta.latest_gameweek_with_result),history_status:meta.history_coverage_status||null,rich_matches_missing:num(meta.rich_matches_missing),import_mode:importMode||null}};
 }
 async function restoreLocal(payload){
  if(!payload)return;
@@ -145,7 +152,7 @@ async function restoreLocal(payload){
  try{if(typeof applyImportedPayload==='function')applyImportedPayload(payload,'load')}catch(_e){}
 }
 function install(){
- const c=window.FMCloud;if(!c||c.__worldUpdateGuardV6||typeof c.publishWorld!=='function')return false;c.__worldUpdateGuardV6=true;
+ const c=window.FMCloud;if(!c||c.__worldUpdateGuardV7||typeof c.publishWorld!=='function')return false;c.__worldUpdateGuardV7=true;
  const original=c.publishWorld.bind(c);
  c.publishWorld=async(payload,...args)=>{
   if(payload==null)return original(payload,...args);
