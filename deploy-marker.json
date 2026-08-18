@@ -1,6 +1,6 @@
 {
-  "verified_live_sha": "de445b0797ea250fad7b5a57fcf8450a21a2d1e8",
-  "verified_at": "2026-08-18T08:57:26Z",
+  "verified_live_sha": "884e39e5edf5eedc3d54c302d1db4689c84e41f2",
+  "verified_at": "2026-08-18T08:58:21Z",
   "verification": "v70-reset-safe-clean-rebuild-live-preflight-and-postdeploy",
   "authfix": "v12-authoritative-cloud",
   "availability_truth": "v4-direct-structural-evidence",
