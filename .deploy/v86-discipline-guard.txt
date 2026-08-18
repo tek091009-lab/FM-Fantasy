@@ -1,0 +1,1 @@
+V86 discipline evidence guard: preserve direct FM active-ban evidence across v85 finalizer; quarantine card-history threshold candidates as diagnostic only.
