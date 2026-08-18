@@ -1,15 +1,15 @@
 {
-  "verified_live_sha": "547cd5ca281ae36cb92f23d67f2dee48c4df73d5",
-  "verified_at": "2026-08-18T04:59:13Z",
-  "verification": "deep-live-index-scripts-embedded-importer-and-core-availability",
+  "verified_live_sha": "42d8e1dce755f4de10423748790461fd38eb905b",
+  "verified_at": "2026-08-18T08:26:51Z",
+  "verification": "v69-clean-rebuild-live-preflight-and-postdeploy",
   "authfix": "v12-authoritative-cloud",
-  "availability_truth": "v3-direct-structural-evidence",
-  "core_availability_truth": "direct-structural-only-no-card-heuristics",
-  "embedded_availability_decoder": "structural-v2-fixture-floor",
-  "update_guard": "v2",
-  "canonical_publish": "v1",
+  "availability_truth": "v4-direct-structural-evidence",
+  "current_squad_identity": "v68-strict-db-membership-only",
+  "retained_match_validation": "v69-official-score-plus-current-cohort",
+  "update_guard": "v3-identity-history-safe",
+  "clear_database": "v2-backed-up-season-reset",
+  "server_history_lock": "accepted-gameweeks-immutable",
+  "server_price_history_lock": "accepted-price-events-immutable",
   "identity_guard": "v3-diagnostic-only",
-  "world_scorer": "v5-chip-persistence",
-  "draft_recovery": "v2",
-  "capability_consistency": "v1"
+  "world_scorer": "v5-chip-persistence"
 }
