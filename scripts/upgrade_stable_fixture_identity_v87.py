@@ -6,6 +6,7 @@ from pathlib import Path
 # supported double-round-robin league, each ordered home_tid -> away_tid pair is unique.
 # Assign the public numeric fixture_id from that immutable pair ordering so a postponement,
 # Gameweek relabel or date correction cannot renumber unrelated fixtures on the next save.
+# workflow trigger marker: v87-stable-fixture-identity
 ROOT=Path(__file__).resolve().parents[1]
 PARTS=[ROOT/'app'/f'part{i:02d}' for i in range(17)]+[ROOT/'app'/f'fix{i}' for i in range(17,21)]
 
