@@ -14,35 +14,16 @@ def main():
         result['checks']['embedded_importer']=bool(m)
         if not m: raise RuntimeError('embedded importer missing')
         py=base64.b64decode(m.group(1)).decode('utf-8')
-        required=[
-            'strict_current_db_membership_only_v68',
-            'strict-db-membership-only-no-history-mutation-v68',
-            'v68_current-squad-authority_previous-gws-quarantined',
-            'def _rich_candidate_twenty_pairs',
-            'named_header_candidate_v69',
-            'official-score-plus-strict-current-cohort-v69',
-            'rich_fixture_coverage',
-            'same_match_both_clubs',
-        ]
+        required=['strict_current_db_membership_only_v68','strict-db-membership-only-no-history-mutation-v68','v68_current-squad-authority_previous-gws-quarantined','def _rich_candidate_twenty_pairs','named_header_candidate_v69','official-score-plus-strict-current-cohort-v69','rich_fixture_coverage','same_match_both_clubs']
         result['checks']['required_tokens']={x:(x in py) for x in required}
-        forbidden=[
-            "cur.extend(add);diag['rich_augmented_players']+=len(add)",
-            'if played_club.get(eid) in clubs: ceid=played_club[eid]',
-            'infer_hybrid_positions_from_match_markers(rich,players_by_eid)',
-            "candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates",
-            'bounded 18-22 rows per side',
-        ]
+        forbidden=["cur.extend(add);diag['rich_augmented_players']+=len(add)",'if played_club.get(eid) in clubs: ceid=played_club[eid]','infer_hybrid_positions_from_match_markers(rich,players_by_eid)',"candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates",'bounded 18-22 rows per side']
         result['checks']['forbidden_tokens']={x:(x in py) for x in forbidden}
-        code=compile(py,'fm_importer_preflight_v70.py','exec')
-        result['checks']['compile']=True
-        module_name='fm_importer_preflight_v70'
-        mod=types.ModuleType(module_name);mod.__file__='fm_importer_preflight_v70.py';sys.modules[module_name]=mod
-        exec(code,mod.__dict__,mod.__dict__)
-        ns=mod.__dict__
+        code=compile(py,'fm_importer_preflight_v70.py','exec');result['checks']['compile']=True
+        module_name='fm_importer_preflight_v70';mod=types.ModuleType(module_name);mod.__file__='fm_importer_preflight_v70.py';sys.modules[module_name]=mod
+        exec(code,mod.__dict__,mod.__dict__);ns=mod.__dict__
         result['checks']['candidate_function']=callable(ns.get('_rich_candidate_twenty_pairs'))
         def row(pid,off): return {'player_id':pid,'offset':off,'goals':0,'own_goals':0}
-        left=[row(i+1,i*100) for i in range(20)]
-        right=[row(101+i,5000+i*100) for i in range(20)]
+        left=[row(i+1,i*100) for i in range(20)];right=[row(101+i,5000+i*100) for i in range(20)]
         pairs=ns['_rich_candidate_twenty_pairs'](left+right) if callable(ns.get('_rich_candidate_twenty_pairs')) else []
         result['checks']['synthetic_20x20']=bool(pairs and len(pairs[0][0])==20 and len(pairs[0][1])==20)
         result['checks']['availability_tokens']={x:(x in py) for x in ['structural-v2-fixture-floor','fixture_floor','full<=save_date','expiry<=save_date']}
@@ -54,7 +35,8 @@ def main():
         ug=(ROOT/'updateguard.js').read_text();cf=(ROOT/'clearfix.js').read_text();idx=(ROOT/'index.html').read_text()
         result['checks']['update_guard_v3']='world-update-guard-v3-identity-history-safe' in ug
         result['checks']['backed_reset']='fmfantasy_reset_world_season' in cf and 'fmFantasyLastSeasonResetBackup' in cf
-        result['checks']['index_versions']={x:(x in idx) for x in ['availabilitytruth.js?v=4','updateguard.js?v=3','clearfix.js?v=2']}
+        result['checks']['reset_stale_state_guard']=all(x in cf for x in ['clearBrowserManagerSeason','resetLeagueSnapshots','__fmSeasonResetInProgress','fmRestoreManagerFromCloud'])
+        result['checks']['index_versions']={x:(x in idx) for x in ['availabilitytruth.js?v=4','updateguard.js?v=3','clearfix.js?v=3']}
         values=[]
         for k,v in result['checks'].items():
             if isinstance(v,bool): values.append(v)
