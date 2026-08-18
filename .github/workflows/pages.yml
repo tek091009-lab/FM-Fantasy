@@ -25,10 +25,8 @@ jobs:
         with: {node-version: '22'}
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-
       - name: Verify current season-import guard behavior
         run: node scripts/test_season_publish_v84.js
-
       - name: Verify packed importer compiles
         shell: bash
         run: |
@@ -46,7 +44,6 @@ jobs:
           assert 'v82-current-db-consensus-only-ability-non-authoritative' in py
           print('current packed importer compiles and includes V82/V81 recovery paths')
           PY
-
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -54,7 +51,6 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
       - name: Verify deployed V84 importer shell
         shell: bash
         env:
@@ -69,16 +65,15 @@ jobs:
             guard="$(curl -fsSL --max-time 20 "$base/updateguard.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             compat="$(curl -fsSL --max-time 20 "$base/importcompat.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             if printf '%s' "$idx" | grep -q 'updateguard.js?v=7' \
-              && printf '%s' "$idx" | grep -q 'importcompat.js?v=3' \
+              && printf '%s' "$idx" | grep -q 'importcompat.js?v=4' \
               && printf '%s' "$entry" | grep -q 'bootstrap=v84-20260818' \
               && printf '%s' "$guard" | grep -q 'world-update-guard-v7-explicit-season-partial' \
-              && printf '%s' "$compat" | grep -q 'import-mode-v83-season-publish'; then
+              && printf '%s' "$compat" | grep -q 'import-compat-v84-season-plus-36-row'; then
               ok=1; break
             fi
             sleep 5
           done
           [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose current V84 importer shell' >&2; exit 1; }
-
       - name: Record current Pages deployment
         shell: bash
         env:
@@ -92,7 +87,7 @@ jobs:
             "verified_at": "${stamp}",
             "verification": "v84-season-import-live",
             "update_guard": "v7-explicit-season-partial",
-            "import_mode": "v83-season-publish",
+            "import_compat": "v84-season-plus-36-row",
             "current_squad_decoder": "v82-consensus-only",
             "retained_history": "v81-36-row-plus-variable-squad",
             "snapshot_boundary": "append-only-by-snapshot-date-v1"
