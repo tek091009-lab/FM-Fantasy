@@ -1,0 +1,14 @@
+sha=87b61521f43393f4d076a3fa983d93d9fccb39cd
+utc=2026-08-18T16:51:29Z
+--- node regression ---
+{"guard":"world-update-guard-v7-explicit-season-partial","season_partial_publishes":true,"season_warnings":3,"gameweek_missing_detail_blocked":true}
+node_status=0
+--- live v84 ---
+curl: (22) The requested URL returned error: 404
+entry_status=22
+--- live guard ---
+world-update-guard-v5-strict-current-roster';
+guard_status=0
+--- live compat ---
+curl: (22) The requested URL returned error: 404
+compat_status=22
