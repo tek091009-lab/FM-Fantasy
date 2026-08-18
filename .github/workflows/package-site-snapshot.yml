@@ -1,0 +1,21 @@
+name: Package site snapshot
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/package-site-snapshot.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package exact repository snapshot
+        run: zip -qr site-snapshot.zip . -x '.git/*'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site-snapshot
+          path: site-snapshot.zip
+          retention-days: 1
