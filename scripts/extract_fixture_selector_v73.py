@@ -17,10 +17,9 @@ def block(start_name):
 out=[]
 for name in [
     'def scan_fixture_groups','def derive_fixture_to_club_shift','def select_championship_fixtures',
-    'def scan_clubs','def find_squad_candidates','def extract_squads','def scan_squad','def build_players',
+    'def scan_clubs','def read_squad_list','def scan_first_team_squads','def build_players',
     'def browser_build_payload_from_fs'
 ]:out.append(block(name))
-# Also locate every function name containing squad so we know the actual decoder names.
 out.append('=== SQUAD FUNCTIONS ===\n'+'\n'.join(f'{i+1:05d}: {l}' for i,l in enumerate(lines) if l.startswith('def ') and 'squad' in l.lower())+'\n')
 Path('_fixture_selector_v73.txt').write_text('\n'.join(out))
 print('wrote _fixture_selector_v73.txt')
