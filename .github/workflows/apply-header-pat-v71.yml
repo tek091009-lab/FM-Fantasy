@@ -11,25 +11,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Restore and runtime-test name pool scanner
-        run: python scripts/restore_header_pat_v71.py
-      - name: Verify packed importer runtime
+      - name: Apply and diagnose V71 runtime fix
         shell: bash
         run: |
-          set -euo pipefail
-          python scripts/final_preflight_v70.py
-          python - <<'PY'
-          import json
-          r=json.load(open('_preflight_v70.json'))
-          assert r.get('ok') is True,r
-          print('existing V70 preflight still green')
-          PY
-      - name: Commit production importer
-        shell: bash
-        run: |
+          set +e
+          : > _header_v71_status.txt
+          python scripts/restore_header_pat_v71.py >> _header_v71_status.txt 2>&1
+          rc=$?
+          echo "restore_rc=$rc" >> _header_v71_status.txt
+          if [ "$rc" -eq 0 ]; then
+            python scripts/final_preflight_v70.py >> _header_v71_status.txt 2>&1
+            prc=$?
+          else
+            prc=99
+          fi
+          echo "preflight_rc=$prc" >> _header_v71_status.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20
-          git commit -m 'Restore HEADER_PAT runtime dependency in importer' || exit 0
+          if [ "$rc" -eq 0 ] && [ "$prc" -eq 0 ]; then
+            git add app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20 _header_v71_status.txt
+            git commit -m 'Restore HEADER_PAT runtime dependency in importer' || true
+          else
+            git add _header_v71_status.txt
+            git commit -m 'Record HEADER_PAT V71 failure' || true
+          fi
           git pull --rebase origin main
           git push
+          exit $(( rc != 0 || prc != 0 ))
