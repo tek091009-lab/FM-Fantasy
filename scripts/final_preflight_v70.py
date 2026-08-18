@@ -53,9 +53,6 @@ def main():
         pairs=ns['_rich_candidate_twenty_pairs'](left+right) if callable(ns.get('_rich_candidate_twenty_pairs')) else []
         result['checks']['synthetic_20x20']=bool(pairs and len(pairs[0][0])==20 and len(pairs[0][1])==20)
 
-        # V73 exact regression: fixture team ids can map to two adjacent English club entity sets.
-        # The previous code picked the lower shift arbitrarily. The new code must reject that shift
-        # when even one mapped club lacks a plausible CURRENT senior squad and accept the proven set.
         Club=ns.get('Club');shift_candidates=ns.get('_fixture_to_club_shift_candidates');shift_evidence=ns.get('_fixture_shift_current_squad_evidence')
         v73_ok=False;v73_detail={}
         if Club and callable(shift_candidates) and callable(shift_evidence):
@@ -98,10 +95,10 @@ def main():
         result['checks']['old_league_ambiguity_catch_absent']="if(mode==='season'&&!autoRetry&&!($('leagueImportPreference')?.value)&&msg.includes('Multiple supported English league seasons')){" not in html
 
         ug=(ROOT/'updateguard.js').read_text();cf=(ROOT/'clearfix.js').read_text();idx=(ROOT/'index.html').read_text()
-        result['checks']['update_guard_v3']='world-update-guard-v3-identity-history-safe' in ug
+        result['checks']['update_guard_v4']='world-update-guard-v4-fixture-club-proof' in ug and 'current-squad-validated-shift-v73' in ug
         result['checks']['backed_reset']='fmfantasy_reset_world_season' in cf and 'fmFantasyLastSeasonResetBackup' in cf
         result['checks']['reset_stale_state_guard']=all(x in cf for x in ['clearBrowserManagerSeason','resetLeagueSnapshots','__fmSeasonResetInProgress','fmRestoreManagerFromCloud'])
-        result['checks']['index_versions']={x:(x in idx) for x in ['availabilitytruth.js?v=4','updateguard.js?v=3','clearfix.js?v=3']}
+        result['checks']['index_versions']={x:(x in idx) for x in ['availabilitytruth.js?v=4','updateguard.js?v=4','clearfix.js?v=3']}
 
         values=[]
         for k,v in result['checks'].items():
