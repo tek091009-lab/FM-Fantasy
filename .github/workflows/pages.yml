@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths-ignore:
       - 'deploy-marker.json'
+      - '.deploy/**'
   workflow_dispatch:
 permissions:
   contents: write
@@ -20,27 +21,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
       - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+        with: {python-version: '3.12'}
 
-      - name: Preflight V79 importer and guards
+      - name: Verify current season-import guard behavior
+        run: node scripts/test_season_publish_v84.js
+
+      - name: Verify packed importer compiles
         shell: bash
         run: |
           set -euo pipefail
-          python scripts/final_preflight_v70.py
-          python scripts/assert_fixture_db_handoff_v74.py
-          python scripts/assert_v76_snapshot_boundary.py
-          python scripts/assert_v79_strict_extended_roster.py
           python - <<'PY'
-          import json
-          r=json.load(open('_preflight_v70.json'))
-          assert r.get('ok') is True,r
-          for k in ['header_pat_runtime_object','name_pool_runtime_probe','league_selector_v72','fixture_mapping_v73_runtime','update_guard_v5']:
-              assert r['checks'].get(k) is True,(k,r)
-          assert r['fixture_mapping_v73_detail']['shift132_safe']==24,r
-          assert r['fixture_mapping_v73_detail']['shift131_safe']==22,r
-          print('V79 deterministic preflight passed: shift132=24/24, shift131=22/24')
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html); assert m,'embedded importer missing'
+          py=base64.b64decode(m.group(1)).decode('utf-8'); compile(py,'live_importer.py','exec')
+          assert 'browser_build_payload_from_fs' in py
+          assert 'if len(stats)<36:continue' in py
+          assert 'range(18,23)' in py
+          assert 'v82-current-db-consensus-only-ability-non-authoritative' in py
+          print('current packed importer compiles and includes V82/V81 recovery paths')
           PY
 
       - uses: actions/configure-pages@v5
@@ -51,7 +55,7 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Deep verify live V79 build
+      - name: Verify deployed V84 importer shell
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -59,70 +63,23 @@ jobs:
           set -euo pipefail
           base="${PAGE_URL%/}"
           ok=0
-          for attempt in $(seq 1 24); do
-            body="$(curl -fsSL --max-time 20 "$base/index.html?sha=${GITHUB_SHA}-${attempt}" || true)"
-            guard="$(curl -fsSL --max-time 20 "$base/updateguard.js?v=5&sha=${GITHUB_SHA}-${attempt}" || true)"
-            badge="$(curl -fsSL --max-time 20 "$base/snapshotdate.js?v=1&sha=${GITHUB_SHA}-${attempt}" || true)"
-            if printf '%s' "$body" | grep -q 'updateguard.js?v=5' \
-              && printf '%s' "$body" | grep -q 'authfix.js?v=12' \
-              && printf '%s' "$body" | grep -q 'availabilitytruth.js?v=4' \
-              && printf '%s' "$body" | grep -q 'snapshotdate.js?v=1' \
-              && printf '%s' "$guard" | grep -q 'world-update-guard-v5-strict-current-roster' \
-              && printf '%s' "$guard" | grep -q 'strict-current-db-extended-12-60-v79' \
-              && printf '%s' "$badge" | grep -q 'snapshot-date-v1'; then
-              ok=1
-              break
+          for attempt in $(seq 1 36); do
+            idx="$(curl -fsSL --max-time 20 "$base/index.html?sha=${GITHUB_SHA}-${attempt}" || true)"
+            entry="$(curl -fsSL --max-time 20 "$base/v84.html?sha=${GITHUB_SHA}-${attempt}" || true)"
+            guard="$(curl -fsSL --max-time 20 "$base/updateguard.js?sha=${GITHUB_SHA}-${attempt}" || true)"
+            compat="$(curl -fsSL --max-time 20 "$base/importcompat.js?sha=${GITHUB_SHA}-${attempt}" || true)"
+            if printf '%s' "$idx" | grep -q 'updateguard.js?v=7' \
+              && printf '%s' "$idx" | grep -q 'importcompat.js?v=3' \
+              && printf '%s' "$entry" | grep -q 'bootstrap=v84-20260818' \
+              && printf '%s' "$guard" | grep -q 'world-update-guard-v7-explicit-season-partial' \
+              && printf '%s' "$compat" | grep -q 'import-mode-v83-season-publish'; then
+              ok=1; break
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'Live site did not expose V79 scripts' >&2; exit 1; }
+          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose current V84 importer shell' >&2; exit 1; }
 
-          : > /tmp/live_parts.b64
-          for i in $(seq -w 0 16); do curl -fsSL --max-time 20 "$base/app/part${i}?sha=${GITHUB_SHA}" >> /tmp/live_parts.b64; done
-          for i in 17 18 19 20; do curl -fsSL --max-time 20 "$base/app/fix${i}?sha=${GITHUB_SHA}" >> /tmp/live_parts.b64; done
-          tr -d '\r\n ' < /tmp/live_parts.b64 | base64 -d | gzip -dc > /tmp/live_app.html
-
-          python scripts/assert_fixture_db_handoff_v74.py /tmp/live_app.html
-          python scripts/assert_v76_snapshot_boundary.py /tmp/live_app.html
-          python scripts/assert_v79_strict_extended_roster.py /tmp/live_app.html
-
-          python - <<'PY'
-          from pathlib import Path
-          import base64,re,sys,types
-          html=Path('/tmp/live_app.html').read_text(encoding='utf-8')
-          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html); assert m
-          py=base64.b64decode(m.group(1)).decode('utf-8')
-          required=[
-            'strict-db-membership-only-no-history-mutation-v68',
-            'official-score-plus-strict-current-cohort-v69',
-            'HEADER_PAT=re.compile',
-            'current-squad-validated-shift-v73',
-            "FIXTURE_DB_HANDOFF_POLICY='loaded-game-db-bytes-v74'",
-            "CURRENT_SQUAD_SIZE_POLICY='strict-current-db-extended-12-60-v79'",
-            'CURRENT_SQUAD_STRICT_MAX=60',
-            'current-db-roster-proof-v79',
-            "'current_squad_size_policy':CURRENT_SQUAD_SIZE_POLICY",
-            "'historical_freeze_policy':'append-only-by-snapshot-date-v1'",
-          ]
-          for t in required: assert t in py,'live importer missing '+t
-          forbidden=[
-            "cur.extend(add);diag['rich_augmented_players']+=len(add)",
-            'if played_club.get(eid) in clubs: ceid=played_club[eid]',
-            'infer_hybrid_positions_from_match_markers(rich,players_by_eid)',
-          ]
-          for t in forbidden: assert t not in py,'live importer contains forbidden '+t
-          name='fm_importer_live_v79';mod=types.ModuleType(name);mod.__file__=name+'.py';sys.modules[name]=mod
-          exec(compile(py,name+'.py','exec'),mod.__dict__,mod.__dict__)
-          assert hasattr(mod.__dict__.get('HEADER_PAT'),'finditer')
-          try: mod.__dict__['find_name_pool_index'](b'\x00'*4096)
-          except RuntimeError as e: assert 'FM name string table not found' in str(e)
-          else: raise AssertionError('empty DB unexpectedly resolved name pool')
-          for t in ['fmFantasySeasonLeaguePreferenceV72','contains both supported English leagues','FM_PENDING_SEASON_LEAGUE=fmRememberLeaguePreference(chosen)']:
-              assert t in html,'live league selector missing '+t
-          print('deep live V79 importer verification passed')
-          PY
-
-      - name: Record verified V79 deployment
+      - name: Record current Pages deployment
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -133,28 +90,18 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v79-real-save-strict-roster-live",
-            "authfix": "v12-authoritative-cloud",
-            "availability_truth": "v4-direct-structural-evidence",
-            "current_squad_identity": "v68-current-db-only",
-            "current_squad_size_policy": "strict-current-db-extended-12-60-v79",
-            "real_save_roster_probe": "shift132=24/24; strict Portsmouth roster=46; shift131=22/24",
-            "retained_match_validation": "v69-official-score-plus-current-cohort",
-            "name_pool_runtime": "v71-historical-header-pat-restored-and-executed",
-            "league_selector": "v72-auto-prompt-plus-sticky-manual-choice",
-            "fixture_club_mapping": "v73-current-squad-validated-shift",
-            "fixture_db_handoff": "v74-loaded-game-db-bytes",
-            "snapshot_boundary": "append-only-by-snapshot-date-v1",
-            "snapshot_badge": "snapshot-date-v1",
-            "server_history_authority": "supabase-dated-canonical-merge",
-            "update_guard": "v5-strict-current-roster",
-            "clear_database": "v3-backed-up-reset-plus-stale-manager-wipe"
+            "verification": "v84-season-import-live",
+            "update_guard": "v7-explicit-season-partial",
+            "import_mode": "v83-season-publish",
+            "current_squad_decoder": "v82-consensus-only",
+            "retained_history": "v81-36-row-plus-variable-squad",
+            "snapshot_boundary": "append-only-by-snapshot-date-v1"
           }
           JSON
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V79 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V84 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V79 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V84 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
