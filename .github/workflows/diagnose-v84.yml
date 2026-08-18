@@ -1,0 +1,42 @@
+name: Diagnose V84 importer
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-v84.yml'
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Capture V84 regression and live asset state
+        shell: bash
+        run: |
+          set +e
+          mkdir -p .deploy
+          {
+            echo "sha=$GITHUB_SHA"
+            echo "utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo '--- node regression ---'
+            node scripts/test_season_publish_v84.js
+            echo "node_status=$?"
+            echo '--- live v84 ---'
+            curl -fsSL --max-time 20 "https://tek091009-lab.github.io/FM-Fantasy/v84.html?diag=$GITHUB_SHA" | grep -o 'bootstrap=v84-[0-9]*' | head -1
+            echo "entry_status=${PIPESTATUS[0]}"
+            echo '--- live guard ---'
+            curl -fsSL --max-time 20 "https://tek091009-lab.github.io/FM-Fantasy/updateguard.js?diag=$GITHUB_SHA" | grep -o 'world-update-guard-v[0-9][^'\"']*' | head -1
+            echo "guard_status=${PIPESTATUS[0]}"
+            echo '--- live compat ---'
+            curl -fsSL --max-time 20 "https://tek091009-lab.github.io/FM-Fantasy/importcompat.js?diag=$GITHUB_SHA" | grep -o 'import-mode-v[0-9][^'\"']*' | head -1
+            echo "compat_status=${PIPESTATUS[0]}"
+          } > .deploy/v84-diagnostic.txt 2>&1
+          git config user.name github-actions[bot]
+          git config user.email 4189824+github-actions[bot]@users.noreply.github.com
+          git add .deploy/v84-diagnostic.txt
+          git commit -m "Record V84 importer diagnostic ${GITHUB_SHA::7}"
+          git pull --rebase origin main
+          git push
