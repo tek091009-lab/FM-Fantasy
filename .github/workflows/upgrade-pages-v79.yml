@@ -1,0 +1,29 @@
+name: Upgrade Pages V79 verifier
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/upgrade_pages_v79.py'
+      - '.github/workflows/upgrade-pages-v79.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/upgrade_pages_v79.py
+      - run: python scripts/final_preflight_v70.py
+      - run: python scripts/assert_v79_strict_extended_roster.py
+      - name: Commit Pages verifier
+        run: |
+          set -e
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/pages.yml _preflight_v70.json
+          git commit -m 'Gate live Pages on V79 strict current roster' || exit 0
+          git push
