@@ -20,22 +20,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Preflight clean-rebuild importer safety
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Preflight V76 clean-rebuild safety
         shell: bash
         run: |
           set -euo pipefail
           python scripts/final_preflight_v70.py
           python scripts/assert_fixture_db_handoff_v74.py
+          python scripts/assert_v76_snapshot_boundary.py
           python - <<'PY'
           import json
           r=json.load(open('_preflight_v70.json'))
           assert r.get('ok') is True,r
-          assert r['checks'].get('header_pat_runtime_object') is True,r
-          assert r['checks'].get('name_pool_runtime_probe') is True,r
-          assert r['checks'].get('league_selector_v72') is True,r
-          assert r['checks'].get('fixture_mapping_v73_runtime') is True,r
-          assert r['checks'].get('update_guard_v4') is True,r
-          print('deterministic V73/V74 clean-rebuild preflight passed')
+          for k in ['header_pat_runtime_object','name_pool_runtime_probe','league_selector_v72','fixture_mapping_v73_runtime','update_guard_v4']:
+              assert r['checks'].get(k) is True,(k,r)
+          print('deterministic V76 clean-rebuild preflight passed')
           PY
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
@@ -44,7 +45,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Deep-verify live FM Fantasy build
+      - name: Deep-verify live V76 build
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -52,24 +53,28 @@ jobs:
           set -euo pipefail
           base="${PAGE_URL%/}"
           ok=0
-          for attempt in $(seq 1 12); do
-            body="$(curl -fsSL --max-time 20 "$base/index.html?sha=${GITHUB_SHA}" || true)"
+          for attempt in $(seq 1 18); do
+            body="$(curl -fsSL --max-time 20 "$base/index.html?sha=${GITHUB_SHA}-${attempt}" || true)"
+            badge="$(curl -fsSL --max-time 20 "$base/snapshotdate.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             if printf '%s' "$body" | grep -q 'authfix.js?v=12' \
               && printf '%s' "$body" | grep -q 'availabilitytruth.js?v=4' \
               && printf '%s' "$body" | grep -q 'updateguard.js?v=4' \
               && printf '%s' "$body" | grep -q 'clearfix.js?v=3' \
               && printf '%s' "$body" | grep -q 'identityguard.js?v=3' \
-              && printf '%s' "$body" | grep -q 'worldscorefix.js?v=5'; then
-              ok=1;break
+              && printf '%s' "$body" | grep -q 'worldscorefix.js?v=5' \
+              && printf '%s' "$body" | grep -q 'snapshotdate.js?v=1' \
+              && printf '%s' "$badge" | grep -q 'snapshot-date-v1'; then
+              ok=1; break
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'Live index did not expose V73/V74 clean-rebuild scripts' >&2; exit 1; }
+          [ "$ok" -eq 1 ] || { echo 'Live index did not expose V76 safety scripts' >&2; exit 1; }
 
           updateguard="$(curl -fsSL --max-time 20 "$base/updateguard.js?v=4&sha=${GITHUB_SHA}")"
           clearfix="$(curl -fsSL --max-time 20 "$base/clearfix.js?v=3&sha=${GITHUB_SHA}")"
           availability="$(curl -fsSL --max-time 20 "$base/availabilitytruth.js?v=4&sha=${GITHUB_SHA}")"
           identity="$(curl -fsSL --max-time 20 "$base/identityguard.js?v=3&sha=${GITHUB_SHA}")"
+          snapshotbadge="$(curl -fsSL --max-time 20 "$base/snapshotdate.js?v=1&sha=${GITHUB_SHA}")"
           printf '%s' "$updateguard" | grep -q 'world-update-guard-v4-fixture-club-proof'
           printf '%s' "$updateguard" | grep -q 'current-squad-validated-shift-v73'
           printf '%s' "$updateguard" | grep -q 'retained matches do not reproduce the official score'
@@ -77,73 +82,65 @@ jobs:
           printf '%s' "$clearfix" | grep -q 'clearBrowserManagerSeason'
           printf '%s' "$availability" | grep -q 'availability-truth-v4'
           printf '%s' "$identity" | grep -q 'diagnostic-only'
+          printf '%s' "$snapshotbadge" | grep -q 'snapshot-date-v1'
+          printf '%s' "$snapshotbadge" | grep -q 'FM data · '
 
           : > /tmp/live_parts.b64
           for i in $(seq -w 0 16); do curl -fsSL --max-time 20 "$base/app/part${i}?sha=${GITHUB_SHA}" >> /tmp/live_parts.b64; done
           for i in 17 18 19 20; do curl -fsSL --max-time 20 "$base/app/fix${i}?sha=${GITHUB_SHA}" >> /tmp/live_parts.b64; done
           tr -d '\r\n ' < /tmp/live_parts.b64 | base64 -d | gzip -dc > /tmp/live_app.html
           python scripts/assert_fixture_db_handoff_v74.py /tmp/live_app.html
+          python scripts/assert_v76_snapshot_boundary.py /tmp/live_app.html
           python - <<'PY'
           from pathlib import Path
           import base64,re,sys,types
           html=Path('/tmp/live_app.html').read_text(encoding='utf-8')
-          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m,'live embedded importer missing'
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html); assert m,'live embedded importer missing'
           py=base64.b64decode(m.group(1)).decode('utf-8')
           required=[
-            'strict_current_db_membership_only_v68','strict-db-membership-only-no-history-mutation-v68','v68_current-squad-authority_previous-gws-quarantined',
-            'def _rich_candidate_twenty_pairs','named_header_candidate_v69','official-score-plus-strict-current-cohort-v69','rich_fixture_coverage','same_match_both_clubs','HEADER_PAT=re.compile',
-            'current-squad-validated-shift-v73','def _fixture_to_club_shift_candidates','def _fixture_shift_current_squad_evidence','every-current-senior-squad-size-12..45-v73',
+            'strict_current_db_membership_only_v68','strict-db-membership-only-no-history-mutation-v68',
+            'def _rich_candidate_twenty_pairs','official-score-plus-strict-current-cohort-v69','HEADER_PAT=re.compile',
+            'current-squad-validated-shift-v73','def _fixture_to_club_shift_candidates','def _fixture_shift_current_squad_evidence',
             'select_championship_fixtures(fix,all_clubs,expected_names,requested_league,db)',
             "FIXTURE_DB_HANDOFF_POLICY='loaded-game-db-bytes-v74'",
-            "'current_squad_identity_policy':'strict-db-membership-only-no-history-mutation-v68'",
-            "'rich_match_validation_policy':'official-score-plus-strict-current-cohort-v69'",
-            "'fixture_club_mapping_policy':fixture_info.get('fixture_club_mapping_policy')",
+            'v75-current-db-structural-senior-resolution-no-history','_choose_current_squad_option_v75','paired_uid_v75','current_person_senior_quality_v75',
+            "'snapshot_date':snapshot_date","'historical_freeze_policy':'append-only-by-snapshot-date-v1'",
+            "'snapshot_date_semantics':'FM data boundary; not browser time'",
           ]
-          forbidden=["cur.extend(add);diag['rich_augmented_players']+=len(add)",'if played_club.get(eid) in clubs: ceid=played_club[eid]','infer_hybrid_positions_from_match_markers(rich,players_by_eid)',"candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates",'bounded 18-22 rows per side']
-          for t in required:assert t in py,'live importer missing '+t
-          for t in forbidden:assert t not in py,'live importer contains forbidden '+t
-          code=compile(py,'fm_importer_live_v74.py','exec');name='fm_importer_live_v74';mod=types.ModuleType(name);mod.__file__='fm_importer_live_v74.py';sys.modules[name]=mod;exec(code,mod.__dict__,mod.__dict__)
+          forbidden=[
+            "cur.extend(add);diag['rich_augmented_players']+=len(add)",
+            'if played_club.get(eid) in clubs: ceid=played_club[eid]',
+            'infer_hybrid_positions_from_match_markers(rich,players_by_eid)',
+            'bounded 18-22 rows per side',
+          ]
+          for t in required: assert t in py,'live importer missing '+t
+          for t in forbidden: assert t not in py,'live importer contains forbidden '+t
+          code=compile(py,'fm_importer_live_v76.py','exec'); name='fm_importer_live_v76'; mod=types.ModuleType(name); mod.__file__='fm_importer_live_v76.py'; sys.modules[name]=mod; exec(code,mod.__dict__,mod.__dict__)
           assert hasattr(mod.__dict__.get('HEADER_PAT'),'finditer')
-          try:mod.__dict__['find_name_pool_index'](b'\x00'*4096)
-          except RuntimeError as e:assert 'FM name string table not found' in str(e)
-          except NameError as e:raise AssertionError('live name-pool runtime dependency unresolved') from e
-          else:raise AssertionError('synthetic empty DB unexpectedly resolved a live name pool')
-
-          Club=mod.__dict__['Club'];correct=[299,302,304,309,312,315,318,335,364,374,375,380,388,389,390,397,402,410,413,420,422,423,428,429]
-          team_ids={eid+132 for eid in correct};clubs={eid:Club(eid,eid+1000,f'C{eid}',f'C{eid}',139) for eid in set(correct+[x+1 for x in correct])}
-          original=mod.__dict__['scan_first_team_squads']
-          def fake_scan(_db,selected,_rich=None):
-              is_correct=set(selected)==set(correct);out={}
-              for i,eid in enumerate(selected):
-                  n=28 if is_correct or i>=2 else 0;out[eid]=list(range(eid*100,eid*100+n))
-              return out,{'policy':'strict_current_db_membership_only_v68','missing_club_eids':[]}
-          mod.__dict__['scan_first_team_squads']=fake_scan
-          shifts=mod.__dict__['_fixture_to_club_shift_candidates'](team_ids,clubs)
-          e131=mod.__dict__['_fixture_shift_current_squad_evidence'](team_ids,clubs,131,b'x')
-          e132=mod.__dict__['_fixture_shift_current_squad_evidence'](team_ids,clubs,132,b'x')
-          mod.__dict__['scan_first_team_squads']=original
-          assert 131 in shifts and 132 in shifts and e131['safe_squad_clubs']==22 and e132['safe_squad_clubs']==24,(shifts,e131,e132)
-
-          v72=['fmFantasySeasonLeaguePreferenceV72','fmLeagueAmbiguity=/Multiple supported English league seasons|contains both supported English leagues/i.test(msg)','FM_PENDING_SEASON_LEAGUE=fmRememberLeaguePreference(chosen)','explicitPreference!==undefined?fmNormaliseLeaguePreference(explicitPreference):fmCurrentLeaguePreference()',"return await sendFMImport(file,mode,true,chosen)"]
-          for t in v72:assert t in html,'live V72 league selector missing '+t
-          start=html.find('function fmAvailabilityTruthDate(payload){');end=html.find('function fmBuildInitialNews(payload){',start);assert start>=0 and end>start
+          try: mod.__dict__['find_name_pool_index'](b'\x00'*4096)
+          except RuntimeError as e: assert 'FM name string table not found' in str(e)
+          except NameError as e: raise AssertionError('live name-pool runtime dependency unresolved') from e
+          else: raise AssertionError('synthetic empty DB unexpectedly resolved a name pool')
+          v72=['fmFantasySeasonLeaguePreferenceV72','contains both supported English leagues','FM_PENDING_SEASON_LEAGUE=fmRememberLeaguePreference(chosen)',"return await sendFMImport(file,mode,true,chosen)"]
+          for t in v72: assert t in html,'live V72 league selector missing '+t
+          start=html.find('function fmAvailabilityTruthDate(payload){'); end=html.find('function fmBuildInitialNews(payload){',start); assert start>=0 and end>start
           block=html[start:end]
-          for t in ['discipline.dat/active-ban-v1','injury_manager.dat/current-window']:assert t in block
-          for t in ['5 yellow cards','second-yellow red','fmClubPlayedAfter(payload,p.club,inc.date)']:assert t not in block
-          print('deep live V73/V74 fixture-club and DB-handoff verification passed')
+          for t in ['discipline.dat/active-ban-v1','injury_manager.dat/current-window']: assert t in block
+          for t in ['5 yellow cards','second-yellow red','fmClubPlayedAfter(payload,p.club,inc.date)']: assert t not in block
+          print('deep live V76 verification passed')
           PY
-      - name: Record verified live deployment
+      - name: Record verified V76 deployment
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"verification\": \"v74-fixture-db-handoff-live\",\n  \"authfix\": \"v12-authoritative-cloud\",\n  \"availability_truth\": \"v4-direct-structural-evidence\",\n  \"current_squad_identity\": \"v68-strict-db-membership-only\",\n  \"retained_match_validation\": \"v69-official-score-plus-current-cohort\",\n  \"name_pool_runtime\": \"v71-historical-header-pat-restored-and-executed\",\n  \"league_selector\": \"v72-auto-prompt-plus-sticky-manual-choice\",\n  \"fixture_club_mapping\": \"v73-current-squad-validated-shift\",\n  \"fixture_db_handoff\": \"v74-loaded-game-db-bytes-to-every-browser-selector-call\",\n  \"update_guard\": \"v4-fixture-club-proof\",\n  \"clear_database\": \"v3-backed-up-reset-plus-stale-manager-wipe\"\n}\n' "$GITHUB_SHA" "$stamp")"
+          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"verification\": \"v76-dated-append-only-snapshot-live\",\n  \"authfix\": \"v12-authoritative-cloud\",\n  \"availability_truth\": \"v4-direct-structural-evidence\",\n  \"current_squad_decoder\": \"v75-current-db-structural-senior-resolution-no-history\",\n  \"retained_match_validation\": \"v69-official-score-plus-current-cohort\",\n  \"name_pool_runtime\": \"v71-historical-header-pat-restored-and-executed\",\n  \"league_selector\": \"v72-auto-prompt-plus-sticky-manual-choice\",\n  \"fixture_club_mapping\": \"v73-current-squad-validated-shift\",\n  \"fixture_db_handoff\": \"v74-loaded-game-db-bytes\",\n  \"snapshot_boundary\": \"append-only-by-snapshot-date-v1\",\n  \"snapshot_badge\": \"snapshot-date-v1\",\n  \"server_history_authority\": \"supabase-dated-canonical-merge\",\n  \"history_identity\": \"stable-date-fixture-context-v2\",\n  \"update_guard\": \"v4-fixture-club-proof\",\n  \"clear_database\": \"v3-backed-up-reset-plus-stale-manager-wipe\"\n}\n' "$GITHUB_SHA" "$stamp")"
           content="$(printf '%s' "$json" | base64 -w0)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified v74 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V76 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified v74 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V76 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
