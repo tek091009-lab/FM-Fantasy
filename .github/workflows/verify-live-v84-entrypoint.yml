@@ -8,7 +8,7 @@ on:
       - 'updateguard.js'
       - 'importcompat.js'
       - 'canonicalpublish.js'
-      - 'scripts/test_partial_catchup_guard_v81.js'
+      - 'scripts/test_season_publish_v84.js'
       - '.github/workflows/verify-live-v84-entrypoint.yml'
 permissions:
   contents: write
@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: {node-version: '22'}
       - name: Verify season partial guard regression locally
-        run: node scripts/test_partial_catchup_guard_v81.js
+        run: node scripts/test_season_publish_v84.js
       - name: Verify fresh entrypoint and V7/V83 assets are live
         shell: bash
         run: |
@@ -46,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .deploy
-          printf 'verified_sha=%s\nverified_at=%s\nentrypoint=v84.html\nguard=world-update-guard-v7-explicit-season-partial\nmode=import-mode-v83-season-publish\n' "$GITHUB_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .deploy/live-v84-import.txt
+          printf 'verified_sha=%s\nverified_at=%s\nentrypoint=v84.html\nguard=world-update-guard-v7-explicit-season-partial\nmode=import-mode-v83-season-publish\nseason_partial_guard=tested\n' "$GITHUB_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .deploy/live-v84-import.txt
           git config user.name github-actions[bot]
           git config user.email 4189824+github-actions[bot]@users.noreply.github.com
           git add .deploy/live-v84-import.txt
