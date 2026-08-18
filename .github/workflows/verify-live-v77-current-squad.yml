@@ -1,0 +1,47 @@
+name: Verify live V77 current squad resolver
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'scripts/assert_v77_single_missing_current_squad.py'
+      - '.github/workflows/verify-live-v77-current-squad.yml'
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Verify repository V77
+        run: python scripts/assert_v77_single_missing_current_squad.py
+      - name: Wait for live Pages and run same V77 regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://tek091009-lab.github.io/FM-Fantasy'
+          ok=0
+          for attempt in $(seq 1 30); do
+            : > /tmp/live_parts.b64
+            good=1
+            for i in $(seq -w 0 16); do curl -fsSL --max-time 20 "$base/app/part${i}?v77=${GITHUB_SHA}-${attempt}" >> /tmp/live_parts.b64 || good=0; done
+            for i in 17 18 19 20; do curl -fsSL --max-time 20 "$base/app/fix${i}?v77=${GITHUB_SHA}-${attempt}" >> /tmp/live_parts.b64 || good=0; done
+            if [ "$good" -eq 1 ] && tr -d '\r\n ' < /tmp/live_parts.b64 | base64 -d | gzip -dc > /tmp/live_app.html 2>/dev/null; then
+              if python scripts/assert_v77_single_missing_current_squad.py /tmp/live_app.html; then ok=1;break; fi
+            fi
+            sleep 5
+          done
+          [ "$ok" -eq 1 ] || { echo 'Live Pages never passed V77 current squad regression' >&2; exit 1; }
+          printf 'V77 LIVE regression passed: 23+1 completes; 22+2 and overlap remain blocked\n' > _v77_live_current_squad.txt
+      - name: Commit live proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add _v77_live_current_squad.txt
+          git commit -m 'Record live V77 current squad proof' || exit 0
+          git pull --rebase origin main
+          git push
