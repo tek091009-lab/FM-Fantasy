@@ -11,7 +11,7 @@ on:
       - 'scripts/test_partial_catchup_guard_v81.js'
       - '.github/workflows/verify-live-v84-entrypoint.yml'
 permissions:
-  contents: read
+  contents: write
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -41,3 +41,15 @@ jobs:
             sleep 5
           done
           [ "$ok" -eq 1 ] || { echo 'V84 importer entrypoint did not reach live Pages' >&2; exit 1; }
+      - name: Record successful live verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .deploy
+          printf 'verified_sha=%s\nverified_at=%s\nentrypoint=v84.html\nguard=world-update-guard-v7-explicit-season-partial\nmode=import-mode-v83-season-publish\n' "$GITHUB_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .deploy/live-v84-import.txt
+          git config user.name github-actions[bot]
+          git config user.email 4189824+github-actions[bot]@users.noreply.github.com
+          git add .deploy/live-v84-import.txt
+          git commit -m "Record verified live V84 importer ${GITHUB_SHA::7}"
+          git pull --rebase origin main
+          git push
