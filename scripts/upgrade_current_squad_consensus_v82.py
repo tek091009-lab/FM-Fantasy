@@ -2,6 +2,7 @@ from __future__ import annotations
 import base64,gzip,re
 from pathlib import Path
 
+# v82 trigger: CA remains diagnostic evidence only when current-DB squad blocks disagree.
 ROOT=Path(__file__).resolve().parents[1]
 PARTS=[ROOT/'app'/f'part{i:02d}' for i in range(17)]+[ROOT/'app'/f'fix{i}' for i in range(17,21)]
 
