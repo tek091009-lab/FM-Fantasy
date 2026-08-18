@@ -43,6 +43,15 @@ def main():
         result['checks']['availability_block']=bool(block)
         result['checks']['availability_direct']={x:(x in block) for x in ['discipline.dat/active-ban-v1','injury_manager.dat/current-window']}
         result['checks']['availability_forbidden']={x:(x in block) for x in ['5 yellow cards','second-yellow red','fmClubPlayedAfter(payload,p.club,inc.date)']}
+        v72_tokens=[
+            'fmFantasySeasonLeaguePreferenceV72',
+            'fmLeagueAmbiguity=/Multiple supported English league seasons|contains both supported English leagues/i.test(msg)',
+            'FM_PENDING_SEASON_LEAGUE=fmRememberLeaguePreference(chosen)',
+            'explicitPreference!==undefined?fmNormaliseLeaguePreference(explicitPreference):fmCurrentLeaguePreference()',
+            "return await sendFMImport(file,mode,true,chosen)",
+        ]
+        result['checks']['league_selector_v72']=all(x in html for x in v72_tokens)
+        result['checks']['old_league_ambiguity_catch_absent']="if(mode==='season'&&!autoRetry&&!($('leagueImportPreference')?.value)&&msg.includes('Multiple supported English league seasons')){" not in html
         ug=(ROOT/'updateguard.js').read_text();cf=(ROOT/'clearfix.js').read_text();idx=(ROOT/'index.html').read_text()
         result['checks']['update_guard_v3']='world-update-guard-v3-identity-history-safe' in ug
         result['checks']['backed_reset']='fmfantasy_reset_world_season' in cf and 'fmFantasyLastSeasonResetBackup' in cf
