@@ -1,0 +1,54 @@
+v71: restored historical HEADER_PAT and passed real find_name_pool_index runtime dependency probe
+restore_rc=0
+{
+  "checks": {
+    "availability_block": true,
+    "availability_direct": {
+      "discipline.dat/active-ban-v1": true,
+      "injury_manager.dat/current-window": true
+    },
+    "availability_forbidden": {
+      "5 yellow cards": false,
+      "fmClubPlayedAfter(payload,p.club,inc.date)": false,
+      "second-yellow red": false
+    },
+    "availability_tokens": {
+      "expiry<=save_date": true,
+      "fixture_floor": true,
+      "full<=save_date": true,
+      "structural-v2-fixture-floor": true
+    },
+    "backed_reset": true,
+    "candidate_function": true,
+    "compile": true,
+    "embedded_importer": true,
+    "forbidden_tokens": {
+      "bounded 18-22 rows per side": false,
+      "candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates": false,
+      "cur.extend(add);diag['rich_augmented_players']+=len(add)": false,
+      "if played_club.get(eid) in clubs: ceid=played_club[eid]": false,
+      "infer_hybrid_positions_from_match_markers(rich,players_by_eid)": false
+    },
+    "index_versions": {
+      "availabilitytruth.js?v=4": true,
+      "clearfix.js?v=3": true,
+      "updateguard.js?v=3": true
+    },
+    "required_tokens": {
+      "def _rich_candidate_twenty_pairs": true,
+      "named_header_candidate_v69": true,
+      "official-score-plus-strict-current-cohort-v69": true,
+      "rich_fixture_coverage": true,
+      "same_match_both_clubs": true,
+      "strict-db-membership-only-no-history-mutation-v68": true,
+      "strict_current_db_membership_only_v68": true,
+      "v68_current-squad-authority_previous-gws-quarantined": true
+    },
+    "reset_stale_state_guard": true,
+    "synthetic_20x20": true,
+    "update_guard_v3": true
+  },
+  "errors": [],
+  "ok": true
+}
+preflight_rc=0
