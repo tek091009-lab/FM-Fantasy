@@ -1,0 +1,53 @@
+name: Find historical HEADER_PAT
+on:
+  push:
+    paths:
+      - '.github/workflows/find-header-pat-history.yml'
+permissions:
+  contents: write
+jobs:
+  find:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Search embedded importer history
+        shell: bash
+        run: |
+          python - <<'PY'
+          import subprocess,base64,gzip,re
+          from pathlib import Path
+          paths=[f'app/part{i:02d}' for i in range(17)]+[f'app/fix{i}' for i in range(17,21)]
+          commits=subprocess.check_output(['git','rev-list','--all','--max-count=300'],text=True).splitlines()
+          out=[];found=False
+          for sha in commits:
+            try:
+              chunks=[]
+              for p in paths:
+                chunks.append(subprocess.check_output(['git','show',f'{sha}:{p}'],stderr=subprocess.DEVNULL).decode().strip())
+              html=gzip.decompress(base64.b64decode(''.join(chunks))).decode('utf-8')
+              m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
+              if not m: continue
+              py=base64.b64decode(m.group(1)).decode('utf-8')
+            except Exception:
+              continue
+            defs=list(re.finditer(r'(?m)^HEADER_PAT\s*=.*$',py))
+            if defs:
+              d=defs[-1];lines=py.splitlines();idx=py[:d.start()].count('\n')
+              out.append('sha='+sha)
+              out.append('commit='+subprocess.check_output(['git','show','-s','--format=%s',sha],text=True).strip())
+              out.extend(f'{i+1:05d}: {lines[i]}' for i in range(max(0,idx-12),min(len(lines),idx+20)))
+              found=True;break
+          if not found:out.append('NO HISTORICAL HEADER_PAT DEFINITION FOUND IN 300 COMMITS')
+          Path('_header_pat_history.txt').write_text('\n'.join(out)+'\n')
+          PY
+      - name: Commit result
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add _header_pat_history.txt
+          git commit -m 'Record historical HEADER_PAT definition' || exit 0
+          git pull --rebase origin main
+          git push
