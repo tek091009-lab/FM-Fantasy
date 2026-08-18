@@ -14,7 +14,7 @@ def main():
         result['checks']['embedded_importer']=bool(m)
         if not m: raise RuntimeError('embedded importer missing')
         py=base64.b64decode(m.group(1)).decode('utf-8')
-        required=['strict_current_db_membership_only_v68','strict-db-membership-only-no-history-mutation-v68','v68_current-squad-authority_previous-gws-quarantined','def _rich_candidate_twenty_pairs','named_header_candidate_v69','official-score-plus-strict-current-cohort-v69','rich_fixture_coverage','same_match_both_clubs']
+        required=['strict_current_db_membership_only_v68','strict-db-membership-only-no-history-mutation-v68','v68_current-squad-authority_previous-gws-quarantined','def _rich_candidate_twenty_pairs','named_header_candidate_v69','official-score-plus-strict-current-cohort-v69','rich_fixture_coverage','same_match_both_clubs','HEADER_PAT=re.compile']
         result['checks']['required_tokens']={x:(x in py) for x in required}
         forbidden=["cur.extend(add);diag['rich_augmented_players']+=len(add)",'if played_club.get(eid) in clubs: ceid=played_club[eid]','infer_hybrid_positions_from_match_markers(rich,players_by_eid)',"candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates",'bounded 18-22 rows per side']
         result['checks']['forbidden_tokens']={x:(x in py) for x in forbidden}
@@ -22,6 +22,17 @@ def main():
         module_name='fm_importer_preflight_v70';mod=types.ModuleType(module_name);mod.__file__='fm_importer_preflight_v70.py';sys.modules[module_name]=mod
         exec(code,mod.__dict__,mod.__dict__);ns=mod.__dict__
         result['checks']['candidate_function']=callable(ns.get('_rich_candidate_twenty_pairs'))
+        result['checks']['header_pat_runtime_object']=hasattr(ns.get('HEADER_PAT'),'finditer')
+        result['checks']['name_pool_function']=callable(ns.get('find_name_pool_index'))
+        name_pool_probe=False
+        if result['checks']['header_pat_runtime_object'] and result['checks']['name_pool_function']:
+            try:
+                ns['find_name_pool_index'](b'\x00'*4096)
+            except RuntimeError as e:
+                name_pool_probe='FM name string table not found' in str(e)
+            except Exception:
+                name_pool_probe=False
+        result['checks']['name_pool_runtime_probe']=name_pool_probe
         def row(pid,off): return {'player_id':pid,'offset':off,'goals':0,'own_goals':0}
         left=[row(i+1,i*100) for i in range(20)];right=[row(101+i,5000+i*100) for i in range(20)]
         pairs=ns['_rich_candidate_twenty_pairs'](left+right) if callable(ns.get('_rich_candidate_twenty_pairs')) else []
