@@ -3,7 +3,10 @@ import base64,gzip,re,struct,sys,types
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 PARTS=[ROOT/'app'/f'part{i:02d}' for i in range(17)]+[ROOT/'app'/f'fix{i}' for i in range(17,21)]
-html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in PARTS))).decode('utf-8')
+if len(sys.argv)>1:
+    html=Path(sys.argv[1]).read_text(encoding='utf-8')
+else:
+    html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in PARTS))).decode('utf-8')
 m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m
 py=base64.b64decode(m.group(1)).decode('utf-8')
 req=["CURRENT_SQUAD_SINGLE_MISSING_POLICY='23-of-24-strong-plus-current-person-proof-v77'",'single_missing_current_db_completion_v77','legacy_exact_uid_header_v77']
