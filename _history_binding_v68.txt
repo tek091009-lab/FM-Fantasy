@@ -1,0 +1,679 @@
+DEFINITIONS
+136: scan_fixture_groups
+178: select_championship_fixtures
+273: derive_fixture_to_club_shift
+295: read_squad_list
+316: _rich_members_by_club
+333: selected_rich_team_aliases
+348: scan_first_team_squads
+773: reprice_players
+1124: _rich_read_lp_utf8
+1135: _rich_stat_record_at
+1172: _rich_scan_stats
+1183: _rich_pick_two_squads
+1197: _rich_decorate
+1218: _rich_header
+1241: _rich_extract_member
+1276: rich_extract_named
+1301: score_player
+1343: infer_hybrid_positions_from_match_markers
+1424: join_rich_matches
+1458: build_players
+1487: aggregate_player_history
+1596: _build_payload
+1702: _rich_candidate_squad_pairs
+1757: _rich_scan_stats_fast
+1772: recover_unlabelled_rich_members
+2247: recover_game_db_rich_matches
+2305: browser_build_payload_from_fs
+
+CONTEXT
+
+---
+00320:     for eid,c in selected_clubs.items():
+00321:         byname[normalize_club_name(c.name)]=eid
+00322:         byname[normalize_club_name(c.short)]=eid
+00323:     for m in rich:
+00324:         for side,key in (('home','home_players'),('away','away_players')):
+00325:             ceid=byname.get(normalize_club_name(m.get(side,'')))
+00326:             if ceid is None:continue
+00327:             for r in m.get(key,[]):
+00328:                 try:out[ceid].add(int(r['player_id']))
+00329:                 except Exception:pass
+00330:     return out
+00331: 
+00332: 
+00333: def selected_rich_team_aliases(selected_clubs:dict[int,Club])->dict[int,str]:
+00334:     """Build unambiguous match-header aliases only for clubs in the already-selected league.
+00335: 
+00336:     This is deliberately post-selection: it cannot influence which league/season is selected.
+00337:     It exists only to recover player history in saves whose retained match headers use a
+00338:     different team-id namespace from the original Championship regression save.
+00339:     """
+00340:     aliases=collections.defaultdict(set)
+
+---
+01127:     if n>max_len or pos+4+n>len(buf): return None,pos
+01128:     raw=buf[pos+4:pos+4+n]
+01129:     try:s=raw.decode('utf-8')
+01130:     except UnicodeDecodeError:return None,pos
+01131:     if any(ord(c)<32 for c in s):return None,pos
+01132:     return s,pos+4+n
+01133: 
+01134: 
+01135: def _rich_stat_record_at(buf:bytes,p:int):
+01136:     if p+214>len(buf) or buf[p]!=2:return None
+01137:     c=buf[p:p+214];rating=u16(c,136)
+01138:     if not (1<=c[5]<=99 and c[7]==2 and c[20]<=12 and c[21]<=20 and c[50]<=30 and c[51]<=30 and c[52]<=30 and c[56]<=12 and c[63]<=5 and c[64]<=2 and c[67]<=130 and c[71]<=130 and 400<=rating<=1000):
+01139:         return None
+01140:     out={
+01141:         'player_id':u32(c,1),'shirt':c[5],'goals':c[20],
+01142:         'goalkeeper_goals_conceded_from_sot':c[21],'penalties_taken':c[22],
+01143:         'penalties_scored':c[23],'own_goals':c[24],
+01144:         'shots_on_target':c[42],'shots_blocked':c[43],
+01145:         'save_component_1':c[50],'save_component_2':c[51],'save_component_3':c[52],
+01146:         'save_component_legacy_1':c[50],'save_component_legacy_2':c[51],'save_component_legacy_3':c[52],
+01147:         'blocks':c[55],'assists':c[56],
+01148:         'yellow_cards':c[63],'red_cards':c[64],'sub_off':c[67],'sub_on':c[71],
+01149:         'sent_off_minute':c[74],'match_position_marker':c[77],
+01150:         'passes_attempted':c[86],'passes_completed':c[87],
+01151:         'tackles_attempted':c[92],'tackles_won':c[93],'key_tackles_candidate':c[94],
+01152:         'headers_attempted':c[95],'headers_won':c[96],
+01153:         'interceptions_candidate':c[97],'clearances_candidate':c[98],
+
+---
+01263:                 matches.append({**header,'competition':canonical,'competition_code':spec['code'],
+01264:                     'home_score':sum(x['goals'] for x in home)+sum(x['own_goals'] for x in away),
+01265:                     'away_score':sum(x['goals'] for x in away)+sum(x['own_goals'] for x in home),
+01266:                     'home_players':home,'away_players':away,'offset':pos,'source_member':source_member})
+01267:     # De-duplicate if a generic label appears inside a longer label.
+01268:     out=[];seen=set()
+01269:     for m in matches:
+01270:         k=(m['competition'],m['home_tid'],m['away_tid'],m['home_score'],m['away_score'],
+01271:            tuple(x['player_id'] for x in m['home_players']),tuple(x['player_id'] for x in m['away_players']))
+01272:         if k in seen:continue
+01273:         seen.add(k);out.append(m)
+01274:     return out
+01275: 
+01276: def rich_extract_named(save_path:Path,all_clubs:dict[int,Club])->list[dict[str,Any]]:
+01277:     # Rich match copies live across labelled save members (news, play-fixture manager,
+01278:     # and transient APM/SCM snapshots). Scan members one-at-a-time so the importer
+01279:     # never needs the legacy ~500 MB whole-save decompression.
+01280:     rich_team_names={c.uid+1:normalize_club_name(c.short or c.name) for c in all_clubs.values()}
+01281:     _save,items=read_manifest(save_path)
+01282:     raw=[]
+01283:     for member in items:
+01284:         if member.plain_len<=0 or member.plain_len>30_000_000:continue
+01285:         buf=extract_member(save_path,member)
+01286:         if b'Sky Bet Championship' not in buf:continue
+01287:         raw.extend(_rich_extract_member(buf,rich_team_names,member.name))
+01288:     ded=[];seen=set()
+01289:     for m in raw:
+01290:         key=(m['home'],m['away'],m['home_score'],m['away_score'],
+01291:              tuple(x['player_id'] for x in m['home_players']),tuple(x['player_id'] for x in m['away_players']))
+01292:         if key in seen:continue
+01293:         seen.add(key);ded.append(m)
+01294:     return ded
+01295: 
+01296: def normalize_club_name(name:str)->str:
+01297:     repl={'West Ham United':'West Ham Utd','Queens Park Rangers':'QPR','Sheffield United':'Sheffield Utd','West Bromwich Albion':'West Brom'}
+01298:     return repl.get(name,name)
+01299: 
+01300: 
+01301: def score_player(row:dict[str,Any],pos:str)->dict[str,Any]:
+01302:     mins=row.get('minutes',0) or 0
+01303:     app=2 if mins>=60 else 1 if mins>0 else 0
+
+---
+01335: 
+01336: 
+01337: 
+01338: def _position_strengths(p:dict[str,Any]):
+01339:     ps=p.get('positions') or {};v=lambda k:float(ps.get(k,0) or 0)
+01340:     return {'GK':v('GK'),'DEF':max(v('SW'),v('DL'),v('DC'),v('DR'),v('WBL'),v('WBR')),
+01341:             'MID':max(v('DM'),v('ML'),v('MC'),v('MR'),v('AML'),v('AMC'),v('AMR')),'FWD':v('ST')}
+01342: 
+01343: def infer_hybrid_positions_from_match_markers(rich:list[dict[str,Any]],players_by_eid:dict[int,dict[str,Any]]):
+01344:     """Self-calibrate FM's retained match-position marker from unambiguous players.
+01345: 
+01346:     Marker 4 is already proven as goalkeeper. Other marker meanings can vary across
+01347:     retained objects, so never hard-code them: learn a marker->FPL band mapping only
+01348:     when the save itself gives a strong, repeated correlation. Then use that mapping
+01349:     solely to resolve genuine DEF/MID hybrids; ordinary positions are left untouched.
+01350:     """
+01351:     marker_counts=collections.defaultdict(collections.Counter)
+01352:     for m in rich:
+01353:         for key in ('home_players','away_players'):
+01354:             for r in m.get(key,[]):
+01355:                 p=players_by_eid.get(int(r.get('player_id') or 0));marker=int(r.get('match_position_marker') or 0)
+01356:                 if not p or not marker or marker==4 or float(r.get('minutes') or 0)<=0:continue
+01357:                 strengths=_position_strengths(p);order=sorted(strengths.items(),key=lambda x:x[1],reverse=True)
+01358:                 if order[0][1]<15 or order[0][1]-order[1][1]<3:continue
+01359:                 marker_counts[marker][order[0][0]]+=1
+01360:     marker_roles={4:'GK'}
+01361:     for marker,c in marker_counts.items():
+01362:         total=sum(c.values())
+01363:         if total<8:continue
+01364:         role,n=c.most_common(1)[0]
+01365:         if n/total>=0.80:marker_roles[marker]=role
+01366:     usage=collections.defaultdict(collections.Counter)
+01367:     for m in rich:
+01368:         for key in ('home_players','away_players'):
+01369:             for r in m.get(key,[]):
+01370:                 if float(r.get('minutes') or 0)<=0:continue
+01371:                 role=marker_roles.get(int(r.get('match_position_marker') or 0))
+01372:                 if role:usage[int(r.get('player_id') or 0)][role]+=1
+01373:     changed=[]
+01374:     for eid,c in usage.items():
+01375:         p=players_by_eid.get(eid)
+01376:         if not p:continue
+01377:         st=_position_strengths(p)
+01378:         if max(st['DEF'],st['MID'])<15:continue
+01379:         dm=c['DEF']+c['MID']
+01380:         if dm<2:continue
+01381:         if c['MID']/dm>=0.80 and p.get('pos')!='MID':p['pos']='MID';p['position_source']='observed_midfield_usage_v64_marker';changed.append(eid)
+01382:         elif c['DEF']/dm>=0.80 and p.get('pos')!='DEF':p['pos']='DEF';p['position_source']='observed_defensive_usage_v64_marker';changed.append(eid)
+01383: 
+01384:     # FM's match-position marker is 0 for most outfield rows in some saves. The retained
+01385:     # player blocks still preserve tactical XI order: slot 1 is GK, 2-5 defence, 6-10
+01386:     # midfield/attack, 11 striker in the overwhelming majority of decoded matches. Learn
+01387:     # those slot roles from unambiguous players in THIS save, then apply only to genuine
+01388:     # DEF/MID hybrids with at least two starts in a strongly calibrated slot.
+01389:     slot_counts=collections.defaultdict(collections.Counter)
+01390:     for mm in rich:
+01391:         for key in ('home_players','away_players'):
+01392:             for idx,r in enumerate(mm.get(key,[])[:11],1):
+01393:                 if float(r.get('minutes') or 0)<=0:continue
+01394:                 p=players_by_eid.get(int(r.get('player_id') or 0))
+01395:                 if not p:continue
+01396:                 st=_position_strengths(p);order=sorted(st.items(),key=lambda x:x[1],reverse=True)
+01397:                 if order[0][1]<15 or order[0][1]-order[1][1]<3:continue
+01398:                 slot_counts[idx][order[0][0]]+=1
+01399:     slot_roles={}
+01400:     for idx,cnt in slot_counts.items():
+01401:         total=sum(cnt.values())
+01402:         if total<10:continue
+01403:         role,n=cnt.most_common(1)[0]
+01404:         if n/total>=0.75:slot_roles[idx]=role
+01405:     slot_usage=collections.defaultdict(collections.Counter)
+01406:     for mm in rich:
+01407:         for key in ('home_players','away_players'):
+01408:             for idx,r in enumerate(mm.get(key,[])[:11],1):
+01409:                 role=slot_roles.get(idx)
+01410:                 if role:slot_usage[int(r.get('player_id') or 0)][role]+=1
+01411:     for eid,c in slot_usage.items():
+01412:         p=players_by_eid.get(eid)
+01413:         if not p:continue
+01414:         st=_position_strengths(p)
+01415:         if max(st['DEF'],st['MID'])<15:continue
+01416:         dm=c['DEF']+c['MID']
+01417:         if dm<2:continue
+01418:         if c['MID']/dm>=0.75 and p.get('pos')!='MID':
+01419:             p['pos']='MID';p['position_source']='observed_midfield_usage_v64_lineup_slot';p['observed_lineup_role_counts']=dict(c);changed.append(eid)
+01420:         elif c['DEF']/dm>=0.75 and p.get('pos')!='DEF':
+01421:             p['pos']='DEF';p['position_source']='observed_defensive_usage_v64_lineup_slot';p['observed_lineup_role_counts']=dict(c);changed.append(eid)
+01422:     return {'marker_roles':marker_roles,'slot_roles':slot_roles,'hybrid_players_reclassified':sorted(set(changed))}
+01423: 
+01424: def join_rich_matches(rich:list[dict[str,Any]],fixtures:list[dict[str,Any]],players_by_eid:dict[int,dict[str,Any]]):
+01425:     infer_hybrid_positions_from_match_markers(rich,players_by_eid)
+01426:     # Rich headers use another team-id namespace, so bind by normalized club names and the exact played schedule.
+01427:     by_pair=collections.defaultdict(list)
+01428:     for f in fixtures:
+01429:         if f['status']=='played': by_pair[(f['home'],f['away'])].append(f)
+01430:     out=[]
+01431:     for mid,m in enumerate(rich,1):
+01432:         home=normalize_club_name(m['home']); away=normalize_club_name(m['away'])
+01433:         candidates=by_pair.get((home,away),[])
+01434:         if m.get('date'):
+01435:             dated=[f for f in candidates if f.get('date')==m.get('date')]
+01436:             if dated:candidates=dated
+01437:         # Score disambiguates the return fixture when needed.
+01438:         candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates
+01439:         if len(candidates)!=1: continue
+01440:         fix=candidates[0]
+01441:         mm={'id':mid,'match_id':mid,'fixture_id':fix['fixture_id'],'gameweek':fix['gameweek'],'date':fix['date'],'home':home,'away':away,'home_score':fix['home_score'],'away_score':fix['away_score'],'status':'played','source':'fm_rich_stats'}
+01442:         allp=[]
+01443:         for side,key,club,opp,venue in [('home','home_players',home,away,'H'),('away','away_players',away,home,'A')]:
+01444:             arr=[]
+01445:             for r in m[key]:
+01446:                 eid=int(r['player_id']); canon=players_by_eid.get(eid)
+01447:                 pos=canon['pos'] if canon else ('GK' if r.get('is_goalkeeper_match_role') else 'MID')
+01448:                 name=canon['name'] if canon else r.get('player',f'FM Player {eid}')
+01449:                 row=dict(r); row.update({'player_id':str(eid),'name':name,'club':club,'pos':pos,'opponent':opp,'venue':venue,'home':home,'away':away,'score':f"{fix['home_score']}-{fix['away_score']}",'gameweek':fix['gameweek'],'match_id':mid})
+01450:                 row.update(score_player(row,pos)); arr.append(row);allp.append(row)
+01451:             mm[side+'_players']=arr
+01452:         award_bonus(allp)
+01453:         # bonus/fpl point fields are shared row dicts referenced in arrays.
+01454:         out.append(mm)
+01455:     return out
+01456: 
+01457: 
+01458: def build_players(squads:dict[int,list[int]], selected_clubs:dict[int,Club], people:dict[int,Person], rich:list[dict[str,Any]]|None=None):
+01459:     memberships=collections.defaultdict(list)
+01460:     for ceid,eids in squads.items():
+01461:         for eid in eids: memberships[eid].append(ceid)
+
+---
+01463:     played_club={}
+01464:     if rich:
+01465:         name_to_eid={normalize_club_name(c.name):eid for eid,c in selected_clubs.items()}
+01466:         name_to_eid.update({normalize_club_name(c.short):eid for eid,c in selected_clubs.items()})
+01467:         for m in rich:
+01468:             for side,key in [('home','home_players'),('away','away_players')]:
+01469:                 ceid=name_to_eid.get(normalize_club_name(m[side]))
+01470:                 if ceid is None:continue
+01471:                 for r in m[key]: played_club[int(r['player_id'])]=ceid
+01472:     out=[]; unresolved=[]; ambiguous=[]
+01473:     for eid,clubs in sorted(memberships.items()):
+01474:         person=people.get(eid)
+01475:         if not person:
+01476:             unresolved.append(eid);continue
+01477:         ceid=clubs[0]
+01478:         if len(clubs)>1:
+01479:             if played_club.get(eid) in clubs: ceid=played_club[eid]
+01480:             else: ambiguous.append({'player_eid':eid,'club_eids':clubs})
+01481:         c=selected_clubs[ceid]
+01482:         pos=fantasy_position(person.positions)
+01483:         out.append({'id':str(eid),'pid':str(eid),'name':person.display_name,'display_name':person.display_name,'public_name':person.display_name,'legal_name':person.name,'first_name':getattr(person,'first_name',None),'surname_name':getattr(person,'surname_name',None),'common_name':person.common_name,'first_name_id':getattr(person,'first_name_id',None),'surname_name_id':getattr(person,'surname_name_id',None),'common_name_id':getattr(person,'common_name_id',None),'identity_components_preserved':True,'name_component_evidence':{'legal_full':person.name,'first':getattr(person,'first_name',None),'surname_family':getattr(person,'surname_name',None),'common_known_as':person.common_name,'first_pool_id':getattr(person,'first_name_id',None),'surname_pool_id':getattr(person,'surname_name_id',None),'common_pool_id':getattr(person,'common_name_id',None),'nickname':None,'shirt_name':None,'preferred_short_name':None,'schema':'person_string_pools_v1'},'name_resolution_evidence':{'resolved_display':getattr(person,'display_name',None),'display_equals_legal':bool(getattr(person,'display_name',None) and getattr(person,'display_name',None)==person.name),'display_equals_common':bool(getattr(person,'display_name',None) and person.common_name and getattr(person,'display_name',None)==person.common_name),'display_contains_common':bool(getattr(person,'display_name',None) and person.common_name and person.common_name.casefold() in getattr(person,'display_name',None).casefold()),'display_contains_surname':bool(getattr(person,'display_name',None) and getattr(person,'surname_name',None) and getattr(person,'surname_name',None).casefold() in getattr(person,'display_name',None).casefold()),'source':'preserved_components_plus_current_resolver'},'preferred_name':person.common_name,'first_name':person.first_name,'surname':person.surname,'football_surname':person.surname,'legal_full_name':person.name,'club':normalize_club_name(c.short or c.name),'club_full':c.name,'club_eid':ceid,'pos':pos,'positions':{POSITION_NAMES[i]:v for i,v in enumerate(person.positions or [])},'ca':person.current_ability,'pa':person.potential_ability,'price':price_from_ca(pos,person.current_ability),'apps':0,'minutes':0,'goals':0,'assists':0,'yc':0,'rc':0,'saves':0,'gc':0,'starts':0,'avg_rating':0.0,'fantasy_points':0,'points':0,'form_points':0.0,'form':0.0,'history':[],'weekly_points':{},'visible':True,'available':True,'unresolved':False})
+01484:     return out,unresolved,ambiguous
+01485: 
+01486: 
+01487: def aggregate_player_history(players:list[dict[str,Any]],matches:list[dict[str,Any]]):
+01488:     byid={int(p['pid']):p for p in players}
+01489:     for m in matches:
+01490:         for key in ('home_players','away_players'):
+01491:             for r in m[key]:
+01492:                 p=byid.get(int(r['player_id']))
+01493:                 if not p:continue
+01494:                 h={k:r.get(k) for k in ['match_id','opponent','venue','score','home','away','minutes','goals','assists','yellow_cards','red_cards','rating','goals_conceded','saves','appearance_pts','goal_pts','assist_pts','clean_sheet_pts','save_pts','gc_pts','card_pts','defcon_actions','defcon_pts','bonus','bps_proxy','fpl_points','gameweek','own_goals','penalties_missed','match_position_marker']};h['date']=m.get('date')
+01495:                 h['yc']=h.pop('yellow_cards') or 0;h['rc']=h.pop('red_cards') or 0;h['gc']=h.pop('goals_conceded') or 0
+01496:                 p['history'].append(h)
+01497:                 mins=r.get('minutes',0) or 0
+01498:                 p['apps']+=1 if mins>0 else 0;p['minutes']+=mins;p['goals']+=r.get('goals',0) or 0;p['assists']+=r.get('assists',0) or 0;p['yc']+=r.get('yellow_cards',0) or 0;p['rc']+=r.get('red_cards',0) or 0;p['saves']+=r.get('saves',0) or 0;p['gc']+=r.get('team_goals_conceded_while_on_pitch',0) or 0;p['starts']+=1 if str(r.get('appearance','')).startswith('Started') else 0
+01499:                 p['fantasy_points']+=r.get('fpl_points',0) or 0;p['weekly_points'][str(r['gameweek'])]=p['weekly_points'].get(str(r['gameweek']),0)+(r.get('fpl_points',0) or 0)
+01500:     for p in players:
+01501:         ratings=[h['rating'] for h in p['history'] if h.get('rating')]
+01502:         p['avg_rating']=round(sum(ratings)/len(ratings),2) if ratings else 0.0
+01503:         recent=sorted(p['history'],key=lambda h:h['gameweek'])[-4:]
+01504:         p['form_points']=round(sum(h.get('fpl_points',0) for h in recent)/len(recent),1) if recent else 0.0
+01505:         p['points']=p['fantasy_points'];p['form']=p['form_points']
+01506:         card_rows=[h for h in p['history'] if int(h.get('yc',0) or 0)>0 or int(h.get('rc',0) or 0)>0]
+01507:         card_rows.sort(key=lambda h:(str(h.get('date') or ''),int(h.get('gameweek') or 0)))
+01508:         _hist_rows=list(p.get('history') or [])
+01509:         _hist_gws=sorted({int(h.get('gameweek') or 0) for h in _hist_rows if int(h.get('gameweek') or 0)>0})
+01510:         _hist_dates=sorted({str(h.get('date')) for h in _hist_rows if h.get('date')})
+01511:         p['retained_history_evidence']={
+
+---
+01578: def build_star_teams(players:list[dict[str,Any]],latest_gw:int)->dict[str,dict[str,Any]]:
+01579:     out={}
+01580:     formations=[]
+01581:     for d in range(3,6):
+01582:         for m in range(2,6):
+01583:             f=10-d-m
+01584:             if 1<=f<=3:formations.append((d,m,f))
+01585:     for gw in range(1,max(1,latest_gw)+1):
+01586:         bypos={pos:sorted((p for p in players if p.get('pos')==pos),key=lambda p:(int(p.get('weekly_points',{}).get(str(gw),0)),p.get('fantasy_points',0)),reverse=True) for pos in ('GK','DEF','MID','FWD')}
+01587:         best=None
+01588:         for d,m,f in formations:
+01589:             picks=bypos['GK'][:1]+bypos['DEF'][:d]+bypos['MID'][:m]+bypos['FWD'][:f]
+01590:             if len(picks)!=11 or len({p['id'] for p in picks})!=11:continue
+01591:             pts=sum(int(p.get('weekly_points',{}).get(str(gw),0)) for p in picks)
+01592:             if best is None or pts>best[0]:best=(pts,[p['id'] for p in picks],{'GK':1,'DEF':d,'MID':m,'FWD':f})
+01593:         if best:out[str(gw)]={'points':best[0],'ids':best[1],'formation':best[2]}
+01594:     return out
+01595: 
+01596: def _build_payload(save_path:Path,fingerprint:str,db,fix:bytes,include_rich:bool=True)->dict[str,Any]:
+01597:     all_clubs=scan_clubs(db)
+01598:     rich_raw=rich_extract_named(save_path,all_clubs) if include_rich else []
+01599:     comp_counts=collections.Counter(m.get('competition') for m in rich_raw if m.get('competition'))
+01600:     requested_league=preferred_league if preferred_league in SUPPORTED_LEAGUES else None
+01601:     preselect_rich=[m for m in rich_raw if (not requested_league or m.get('competition')==requested_league)]
+01602:     expected_names={normalize_club_name(m[k]) for m in preselect_rich for k in ('home','away')} if (requested_league and preselect_rich) else None
+01603:     fixtures,fixture_info=select_championship_fixtures(fix,all_clubs,expected_names,requested_league)
+
+---
+01621:             if normalize_club_name(m.get('home','')) not in selected_names or normalize_club_name(m.get('away','')) not in selected_names: continue
+01622:             post_raw.append(m)
+01623:         p.unlink(missing_ok=True)
+01624:     post_recovered=0
+01625:     if post_raw:
+01626:         combined=[];seen_post=set()
+01627:         for m in list(rich_raw)+post_raw:
+01628:             key=(m.get('competition'),m.get('home'),m.get('away'),m.get('home_score'),m.get('away_score'),
+01629:                  tuple(x.get('player_id') for x in m.get('home_players',[])),tuple(x.get('player_id') for x in m.get('away_players',[])))
+01630:             if key in seen_post: continue
+01631:             seen_post.add(key);combined.append(m)
+01632:         post_recovered=max(0,len(combined)-len(rich_raw));rich_raw=combined
+01633:     fixture_name={tid:normalize_club_name(selected[tid-shift].short or selected[tid-shift].name) for tid in team_ids}
+01634:     for i,f in enumerate(sorted(fixtures,key=lambda x:(x['gameweek'],x['date'],x['home_tid'],x['away_tid'])),1):
+01635:         f['fixture_id']=i;f['home']=fixture_name[f['home_tid']];f['away']=fixture_name[f['away_tid']]
+01636:     results=scan_completed_results(db,fixtures)
+01637:     # First recover senior squads independently. If separate retained match-detail files are
+01638:     # missing, use grounded completed-result anchors inside game_db.dat to recover old player rows.
+01639:     squads,squad_diag=scan_first_team_squads(db,selected,rich_raw)
+01640:     game_db_rich,game_db_rich_diag=recover_game_db_rich_matches(
+01641:         db,fixtures,selected,squads,shift,fixture_info['competition'])
+01642:     if game_db_rich:
+01643:         existing={(normalize_club_name(m.get('home','')),normalize_club_name(m.get('away','')),
+01644:                    int(m.get('home_score') or 0),int(m.get('away_score') or 0)) for m in rich_raw}
+01645:         for m in game_db_rich:
+01646:             k=(normalize_club_name(m.get('home','')),normalize_club_name(m.get('away','')),
+01647:                int(m.get('home_score') or 0),int(m.get('away_score') or 0))
+01648:             if k not in existing:
+01649:                 rich_raw.append(m);existing.add(k)
+01650:         # Re-run squad selection with recovered participation as extra identity evidence.
+01651:         squads,squad_diag=scan_first_team_squads(db,selected,rich_raw)
+01652:     target_eids={p for vals in squads.values() for p in vals}
+01653:     for m in rich_raw:
+01654:         for key in ('home_players','away_players'):
+01655:             for r in m.get(key,[]):target_eids.add(int(r['player_id']))
+01656:     people=bind_target_people(db,target_eids)
+01657:     players,unresolved,ambiguous=build_players(squads,selected,people,rich_raw)
+01658:     pbyeid={int(p['pid']):p for p in players}
+01659:     rich_matches=join_rich_matches(rich_raw,fixtures,pbyeid) if rich_raw else []
+01660:     aggregate_player_history(players,rich_matches)
+01661:     availability_diag=_structural_availability_from_fs(players,fixtures)
+01662:     reprice_players(players,fixtures)
+01663:     fixtures.sort(key=lambda x:(x['gameweek'],x['date'],x['fixture_id']))
+01664:     sched=gameweek_schedule_meta(fixtures,fixture_info['total_gameweeks'])
+01665:     current=sched['completed_contiguous']
+01666:     table=build_table(fixtures)
+01667:     star_teams=build_star_teams(players,current)
+01668:     meta={'fingerprint':fingerprint,'competition':fixture_info['competition'],'competition_code':fixture_info['competition_code'],'competition_fixture_id':fixture_info['competition_id'],'fixture_season_start':fixture_info['season_start'],'fixture_to_club_shift':shift,'fixture_candidates_considered':fixture_info['candidate_groups'],'fixture_exact_candidates':fixture_info['exact_candidate_groups'],'fixture_rich_name_overlap':fixture_info['rich_name_overlap'],'rich_competition_counts':dict(comp_counts),'rich_selected_competition':expected_league,'requested_league':requested_league,'requested_league_honoured':(not requested_league or fixture_info['competition']==requested_league),'league_selection_source':fixture_info.get('selection_mode',('user_preference_locked' if requested_league else 'auto_latest_season')),'current_season_candidates':fixture_info.get('current_season_candidates',[]),'gameweek_relabels':fixture_info['gameweek_relabels'],'calendar_gameweek_model':'deadline-window-v1','calendar_gameweek_windows':fixture_info['calendar_gameweek_windows'],'calendar_reassigned_fixtures':fixture_info['calendar_reassigned_count'],'calendar_reassigned_examples':fixture_info['calendar_reassigned_examples'],'gameweek_fixture_counts':sched['fixture_counts'],'gameweek_played_counts':sched['played_counts'],'double_gameweek_clubs':sched['double_gameweek_clubs'],'blank_gameweek_clubs':sched['blank_gameweek_clubs'],'pricing_model':'fpl-shaped-v65-role-projection-guardrails','availability_decoder':'structural-v1','injured_players':availability_diag.get('injured_players',0),'suspended_players':availability_diag.get('suspended_players',0),'availability_save_date':availability_diag.get('save_date'),'availability_diagnostics':availability_diag,'observed_position_reclassifications':sum(1 for p in players if p.get('position_source','').startswith('observed_')),'squad_scan_fallbacks':squad_diag['fallbacks'],'squad_scan_missing_club_eids':squad_diag['missing_club_eids'],'squad_rich_augmented_players':squad_diag['rich_augmented_players'],'game_db_rich_matches_recovered':game_db_rich_diag['recovered'],'game_db_rich_recovery_attempted':game_db_rich_diag['attempted'],'game_db_rich_windows_with_stats':game_db_rich_diag['windows_with_stats'],'game_db_rich_candidate_pairs':game_db_rich_diag['candidate_pairs'],'clubs':fixture_info['team_count'],'team_count':fixture_info['team_count'],'total_gameweeks':fixture_info['total_gameweeks'],'fixtures':len(fixtures),'played_results':len(results),'rich_matches':len(rich_matches),'post_selection_rich_matches_recovered':post_recovered,'selected_rich_team_aliases':len(selected_aliases),'players':len(players),'unresolved_squad_eids':unresolved,'ambiguous_memberships':ambiguous,'fully_completed_gameweeks':sched['fully_completed'],'latest_gameweek_with_result':sched['latest_result'],'completed_gameweek':current,'current_gameweek':min(fixture_info['total_gameweeks'],current+1) if current<fixture_info['total_gameweeks'] else fixture_info['total_gameweeks'],'next_gameweek':min(fixture_info['total_gameweeks'],current+1) if current<fixture_info['total_gameweeks'] else fixture_info['total_gameweeks'],'hidden_unresolved':len(unresolved),'scoring_note':'Bonus uses an FM-derived BPS proxy; MID/FWD DEFCON uses FM possession-won as the recovery-equivalent.'}
+01669:     clubs_payload=[{'eid':c.eid,'uid':c.uid,'name':c.name,'short_name':normalize_club_name(c.short)} for c in sorted(selected.values(),key=lambda c:c.name)]
+01670:     return {'meta':meta,'clubs':clubs_payload,'players':players,'fixtures':fixtures,'matches':rich_matches,'table':table,'star_teams':star_teams}
+01671: 
+01672: 
+01673: def import_save(save_path:str|Path, include_rich:bool=True)->dict[str,Any]:
+01674:     save_path=Path(save_path)
+01675:     h=hashlib.sha256()
+01676:     with save_path.open('rb') as fh:
+01677:         for chunk in iter(lambda:fh.read(8*1024*1024),b''):h.update(chunk)
+01678:     fingerprint=h.hexdigest()
+01679:     _save,items=read_manifest(save_path)
+01680:     byname={m.name:m for m in items}
+01681:     game=byname.get('game_db.dat');fix_member=byname.get('fix_man.dat')
+01682:     if not game or not fix_member:raise RuntimeError('Required FM database/fixture members not found')
+
+---
+01764:         if r:
+01765:             out.append(r);p+=140
+01766:         else:p+=1
+01767:     return out
+01768: 
+01769: 
+01770: 
+01771: 
+01772: def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[int,Club], squads:dict[int,list[int]],
+01773:                                     fixtures:list[dict[str,Any]], fixture_shift:int, competition:str):
+01774:     """Recover retained player-match blocks that have no reliable team/competition label.
+01775: 
+01776:     Multi-path identity strategy (all after one archive scan):
+01777:       A. strict current-squad anchors (legacy path);
+01778:       B. repeated-side cluster labels;
+01779:       C. semi-supervised player/cohort propagation from confidently identified sides;
+01780:       D. fixture-constrained global matching using both side identity and exact score;
+01781:       E. one-strong-side bridge when the known club + score identifies exactly one fixture.
+01782: 
+01783:     Text labels are intentionally not required here. Every accepted recovery is still tied to one
+01784:     authoritative played fixture and exact aggregate score. Ambiguous candidates are left unused.
+01785:     """
+01786:     diagnostics={
+01787:         'members_scanned':0,'members_with_stats':0,'stat_records':0,'candidate_pairs':0,
+01788:         'matches_recovered':0,'cached_candidate_pairs':0,'side_clusters':0,'labelled_side_clusters':0,
+01789:         'propagation_rounds':0,'propagation_matches':0,'strict_seed_matches':0,
+01790:         'cluster_matches':0,'unmatched_cached_pairs':0,
+01791:         'cohort_side_labels':0,'fixture_identity_matches':0,'single_side_bridge_matches':0,
+01792:         'identity_rounds':0,'ambiguous_seed_player_ids':0,'transfer_conflict_neutralized_players':0,
+01793:         'adaptive_cluster_edges':0,'adaptive_cluster_edges_rejected_conflict':0,
+01794:         'near_duplicate_candidate_pairs_collapsed':0,'near_duplicate_candidate_pairs_soft_collapsed':0,
+01795:         'temporal_transfer_fixture_evidence':0,'variable_squad_size_candidate_pairs':0,'sub40_stat_members':0,
+01796:         'same_lineup_distinct_regions_preserved':0
+01797:     }
+01798:     club_sets={eid:set(int(x) for x in squads.get(eid,[])) for eid in selected_clubs}
+01799:     membership_owners=collections.defaultdict(set)
+01800:     for _eid,_pids in club_sets.items():
+01801:         for _pid in _pids:membership_owners[int(_pid)].add(_eid)
+01802:     unique_club_sets={eid:{pid for pid in pids if len(membership_owners.get(int(pid),()))==1}
+01803:                       for eid,pids in club_sets.items()}
+01804:     ambiguous_seed_player_ids={pid for pid,owners in membership_owners.items() if len(owners)>1}
+01805:     club_names={eid:normalize_club_name(c.short or c.name) for eid,c in selected_clubs.items()}
+01806:     played=[]
+01807:     for f in fixtures:
+01808:         if f.get('status')!='played':continue
+01809:         heid=int(f['home_tid'])-int(fixture_shift);aeid=int(f['away_tid'])-int(fixture_shift)
+01810:         played.append((heid,aeid,int(f.get('home_score') or 0),int(f.get('away_score') or 0),f))
+01811:     played_score_pairs={(hs,as_) for _h,_a,hs,as_,_f in played}
+01812:     played_score_pairs|={(as_,hs) for _h,_a,hs,as_,_f in played}
+01813: 
+01814:     cached=[];seen_pairs=set()
+01815:     for i,name in enumerate(rich_names):
+01816:         path=Path(f'/tmp/rich_{i}.bin')
+
+---
+01834:     # contain several candidate windows around the same retained player block; allowing all
+01835:     # of them into proposal ranking artificially lowers uniqueness margins. v59's exact-set
+01836:     # path remains first. A second conservative path handles adjacent windows which gained or
+01837:     # lost one/two edge player rows: same source member, same aggregate score, near-identical
+01838:     # byte span and >=88% Jaccard overlap on both sides (allowing side orientation to flip).
+01839:     if cached:
+01840:         compact=[];seen_exact=collections.defaultdict(list);seen_member=collections.defaultdict(list)
+01841:         def _norm_ids(rows):
+01842:             return frozenset(int(x.get('player_id') or 0) for x in rows if int(x.get('player_id') or 0)>0)
+01843:         def _jac(a,b):
+01844:             u=len(a|b)
+01845:             return (len(a&b)/u) if u else 0.0
+01846:         def _pair_score_inline(c):
+01847:             left,right=c['left'],c['right']
+01848:             return (sum(int(x.get('goals',0) or 0) for x in left)+sum(int(x.get('own_goals',0) or 0) for x in right),
+01849:                     sum(int(x.get('goals',0) or 0) for x in right)+sum(int(x.get('own_goals',0) or 0) for x in left))
+01850:         for c in cached:
+01851:             lids=_norm_ids(c['left']);rids=_norm_ids(c['right'])
+01852:             pair_key=tuple(sorted((tuple(sorted(lids)),tuple(sorted(rids)))))
+01853:             start=min(int(c['left'][0]['offset']),int(c['right'][0]['offset']))
+01854:             end=max(int(c['left'][-1]['offset']),int(c['right'][-1]['offset']))
+
+---
+01885:             seen_exact[sig].append((start,end))
+01886:             seen_member[c['name']].append({'start':start,'end':end,'score':score,'lids':lids,'rids':rids})
+01887:             compact.append(c)
+01888:         cached=compact
+01889:         # Exact/adjacent scanner duplicates are already removed by byte locality.
+01890:         # Repeated lineup signatures which survive are distinct retained regions.
+01891:         _lineup_counts=collections.Counter()
+01892:         for _c in cached:
+01893:             _l=tuple(sorted(ids_of_row for ids_of_row in (int(x.get('player_id') or 0) for x in _c['left']) if ids_of_row>0))
+01894:             _r=tuple(sorted(ids_of_row for ids_of_row in (int(x.get('player_id') or 0) for x in _c['right']) if ids_of_row>0))
+01895:             _lineup_counts[(_c['name'],tuple(sorted((_l,_r))))]+=1
+01896:         diagnostics['same_lineup_distinct_regions_preserved']=sum(max(0,n-1) for n in _lineup_counts.values())
+01897:     diagnostics['cached_candidate_pairs']=len(cached)
+01898:     if not cached:return [],diagnostics
+01899: 
+01900:     def ids_of(rows):
+01901:         return {int(x['player_id']) for x in rows if int(x.get('player_id') or 0)>0}
+01902: 
+01903:     def score_of(c):
+01904:         left,right=c['left'],c['right']
+01905:         lhg=sum(int(x.get('goals',0) or 0) for x in left)+sum(int(x.get('own_goals',0) or 0) for x in right)
+01906:         lag=sum(int(x.get('goals',0) or 0) for x in right)+sum(int(x.get('own_goals',0) or 0) for x in left)
+01907:         return lhg,lag
+01908: 
+01909:     sides=[]
+01910:     for ci,c in enumerate(cached):
+01911:         for which in ('left','right'):
+01912:             rows=c[which];sides.append({'candidate':ci,'which':which,'rows':rows,'ids':ids_of(rows)})
+01913:     n=len(sides);parent=list(range(n));size=[1]*n
+
+---
+01960:             continue
+01961:         union(a,b);diagnostics['adaptive_cluster_edges']+=1
+01962: 
+01963:     clusters=collections.defaultdict(list)
+01964:     for si in range(n):clusters[find(si)].append(si)
+01965:     diagnostics['side_clusters']=len(clusters)
+01966: 
+01967:     player_votes=collections.defaultdict(lambda:collections.Counter())
+01968:     diagnostics['ambiguous_seed_player_ids']=len(ambiguous_seed_player_ids)
+01969:     for eid,pids in unique_club_sets.items():
+01970:         for pid in pids:player_votes[int(pid)][eid]+=4.0
+01971:     transfer_conflicts=set()
+01972:     # Confirmed retained matches supply dated club appearances. Keep them separately from the
+01973:     # ordinary player votes so transfer ambiguity can remain neutral by default while fixture
+01974:     # scoring may use a very small nearest-date signal when BOTH clubs have confirmed dates.
+01975:     confirmed_temporal_clubs=collections.defaultdict(list)
+01976:     def _history_date_ordinal(v):
+01977:         try:
+01978:             y,m,d=(int(x) for x in str(v or '')[:10].split('-'))
+01979:             return y*372+m*31+d
+01980:         except Exception:
+
+---
+02239:             diagnostics['propagation_rounds']+=1
+02240:             diagnostics['propagation_matches']+=a+b
+02241:         if len(out)==before:break
+02242: 
+02243:     diagnostics['matches_recovered']=len(out)
+02244:     diagnostics['unmatched_cached_pairs']=max(0,len(cached)-len(used_candidates))
+02245:     return out,diagnostics
+02246: 
+02247: def recover_game_db_rich_matches(db:bytes, fixtures:list[dict[str,Any]], selected_clubs:dict[int,Club],
+02248:                                  squads:dict[int,list[int]], fixture_shift:int, competition:str):
+02249:     """Recover historical player-match rows that FM keeps in game_db.dat.
+02250: 
+02251:     Some saves retain final league scores/table state but purge the separate match-detail members.
+02252:     The completed-result record gives us a grounded anchor in game_db.dat.  Around each anchor we
+02253:     search only for already-proven FM player-stat record shapes, then require:
+02254:       * strong home/away senior-squad membership overlap, and
+02255:       * the stat-block goal total to exactly reproduce the decoded fixture score.
+02256:     This runs AFTER league selection, so it can never change or mix the selected division.
+02257:     """
+02258:     out=[];diagnostics={'attempted':0,'recovered':0,'windows_with_stats':0,'candidate_pairs':0}
+02259:     played=[f for f in fixtures if f.get('status')=='played' and f.get('result_offset') is not None]
+
+---
+02265:         start=max(0,off-240_000);end=min(len(db),off+240_000)
+02266:         stats=_rich_scan_stats_fast(db,start,end)
+02267:         if len(stats)<40:continue
+02268:         diagnostics['windows_with_stats']+=1
+02269:         pairs=_rich_candidate_squad_pairs(stats)
+02270:         diagnostics['candidate_pairs']+=len(pairs)
+02271:         if not pairs:continue
+02272:         heid=int(f['home_tid'])-int(fixture_shift);aeid=int(f['away_tid'])-int(fixture_shift)
+02273:         hset=set(int(x) for x in squads.get(heid,[]));aset=set(int(x) for x in squads.get(aeid,[]))
+02274:         best=None
+02275:         for left,right in pairs:
+02276:             for orientation in (0,1):
+02277:                 H,A=(left,right) if orientation==0 else (right,left)
+02278:                 hids={int(x['player_id']) for x in H};aids={int(x['player_id']) for x in A}
+02279:                 hov=len(hids & hset);aov=len(aids & aset);membership=hov+aov
+02280:                 # Calculate raw final score from player event rows before decoration.
+02281:                 hg=sum(int(x.get('goals',0) or 0) for x in H)+sum(int(x.get('own_goals',0) or 0) for x in A)
+02282:                 ag=sum(int(x.get('goals',0) or 0) for x in A)+sum(int(x.get('own_goals',0) or 0) for x in H)
+02283:                 score_match=(hg==int(f.get('home_score') or 0) and ag==int(f.get('away_score') or 0))
+02284:                 if not score_match:continue
+02285:                 # Both sides must have convincing senior-squad identity evidence.
+02286:                 if hov<5 or aov<5 or membership<14:continue
+02287:                 center=(H[0]['offset']+A[-1]['offset'])//2
+02288:                 dist=abs(center-off)
+02289:                 score=(membership,min(hov,aov),-dist)
+02290:                 if best is None or score>best[0]:
+
+---
+02313:     # identity hints. Keep the temp members for a second, league-scoped pass below.
+02314:     for i,name in enumerate(rich_names):
+02315:         p=Path(f'/tmp/rich_{i}.bin')
+02316:         if not p.exists(): continue
+02317:         buf=p.read_bytes()
+02318:         raw.extend(_rich_extract_member(buf,rich_team_names,name))
+02319:     rich_raw=[]; seen=set()
+02320:     for m in raw:
+02321:         key=(m['home'],m['away'],m['home_score'],m['away_score'],tuple(x['player_id'] for x in m['home_players']),tuple(x['player_id'] for x in m['away_players']))
+02322:         if key in seen: continue
+02323:         seen.add(key); rich_raw.append(m)
+02324:     comp_counts=collections.Counter(m.get('competition') for m in rich_raw if m.get('competition'))
+02325:     requested_league=preferred_league if preferred_league in SUPPORTED_LEAGUES else None
+02326:     preselect_rich=[m for m in rich_raw if (not requested_league or m.get('competition')==requested_league)]
+02327:     expected_names={normalize_club_name(m[k]) for m in preselect_rich for k in ('home','away')} if (requested_league and preselect_rich) else None
+02328:     fixtures,fixture_info=select_championship_fixtures(fix,all_clubs,expected_names,requested_league)
+02329:     expected_league=fixture_info['competition']
+02330:     rich_raw=[m for m in rich_raw if m.get('competition')==expected_league]
+02331:     team_ids={x for f in fixtures for x in (f['home_tid'],f['away_tid'])}
+02332:     shift=fixture_info['fixture_to_club_shift']
+02333:     selected={tid-shift:all_clubs[tid-shift] for tid in team_ids}
+
+---
+02347:             if mm.get('competition')!=fixture_info['competition']: continue
+02348:             if normalize_club_name(mm.get('home','')) not in selected_names or normalize_club_name(mm.get('away','')) not in selected_names: continue
+02349:             post_raw.append(mm)
+02350:     post_recovered=0
+02351:     if post_raw:
+02352:         combined=[];seen_post=set()
+02353:         for mm in list(rich_raw)+post_raw:
+02354:             key=(mm.get('competition'),mm.get('home'),mm.get('away'),mm.get('home_score'),mm.get('away_score'),
+02355:                  tuple(x.get('player_id') for x in mm.get('home_players',[])),tuple(x.get('player_id') for x in mm.get('away_players',[])))
+02356:             if key in seen_post: continue
+02357:             seen_post.add(key);combined.append(mm)
+02358:         post_recovered=max(0,len(combined)-len(rich_raw));rich_raw=combined
+02359: 
+02360:     fixture_name={tid:normalize_club_name(selected[tid-shift].short or selected[tid-shift].name) for tid in team_ids}
+02361:     for i,f in enumerate(sorted(fixtures,key=lambda x:(x['gameweek'],x['date'],x['home_tid'],x['away_tid'])),1):
+02362:         f['fixture_id']=i; f['home']=fixture_name[f['home_tid']]; f['away']=fixture_name[f['away_tid']]
+02363:     results=scan_completed_results(db,fixtures)
+02364: 
+02365:     # Recover senior squads first.  Then, for saves where FM no longer exposes separate rich
+02366:     # match members, use each *known played league result* as an anchor in game_db.dat and
+02367:     # search locally for the already-validated 214-byte player match-stat records.  The score
+02368:     # and both senior-squad overlaps must agree before a historical match is accepted.
+02369:     squads,squad_diag=scan_first_team_squads(db,selected,rich_raw)
+02370: 
+02371:     # v19: recover current-league match blocks that do not carry a competition-name string.
+02372:     member_rich,member_rich_diag=recover_unlabelled_rich_members(
+02373:         rich_names,selected,squads,fixtures,shift,fixture_info['competition'])
+02374:     if member_rich:
+02375:         existing={(normalize_club_name(mm.get('home','')),normalize_club_name(mm.get('away','')),
+02376:                    int(mm.get('home_score') or 0),int(mm.get('away_score') or 0),mm.get('date')) for mm in rich_raw}
+02377:         for mm in member_rich:
+02378:             k=(normalize_club_name(mm.get('home','')),normalize_club_name(mm.get('away','')),
+02379:                int(mm.get('home_score') or 0),int(mm.get('away_score') or 0),mm.get('date'))
+02380:             if k not in existing:
+02381:                 rich_raw.append(mm);existing.add(k)
+02382:         squads,squad_diag=scan_first_team_squads(db,selected,rich_raw)
+02383: 
+02384:     game_db_rich,game_db_rich_diag=recover_game_db_rich_matches(
+02385:         db,fixtures,selected,squads,shift,fixture_info['competition'])
+02386:     if game_db_rich:
+02387:         existing={(normalize_club_name(mm.get('home','')),normalize_club_name(mm.get('away','')),
+02388:                    int(mm.get('home_score') or 0),int(mm.get('away_score') or 0)) for mm in rich_raw}
+02389:         for mm in game_db_rich:
+02390:             k=(normalize_club_name(mm.get('home','')),normalize_club_name(mm.get('away','')),
+02391:                int(mm.get('home_score') or 0),int(mm.get('away_score') or 0))
+02392:             if k not in existing:
+02393:                 rich_raw.append(mm);existing.add(k)
+02394:         # Re-run squad identity with recovered participation as extra evidence.
+02395:         squads,squad_diag=scan_first_team_squads(db,selected,rich_raw)
+02396: 
+02397:     for i,_name in enumerate(rich_names):
+02398:         Path(f'/tmp/rich_{i}.bin').unlink(missing_ok=True)
+02399: 
+02400:     target_eids={p for vals in squads.values() for p in vals}
+02401:     for mm in rich_raw:
+02402:         for side in ('home_players','away_players'):
+02403:             for r in mm.get(side,[]):
+02404:                 try: target_eids.add(int(r['player_id']))
+02405:                 except Exception: pass
+02406:     people=bind_target_people(db,target_eids)
+02407:     players,unresolved,ambiguous=build_players(squads,selected,people,rich_raw)
+02408:     pbyeid={int(p['pid']):p for p in players}
+02409:     rich_matches=join_rich_matches(rich_raw,fixtures,pbyeid) if rich_raw else []
+02410:     aggregate_player_history(players,rich_matches)
+02411:     availability_diag=_structural_availability_from_fs(players,fixtures)
+02412:     reprice_players(players,fixtures)
+02413:     fixtures.sort(key=lambda x:(x['gameweek'],x['date'],x['fixture_id']))
+02414:     sched=gameweek_schedule_meta(fixtures,fixture_info['total_gameweeks'])
+02415:     current=sched['completed_contiguous']
+02416:     table=build_table(fixtures); star_teams=build_star_teams(players,current)
+02417:     meta={'fingerprint':fingerprint,'competition':fixture_info['competition'],'competition_code':fixture_info['competition_code'],'competition_fixture_id':fixture_info['competition_id'],'fixture_season_start':fixture_info['season_start'],'fixture_to_club_shift':shift,'fixture_candidates_considered':fixture_info['candidate_groups'],'fixture_exact_candidates':fixture_info['exact_candidate_groups'],'fixture_rich_name_overlap':fixture_info['rich_name_overlap'],'rich_competition_counts':dict(comp_counts),'rich_selected_competition':expected_league,'requested_league':requested_league,'requested_league_honoured':(not requested_league or fixture_info['competition']==requested_league),'league_selection_source':fixture_info.get('selection_mode',('user_preference_locked' if requested_league else 'auto_latest_season')),'current_season_candidates':fixture_info.get('current_season_candidates',[]),'gameweek_relabels':fixture_info['gameweek_relabels'],'calendar_gameweek_model':'deadline-window-v1','calendar_gameweek_windows':fixture_info['calendar_gameweek_windows'],'calendar_reassigned_fixtures':fixture_info['calendar_reassigned_count'],'calendar_reassigned_examples':fixture_info['calendar_reassigned_examples'],'gameweek_fixture_counts':sched['fixture_counts'],'gameweek_played_counts':sched['played_counts'],'double_gameweek_clubs':sched['double_gameweek_clubs'],'blank_gameweek_clubs':sched['blank_gameweek_clubs'],'pricing_model':'fpl-shaped-v65-role-projection-guardrails','availability_decoder':'structural-v1','injured_players':availability_diag.get('injured_players',0),'suspended_players':availability_diag.get('suspended_players',0),'availability_save_date':availability_diag.get('save_date'),'availability_diagnostics':availability_diag,'observed_position_reclassifications':sum(1 for p in players if p.get('position_source','').startswith('observed_')),'squad_scan_fallbacks':squad_diag['fallbacks'],'squad_scan_missing_club_eids':squad_diag['missing_club_eids'],'squad_rich_augmented_players':squad_diag['rich_augmented_players'],'game_db_rich_matches_recovered':game_db_rich_diag['recovered'],'game_db_rich_recovery_attempted':game_db_rich_diag['attempted'],'game_db_rich_windows_with_stats':game_db_rich_diag['windows_with_stats'],'game_db_rich_candidate_pairs':game_db_rich_diag['candidate_pairs'],'post_selection_rich_matches_recovered':post_recovered,'selected_rich_team_aliases':len(selected_aliases),'unlabelled_rich_members_scanned':member_rich_diag['members_scanned'],'unlabelled_rich_members_with_stats':member_rich_diag['members_with_stats'],'unlabelled_rich_stat_records':member_rich_diag['stat_records'],'unlabelled_rich_candidate_pairs':member_rich_diag['candidate_pairs'],'unlabelled_rich_matches_recovered':member_rich_diag['matches_recovered'],'unlabelled_rich_cached_candidate_pairs':member_rich_diag.get('cached_candidate_pairs',0),'unlabelled_rich_side_clusters':member_rich_diag.get('side_clusters',0),'unlabelled_rich_labelled_side_clusters':member_rich_diag.get('labelled_side_clusters',0),'unlabelled_rich_strict_seed_matches':member_rich_diag.get('strict_seed_matches',0),'unlabelled_rich_cluster_matches':member_rich_diag.get('cluster_matches',0),'unlabelled_rich_propagation_rounds':member_rich_diag.get('propagation_rounds',0),'unlabelled_rich_propagation_matches':member_rich_diag.get('propagation_matches',0),'unlabelled_rich_cohort_side_labels':member_rich_diag.get('cohort_side_labels',0),'unlabelled_rich_fixture_identity_matches':member_rich_diag.get('fixture_identity_matches',0),'unlabelled_rich_single_side_bridge_matches':member_rich_diag.get('single_side_bridge_matches',0),'unlabelled_rich_identity_rounds':member_rich_diag.get('identity_rounds',0),'unlabelled_rich_ambiguous_seed_player_ids':member_rich_diag.get('ambiguous_seed_player_ids',0),'unlabelled_rich_transfer_conflict_neutralized_players':member_rich_diag.get('transfer_conflict_neutralized_players',0),'unlabelled_rich_adaptive_cluster_edges':member_rich_diag.get('adaptive_cluster_edges',0),'unlabelled_rich_adaptive_cluster_edges_rejected_conflict':member_rich_diag.get('adaptive_cluster_edges_rejected_conflict',0),'unlabelled_rich_unmatched_cached_pairs':member_rich_diag.get('unmatched_cached_pairs',0),'unlabelled_rich_missing_fixture_fallback_matches':member_rich_diag.get('missing_fixture_fallback_matches',0),'clubs':fixture_info['team_count'],'team_count':fixture_info['team_count'],'total_gameweeks':fixture_info['total_gameweeks'],'fixtures':len(fixtures),'played_results':len(results),'rich_matches':len(rich_matches),'players':len(players),'unresolved_squad_eids':unresolved,'ambiguous_memberships':ambiguous,'fully_completed_gameweeks':sched['fully_completed'],'latest_gameweek_with_result':sched['latest_result'],'completed_gameweek':current,'current_gameweek':min(fixture_info['total_gameweeks'],current+1) if current<fixture_info['total_gameweeks'] else fixture_info['total_gameweeks'],'next_gameweek':min(fixture_info['total_gameweeks'],current+1) if current<fixture_info['total_gameweeks'] else fixture_info['total_gameweeks'],'hidden_unresolved':len(unresolved),'scoring_note':'Bonus uses an FM-derived BPS proxy; MID/FWD DEFCON uses FM possession-won as the recovery-equivalent.'}
+02418:     clubs_payload=[{'eid':c.eid,'uid':c.uid,'name':c.name,'short_name':normalize_club_name(c.short)} for c in sorted(selected.values(),key=lambda c:c.name)]
+02419:     return json.dumps({'meta':meta,'clubs':clubs_payload,'players':players,'fixtures':fixtures,'matches':rich_matches,'table':table,'star_teams':star_teams},ensure_ascii=False)
+02420: 
