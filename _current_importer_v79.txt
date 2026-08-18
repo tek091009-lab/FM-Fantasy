@@ -1,0 +1,568 @@
+===== read_squad_list_legacy =====
+00355: def read_squad_list_legacy(db: bytes, head: int, next_head: int|None=None) -> list[int]:
+00356:     """Original squad-list reader retained as a weak fallback for schema compatibility."""
+00357:     end=min(next_head or len(db), head+6000)
+00358:     at=head+26
+00359:     while at+6<end:
+00360:         p=db.find(b'\xff\xff\xff\xff',at,end)
+00361:         if p<0:return []
+00362:         cnt=u16(db,p+4)
+00363:         if 1<=cnt<=80:
+00364:             list_at=p+6; list_end=list_at+cnt*4
+00365:             if list_end+8<=end:
+00366:                 vals=[u32(db,list_at+i*4) for i in range(cnt)]
+00367:                 if all(0<v<3_000_000 for v in vals) and len(set(vals))==cnt:
+00368:                     cap=u32(db,list_end); vice=u32(db,list_end+4)
+00369:                     consistent=lambda v: v in (0,0xFFFFFFFF) or v in vals
+00370:                     asc=sum(1 for a,b in zip(vals[:7],vals[1:8]) if a<b)
+00371:                     if (asc>=min(6,max(0,len(vals)-1)) or cap in vals or vice in vals or (consistent(cap) and consistent(vice))):
+00372:                         return vals
+00373:         at=p+1
+00374:     return []
+00375: 
+00376: 
+
+===== read_squad_list =====
+00355: def read_squad_list_legacy(db: bytes, head: int, next_head: int|None=None) -> list[int]:
+00356:     """Original squad-list reader retained as a weak fallback for schema compatibility."""
+00357:     end=min(next_head or len(db), head+6000)
+00358:     at=head+26
+00359:     while at+6<end:
+00360:         p=db.find(b'\xff\xff\xff\xff',at,end)
+00361:         if p<0:return []
+00362:         cnt=u16(db,p+4)
+00363:         if 1<=cnt<=80:
+00364:             list_at=p+6; list_end=list_at+cnt*4
+00365:             if list_end+8<=end:
+00366:                 vals=[u32(db,list_at+i*4) for i in range(cnt)]
+00367:                 if all(0<v<3_000_000 for v in vals) and len(set(vals))==cnt:
+00368:                     cap=u32(db,list_end); vice=u32(db,list_end+4)
+00369:                     consistent=lambda v: v in (0,0xFFFFFFFF) or v in vals
+00370:                     asc=sum(1 for a,b in zip(vals[:7],vals[1:8]) if a<b)
+00371:                     if (asc>=min(6,max(0,len(vals)-1)) or cap in vals or vice in vals or (consistent(cap) and consistent(vice))):
+00372:                         return vals
+00373:         at=p+1
+00374:     return []
+00375: 
+00376: 
+
+===== _choose_current_squad_option_v75 =====
+00441: def _choose_current_squad_option_v75(db:bytes,eid:int,options:list[tuple[int,list[int],str]],diag:dict[str,Any]):
+00442:     """Resolve multiple CURRENT-DB squad blocks without using retained match history.
+00443: 
+00444:     Exact copies are consensus. Near-identical current snapshots may be unioned. Truly
+00445:     different blocks (e.g. senior vs development team) are resolved only when current
+00446:     person records provide a clear senior-quality separation; otherwise remain ambiguous.
+00447:     """
+00448:     priority={'strict':3,'paired_uid_v75':2,'relaxed_uid':1}
+00449:     valid=[]
+00450:     for p,vals,kind in options:
+00451:         if not (12<=len(vals)<=45):
+00452:             diag['rejected_options']+=1;continue
+00453:         vals=list(dict.fromkeys(int(x) for x in vals if int(x)>0))
+00454:         if not (12<=len(vals)<=45):
+00455:             diag['rejected_options']+=1;continue
+00456:         valid.append((priority.get(kind,0),p,vals,kind))
+00457:     if not valid:return None
+00458:     best=max(x[0] for x in valid);peers=[x for x in valid if x[0]==best]
+00459:     byset=collections.defaultdict(list)
+00460:     for pr,p,vals,kind in peers:byset[tuple(sorted(set(vals)))].append((p,vals,kind))
+00461:     if len(byset)==1:
+00462:         group=next(iter(byset.values()))
+00463:         if len(group)>1:diag['consensus_squad_blocks']+=1
+00464:         group.sort(key=lambda x:(abs(len(x[1])-28),x[0]))
+00465:         return group[0]
+00466: 
+00467:     sets=[set(vals) for _pr,_p,vals,_kind in peers]
+00468:     union=set().union(*sets)
+00469:     min_j=1.0
+00470:     for i,a in enumerate(sets):
+00471:         for b in sets[i+1:]:
+00472:             j=len(a&b)/max(1,len(a|b));min_j=min(min_j,j)
+00473:     # Registration/snapshot variants for the same senior team often differ only by a few
+00474:     # fringe players. Treat strong structural agreement as consensus, not ambiguity.
+00475:     if len(sets)>=2 and min_j>=0.72 and 12<=len(union)<=45:
+00476:         diag['overlap_union_squad_blocks']+=1
+00477:         diag['resolved_squad_blocks'].append({'club_eid':eid,'method':'high_overlap_current_db_union_v75','candidates':len(sets),'union_players':len(union),'min_jaccard':round(min_j,3)})
+00478:         return (-1,sorted(union),'current_db_overlap_union_v75')
+00479: 
+00480:     # Distinct blocks need stronger evidence. Resolve their player EIDs against the current
+00481:     # person table and prefer a block only when its senior-quality profile is clearly higher.
+00482:     people={}
+00483:     try:people=bind_target_people(db,union)
+00484:     except Exception as e:
+00485:         diag['current_person_resolution_errors'].append({'club_eid':eid,'error':str(e)[:180]})
+00486:     metrics=[]
+00487:     for pr,p,vals,kind in peers:
+00488:         cas=[];resolved=0
+00489:         for pid in vals:
+00490:             person=people.get(pid)
+00491:             if not person:continue
+00492:             resolved+=1
+00493:             ca=getattr(person,'current_ability',None)
+00494:             if isinstance(ca,(int,float)) and ca>0:cas.append(float(ca))
+00495:         cas.sort(reverse=True)
+00496:         top=cas[:min(16,len(cas))]
+00497:         topavg=sum(top)/len(top) if top else 0.0
+00498:         med=(sorted(cas)[len(cas)//2] if cas else 0.0)
+00499:         ratio=resolved/max(1,len(vals))
+00500:         metrics.append({'priority':pr,'offset':p,'vals':vals,'kind':kind,'resolved':resolved,'ratio':ratio,'cas':len(cas),'top16avg':topavg,'median_ca':med,'high_ca':sum(1 for x in cas if x>=100)})
+00501:     viable=[x for x in metrics if x['resolved']>=8 and x['ratio']>=0.65 and x['cas']>=8]
+00502:     if viable:
+00503:         viable.sort(key=lambda x:(x['top16avg'],x['median_ca'],x['high_ca'],x['ratio'],len(x['vals'])) ,reverse=True)
+00504:         one=viable[0];two=viable[1] if len(viable)>1 else None
+00505:         clear=two is None or (one['top16avg']-two['top16avg']>=6.0) or (one['median_ca']-two['median_ca']>=8.0 and one['top16avg']>=two['top16avg']+3.0)
+00506:         if clear:
+00507:             diag['resolved_squad_blocks'].append({'club_eid':eid,'method':'current_person_senior_quality_v75','players':len(one['vals']),'resolved_people':one['resolved'],'top16avg':round(one['top16avg'],1),'median_ca':round(one['median_ca'],1),'runner_up_top16avg':round(two['top16avg'],1) if two else None})
+00508:             return (one['offset'],one['vals'],one['kind'])
+00509: 
+00510:     diag['ambiguous_squad_blocks'].append({'club_eid':eid,'priority':best,'candidates':[{'offset':x['offset'],'kind':x['kind'],'players':len(x['vals']),'resolved_people':x['resolved'],'top16avg':round(x['top16avg'],1),'median_ca':round(x['median_ca'],1),'sample_player_eids':x['vals'][:8]} for x in metrics]})
+00511:     return None
+00512: 
+00513: 
+
+===== scan_first_team_squads =====
+00514: def scan_first_team_squads(db: bytes, selected_clubs: dict[int,Club], rich:list[dict[str,Any]]|None=None):
+00515:     """Decode CURRENT senior squad membership from club/team records only (v75).
+00516: 
+00517:     No retained match/opponent evidence can add, move or select current members.
+00518:     """
+00519:     heads=[]
+00520:     for eid,c in selected_clubs.items():
+00521:         needle=struct.pack('<I',eid)+b'\x00'*10;p=0
+00522:         while True:
+00523:             p=db.find(needle,p)
+00524:             if p<0:break
+00525:             if p+26<=len(db) and u32(db,p+18)==c.uid and u32(db,p+22)==c.uid:heads.append((p,eid,'strict'))
+00526:             p+=1
+00527:     heads.sort();byclub=collections.defaultdict(list)
+00528:     for p,eid,kind in heads:byclub[eid].append((p,kind))
+00529:     all_heads=sorted(p for ps in byclub.values() for p,_ in ps)
+00530:     out={};diag={'fallbacks':[],'missing_club_eids':[],'rich_augmented_players':0,
+00531:                  'policy':'strict_current_db_membership_only_v68','block_policy':'v75-current-db-structural-senior-resolution-no-history',
+00532:                  'rejected_options':0,'ambiguous_squad_blocks':[],'consensus_squad_blocks':0,
+00533:                  'overlap_union_squad_blocks':0,'resolved_squad_blocks':[],'current_person_resolution_errors':[]}
+00534: 
+00535:     # First, exact duplicated-UID team headers.
+00536:     unresolved=[]
+00537:     for eid in selected_clubs:
+00538:         options=[]
+00539:         for p,kind in byclub.get(eid,[]):
+00540:             i=bisect.bisect_right(all_heads,p);nxt=all_heads[i] if i<len(all_heads) else None
+00541:             vals=read_squad_list(db,p,nxt)
+00542:             if vals:options.append((p,vals,kind))
+00543:         chosen=_choose_current_squad_option_v75(db,eid,options,diag)
+00544:         if chosen:
+00545:             _p,vals,_kind=chosen;out[eid]=vals
+00546:         else:unresolved.append(eid)
+00547: 
+00548:     # Second, recover schema variants where the same club EID and duplicated club UID are
+00549:     # present in a wider record window. This is still current game_db evidence only.
+00550:     for eid in unresolved:
+00551:         if eid in out:continue
+00552:         c=selected_clubs[eid];options=[];needle=struct.pack('<I',eid);uidb=struct.pack('<I',c.uid);p=0;seen=set()
+00553:         while True:
+00554:             p=db.find(needle,p)
+00555:             if p<0:break
+00556:             if p in seen:p+=1;continue
+00557:             seen.add(p)
+00558:             lo=max(0,p-48);hi=min(len(db),p+320);window=db[lo:hi]
+00559:             uid_hits=window.count(uidb)
+00560:             if uid_hits>=2:
+00561:                 vals=read_squad_list(db,p,None)
+00562:                 if vals:options.append((p,vals,'paired_uid_v75'))
+00563:             p+=1
+00564:         chosen=_choose_current_squad_option_v75(db,eid,options,diag)
+00565:         if chosen:
+00566:             _p,vals,kind=chosen;out[eid]=vals;diag['fallbacks'].append({'club_eid':eid,'method':kind,'players':len(vals)})
+00567: 
+00568:     # Final narrow compatibility fallback: one nearby current club UID, never history.
+00569:     for eid,c in selected_clubs.items():
+00570:         if eid in out:continue
+00571:         options=[];needle=struct.pack('<I',eid);p=0;seen=set();uidb=struct.pack('<I',c.uid)
+00572:         while True:
+00573:             p=db.find(needle,p)
+00574:             if p<0:break
+00575:             if p in seen:p+=1;continue
+00576:             seen.add(p);window=db[p:min(len(db),p+96)]
+00577:             if uidb not in window:p+=1;continue
+00578:             vals=read_squad_list(db,p,None)
+00579:             if vals:options.append((p,vals,'relaxed_uid'))
+00580:             p+=1
+00581:         chosen=_choose_current_squad_option_v75(db,eid,options,diag)
+00582:         if chosen:
+00583:             _p,vals,kind=chosen;out[eid]=vals;diag['fallbacks'].append({'club_eid':eid,'method':kind,'players':len(vals)})
+00584: 
+00585:     # v77: near-complete current-DB mapping completion.
+00586:     # If and only if every other selected club already has a strong current senior squad,
+00587:     # allow the final club to use the legacy sentinel-footer decoder.  This does NOT use
+00588:     # retained match history.  The candidate must still be a sane senior-sized list, bind
+00589:     # overwhelmingly to real current person records, and share no player EIDs with any of
+00590:     # the 23 already-accepted current squads.  Wrong fixture shifts therefore cannot use
+00591:     # this path when two or more clubs are unresolved.
+00592:     strong_missing=[eid for eid in selected_clubs if eid not in out]
+00593:     diag['single_missing_completion_attempted']=False
+00594:     diag['single_missing_completion_accepted']=False
+00595:     diag['single_missing_completion_evidence']=None
+00596:     if len(strong_missing)==1 and len(out)==len(selected_clubs)-1:
+00597:         eid=strong_missing[0];c=selected_clubs[eid]
+00598:         diag['single_missing_completion_attempted']=True
+00599:         weak_options=[];seen_options=set()
+00600: 
+00601:         def add_weak(p:int,vals:list[int],kind:str):
+00602:             vals=list(dict.fromkeys(int(x) for x in vals if int(x)>0))
+00603:             key=tuple(sorted(vals))
+00604:             if not (12<=len(vals)<=45) or key in seen_options:return
+00605:             seen_options.add(key);weak_options.append((p,vals,kind))
+00606: 
+00607:         # Strongest weak path: exact team EID + duplicated club UID header, where the only
+00608:         # thing missing is a positive captain/vice footer marker.
+00609:         for p,_kind in byclub.get(eid,[]):
+00610:             i=bisect.bisect_right(all_heads,p);nxt=all_heads[i] if i<len(all_heads) else None
+00611:             vals=read_squad_list_legacy(db,p,nxt)
+00612:             if not vals:vals=read_squad_list_legacy(db,p,None)
+00613:             if vals:add_weak(p,vals,'legacy_exact_uid_header_v77')
+00614: 
+00615:         # Schema-variant fallback: selected club EID with its duplicated current club UID
+00616:         # nearby.  Still game_db-only and still subject to the person/overlap proof below.
+00617:         if not weak_options:
+00618:             needle=struct.pack('<I',eid);uidb=struct.pack('<I',c.uid);p=0;seen_pos=set()
+00619:             while True:
+00620:                 p=db.find(needle,p)
+00621:                 if p<0:break
+00622:                 if p in seen_pos:p+=1;continue
+00623:                 seen_pos.add(p)
+00624:                 lo=max(0,p-48);hi=min(len(db),p+320);window=db[lo:hi]
+00625:                 if window.count(uidb)>=2:
+00626:                     vals=read_squad_list_legacy(db,p,None)
+00627:                     if vals:add_weak(p,vals,'legacy_paired_uid_v77')
+00628:                 p+=1
+00629: 
+00630:         # v78: some FM saves use a distinct first-team entity id while still carrying the
+00631:         # club UID twice in the authoritative current-team header.  The earlier fallback
+00632:         # always started from the CLUB EID, so those records were invisible.  Search the
+00633:         # duplicated UID header directly and derive the same canonical head offset used by
+00634:         # the 23 already-decoded clubs.  This remains current game_db evidence only.
+00635:         uidb=struct.pack('<I',c.uid);pair=uidb+uidb;q=0;uid_pair_seen=set()
+00636:         while True:
+00637:             q=db.find(pair,q)
+00638:             if q<0:break
+00639:             head=q-18
+00640:             if head>=0 and head not in uid_pair_seen:
+00641:                 uid_pair_seen.add(head)
+00642:                 vals=read_squad_list(db,head,None)
+00643:                 if not vals: vals=read_squad_list_legacy(db,head,None)
+00644:                 if vals:add_weak(head,vals,'uid_pair_header_v78')
+00645:             q+=1
+00646: 
+00647:         accepted_ids=set()
+00648:         for _vals in out.values():accepted_ids.update(int(x) for x in _vals)
+00649:         proven=[];rejected=[]
+00650:         for p,vals,kind in weak_options:
+00651:             s=set(vals);overlap=len(s&accepted_ids)
+00652:             if overlap:
+00653:                 rejected.append({'offset':p,'kind':kind,'players':len(vals),'reason':'overlap-with-accepted-current-squad','overlap':overlap});continue
+00654:             people={}
+00655:             try:people=bind_target_people(db,s)
+00656:             except Exception as e:
+00657:                 rejected.append({'offset':p,'kind':kind,'players':len(vals),'reason':'person-binding-error','error':str(e)[:120]});continue
+00658:             resolved=len(people);ratio=resolved/max(1,len(vals))
+00659:             structural=sum(1 for x in people.values() if getattr(x,'positions',None) or (isinstance(getattr(x,'current_ability',None),(int,float)) and getattr(x,'current_ability',0)>0))
+00660:             required=max(12,(len(vals)*3+3)//4)
+00661:             structural_required=max(8,(len(vals)+2)//3)
+00662:             if resolved<required or ratio<0.75 or structural<structural_required:
+00663:                 rejected.append({'offset':p,'kind':kind,'players':len(vals),'reason':'insufficient-current-person-proof','resolved':resolved,'ratio':round(ratio,3),'structural_people':structural,'required':required,'structural_required':structural_required});continue
+00664:             cas=sorted([float(getattr(x,'current_ability')) for x in people.values() if isinstance(getattr(x,'current_ability',None),(int,float)) and getattr(x,'current_ability',0)>0],reverse=True)
+00665:             top=cas[:min(16,len(cas))];topavg=sum(top)/len(top) if top else 0.0
+00666:             proven.append({'offset':p,'vals':vals,'kind':kind,'resolved':resolved,'ratio':ratio,'structural':structural,'topavg':topavg})
+00667: 
+00668:         # Exact membership consensus is accepted.  If schema variants differ only by a few
+00669:         # fringe players, a very-high-overlap union is also safe after re-validating it.
+00670:         chosen=None;method=None
+00671:         # A duplicated club-UID header is stronger than generic legacy arrays because its
+00672:         # location is learned from the same current-team structure used by the 23 proven clubs.
+00673:         uid_proven=[x for x in proven if x.get('kind')=='uid_pair_header_v78']
+00674:         basis=uid_proven if uid_proven else proven
+00675:         groups=collections.defaultdict(list)
+00676:         for x in basis:groups[tuple(sorted(set(x['vals'])))].append(x)
+00677:         if len(groups)==1 and basis:
+00678:             chosen=basis[0]['vals'];method='single_missing_uid_pair_current_db_completion_v78' if uid_proven else 'single_missing_current_db_completion_v77'
+00679:         elif len(groups)>1:
+00680:             sets=[set(k) for k in groups]
+00681:             union=set().union(*sets);min_j=1.0
+00682:             for i,a in enumerate(sets):
+00683:                 for b in sets[i+1:]:min_j=min(min_j,len(a&b)/max(1,len(a|b)))
+00684:             if min_j>=0.85 and 12<=len(union)<=45 and not (union&accepted_ids):
+00685:                 try:upeople=bind_target_people(db,union)
+00686:                 except Exception:upeople={}
+00687:                 uratio=len(upeople)/max(1,len(union));ustruct=sum(1 for x in upeople.values() if getattr(x,'positions',None) or (isinstance(getattr(x,'current_ability',None),(int,float)) and getattr(x,'current_ability',0)>0))
+00688:                 if len(upeople)>=max(12,(len(union)*3+3)//4) and uratio>=0.75 and ustruct>=max(8,(len(union)+2)//3):
+00689:                     chosen=sorted(union);method='single_missing_high_overlap_union_v77'
+00690:         if chosen is not None:
+00691:             out[eid]=chosen;diag['single_missing_completion_accepted']=True
+00692:             diag['single_missing_completion_evidence']={'club_eid':eid,'method':method,'players':len(chosen),'proven_candidates':len(proven),'rejected_candidates':rejected}
+00693:             diag['fallbacks'].append({'club_eid':eid,'method':method,'players':len(chosen)})
+00694:         else:
+00695:             diag['single_missing_completion_evidence']={'club_eid':eid,'method':None,'weak_candidates':len(weak_options),'proven_candidates':len(proven),'rejected_candidates':rejected}
+00696: 
+00697:     for eid in selected_clubs:
+00698:         if eid not in out:out[eid]=[];diag['missing_club_eids'].append(eid)
+00699:     return out,diag
+00700: 
+00701: HEADER_PAT=re.compile(rb'.{3}[\x00-\x4c][\x00-\xfa]\x00\x00\x00', re.S)
+00702: 
+
+===== _fixture_shift_current_squad_evidence =====
+00325: def _fixture_shift_current_squad_evidence(team_ids:set[int],clubs:dict[int,Club],shift:int,db:bytes,
+00326:                                            expected_names:set[str]|None=None)->dict[str,Any]:
+00327:     selected={tid-shift:clubs[tid-shift] for tid in team_ids if tid-shift in clubs}
+00328:     if len(selected)!=len(team_ids):
+00329:         raise RuntimeError(f'shift {shift} does not map every fixture team to a club')
+00330:     mapped={normalize_club_name(c.short or c.name) for c in selected.values()}
+00331:     squads,diag=scan_first_team_squads(db,selected,None)
+00332:     sizes={eid:len(squads.get(eid,[])) for eid in selected}
+00333:     safe={eid:n for eid,n in sizes.items() if 12<=n<=45}
+00334:     unsafe=[normalize_club_name(selected[eid].short or selected[eid].name) for eid,n in sizes.items() if not (12<=n<=45)]
+00335:     memberships=collections.Counter()
+00336:     for vals in squads.values():
+00337:         for pid in set(vals):memberships[pid]+=1
+00338:     dup=sum(1 for n in memberships.values() if n>1)
+00339:     return {
+00340:         'shift':shift,
+00341:         'team_count':len(team_ids),
+00342:         'mapped_clubs':sorted(mapped),
+00343:         'safe_squad_clubs':len(safe),
+00344:         'unsafe_squad_names':sorted(unsafe),
+00345:         'squad_sizes':{normalize_club_name(selected[eid].short or selected[eid].name):n for eid,n in sorted(sizes.items())},
+00346:         'duplicate_current_memberships':dup,
+00347:         'expected_name_overlap':len(mapped & expected_names) if expected_names else 0,
+00348:         'squad_policy':diag.get('policy'),
+00349:         'squad_resolution_policy':diag.get('block_policy'),
+00350:         'squad_missing_club_eids':list(diag.get('missing_club_eids',[])),
+00351:         'squad_resolution_evidence':{'fallbacks':diag.get('fallbacks',[]),'resolved':diag.get('resolved_squad_blocks',[]),'ambiguous':diag.get('ambiguous_squad_blocks',[]),'rejected_options':diag.get('rejected_options',0),'overlap_unions':diag.get('overlap_union_squad_blocks',0),'single_missing_attempted':diag.get('single_missing_completion_attempted',False),'single_missing_accepted':diag.get('single_missing_completion_accepted',False),'single_missing_evidence':diag.get('single_missing_completion_evidence')},
+00352:         'mapping_proof':'all-fixture-teams-map-to-English-clubs + every-current-senior-squad-size-12..45-v73',
+00353:     }
+00354: 
+
+===== select_championship_fixtures =====
+00182: def select_championship_fixtures(fix:bytes,clubs:dict[int,Club],expected_names:set[str]|None=None,
+00183:                                  expected_league:str|None=None,db:bytes|None=None)->tuple[list[dict[str,Any]],dict[str,Any]]:
+00184:     """Select the current supported domestic league and PROVE its fixture-team -> club mapping.
+00185: 
+00186:     v73: a 20/24-team calendar shape is not club identity evidence.  Every candidate fixture
+00187:     mapping must also decode a plausible CURRENT senior squad for every selected club from
+00188:     game_db.dat. Retained match history is never used to move/select current clubs.
+00189:     """
+00190:     groups=scan_fixture_groups(fix)
+00191:     exact_all=[g for g in groups if g['exact']]
+00192:     if not exact_all:
+00193:         near=sorted(groups,key=lambda g:(abs(len(g['teams'])-24),-g['season_start']))[:10]
+00194:         summary='; '.join(f"comp={g['competition_id']} season={g['season_start']} fixtures={len(g['rows'])} teams={len(g['teams'])} gws={len(g['gws'])} shape={g.get('league_shape')}" for g in near)
+00195:         raise RuntimeError('No supported full league season could be identified. Candidates: '+summary)
+00196: 
+00197:     requested=expected_league if expected_league in SUPPORTED_LEAGUES else None
+00198:     if requested:
+00199:         exact=[g for g in exact_all if g.get('league_shape')==requested]
+00200:         if not exact:
+00201:             raise RuntimeError(f'Manual league selection was {requested}, but no complete {requested} season exists in this save. The selection will not be overridden.')
+00202:         newest=max(g['season_start'] for g in exact)
+00203:         exact=[g for g in exact if g['season_start']==newest]
+00204:         selection_mode='user_preference_locked'
+00205:     else:
+00206:         newest=max(g['season_start'] for g in exact_all)
+00207:         exact=[g for g in exact_all if g['season_start']==newest]
+00208:         shapes={g.get('league_shape') for g in exact}
+00209:         if len(shapes)>1:
+00210:             summary=', '.join(sorted(str(x) for x in shapes))
+00211:             raise RuntimeError(f'Current season {newest}/{str(newest+1)[-2:]} contains both supported English leagues ({summary}). Historical retained-match identity is deliberately ignored because a promoted/relegated human club may have old division data. Choose the current league once; the choice will be locked for this import.')
+00212:         selection_mode='auto_latest_season'
+00213: 
+00214:     if db is None:
+00215:         raise RuntimeError('Current-season club identity validation requires game_db.dat; unsafe fixture-only mapping is disabled.')
+00216: 
+00217:     scored=[]
+00218:     candidate_debug=[]
+00219:     for g in exact:
+00220:         try:
+00221:             shifts=_fixture_to_club_shift_candidates(g['teams'],clubs)
+00222:         except Exception as e:
+00223:             candidate_debug.append({'competition_id':g['competition_id'],'season_start':g['season_start'],
+00224:                                     'league_shape':g.get('league_shape'),'error':str(e)})
+00225:             continue
+00226:         for sh in shifts:
+00227:             try:
+00228:                 ev=_fixture_shift_current_squad_evidence(g['teams'],clubs,sh,db,expected_names if requested else None)
+00229:                 ev.update({'competition_id':g['competition_id'],'season_start':g['season_start'],'league_shape':g.get('league_shape')})
+00230:                 candidate_debug.append(ev)
+00231:                 # The exact same squad-size invariant enforced at publish time is required BEFORE
+00232:                 # a shift is eligible.  A nearby English club entity (the v72 +1-EID failure)
+00233:                 # therefore cannot win merely because it is English.
+00234:                 if ev['safe_squad_clubs'] != len(g['teams']):
+00235:                     continue
+00236:                 overlap=ev['expected_name_overlap']
+00237:                 legacy_hint=1 if (g.get('league_shape')=='EFL Championship' and g['competition_id']==CHAMPIONSHIP_FIXTURE_COMP_ID) else 0
+00238:                 # Prefer fewer duplicated current-list memberships, then any direct expected-name
+00239:                 # evidence, then the legacy competition hint only as a late deterministic tie-break.
+00240:                 score=(ev['safe_squad_clubs'],-ev['duplicate_current_memberships'],overlap,legacy_hint,-abs(sh),-g['competition_id'])
+00241:                 scored.append((score,g,sh,ev))
+00242:             except Exception as e:
+00243:                 candidate_debug.append({'competition_id':g['competition_id'],'season_start':g['season_start'],
+00244:                                         'league_shape':g.get('league_shape'),'shift':sh,'error':str(e)})
+00245:     if not scored:
+00246:         summary='; '.join(
+00247:             f"comp={x.get('competition_id')} shift={x.get('shift')} safe={x.get('safe_squad_clubs','?')}/{x.get('team_count','?')} missing={','.join(x.get('unsafe_squad_names',[])[:4]) or '-'} v78={x.get('squad_resolution_evidence',{}).get('single_missing_completion_evidence') or x.get('single_missing_completion_evidence') or '-'}"
+00248:             for x in candidate_debug[:16]
+00249:         )
+00250:         raise RuntimeError('Supported fixture calendars were found, but no fixture-to-club mapping passed current first-team squad validation. '+summary)
+00251:     scored.sort(key=lambda x:x[0],reverse=True)
+00252:     score,g,shift,chosen_ev=scored[0]
+00253:     # If two mappings are equally proven through all identity evidence, do not guess.
+00254:     if len(scored)>1 and scored[1][0]==score and scored[1][2]!=shift:
+00255:         raise RuntimeError(f'Fixture-to-club identity remains ambiguous between shifts {shift} and {scored[1][2]}; import blocked rather than guessing.')
+00256:     rows=g['rows'];gw_info=_normalize_gameweeks(rows);spec=SUPPORTED_LEAGUES[g['league_shape']]
+00257:     info={'competition_id':g['competition_id'],'season_start':g['season_start'],'fixture_to_club_shift':shift,
+00258:           'candidate_groups':len(groups),'exact_candidate_groups':len(exact_all),
+00259:           'current_season_candidate_groups':len(exact),'current_season_candidates':candidate_debug[:48],
+00260:           'requested_league':requested,'selection_mode':selection_mode,
+00261:           'rich_name_overlap':chosen_ev['expected_name_overlap'],'competition':g['league_shape'],'competition_code':spec['code'],
+00262:           'team_count':spec['teams'],'total_gameweeks':spec['rounds'],'fixture_count':spec['fixtures'],
+00263:           'fixture_club_mapping_policy':'current-squad-validated-shift-v73',
+00264:           'selected_mapping_evidence':chosen_ev,
+00265:           'gameweek_relabels':gw_info['raw_round_relabels'],'calendar_gameweek_windows':gw_info['calendar_windows'],
+00266:           'calendar_reassigned_count':gw_info['calendar_reassigned_count'],
+00267:           'calendar_reassigned_examples':gw_info['calendar_reassigned_examples']}
+00268:     return rows,info
+00269: 
+
+===== browser_build_payload_from_fs =====
+02706: def browser_build_payload_from_fs(fingerprint:str, rich_names_json:str, preferred_league:str|None=None):
+02707:     dbp=Path('/tmp/game_db.dat'); db=dbp.read_bytes(); dbp.unlink(missing_ok=True)
+02708:     fixp=Path('/tmp/fix_man.dat'); fix=fixp.read_bytes(); fixp.unlink(missing_ok=True)
+02709:     all_clubs=scan_clubs(db)
+02710:     rich_team_names={c.uid+1:normalize_club_name(c.short or c.name) for c in all_clubs.values()}
+02711:     raw=[]
+02712:     rich_names=json.loads(rich_names_json)
+02713:     # Pass 1 uses the broad club aliases only to collect any retained match objects and
+02714:     # identity hints. Keep the temp members for a second, league-scoped pass below.
+02715:     for i,name in enumerate(rich_names):
+02716:         p=Path(f'/tmp/rich_{i}.bin')
+02717:         if not p.exists(): continue
+02718:         buf=p.read_bytes()
+02719:         raw.extend(_rich_extract_member(buf,rich_team_names,name))
+02720:     rich_raw=[]; seen=set()
+02721:     for m in raw:
+02722:         key=(m['home'],m['away'],m['home_score'],m['away_score'],tuple(x['player_id'] for x in m['home_players']),tuple(x['player_id'] for x in m['away_players']))
+02723:         if key in seen: continue
+02724:         seen.add(key); rich_raw.append(m)
+02725:     comp_counts=collections.Counter(m.get('competition') for m in rich_raw if m.get('competition'))
+02726:     requested_league=preferred_league if preferred_league in SUPPORTED_LEAGUES else None
+02727:     preselect_rich=[m for m in rich_raw if (not requested_league or m.get('competition')==requested_league)]
+02728:     expected_names={normalize_club_name(m[k]) for m in preselect_rich for k in ('home','away')} if (requested_league and preselect_rich) else None
+02729:     fixtures,fixture_info=select_championship_fixtures(fix,all_clubs,expected_names,requested_league,db)
+02730:     expected_league=fixture_info['competition']
+02731:     rich_raw=[m for m in rich_raw if m.get('competition')==expected_league]
+02732:     team_ids={x for f in fixtures for x in (f['home_tid'],f['away_tid'])}
+02733:     shift=fixture_info['fixture_to_club_shift']
+02734:     selected={tid-shift:all_clubs[tid-shift] for tid in team_ids}
+02735: 
+02736:     # IMPORTANT: browser imports previously stopped here and never ran the historical
+02737:     # recovery logic that existed in the non-browser payload builder.  This second pass
+02738:     # re-decodes the exact same retained members using aliases ONLY from the already-selected
+02739:     # current league. It cannot change the selected competition or clubs.
+02740:     selected_aliases=selected_rich_team_aliases(selected)
+02741:     selected_names={normalize_club_name(c.short or c.name) for c in selected.values()}
+02742:     post_raw=[]
+02743:     for i,name in enumerate(rich_names):
+02744:         p=Path(f'/tmp/rich_{i}.bin')
+02745:         if not p.exists(): continue
+02746:         buf=p.read_bytes()
+02747:         for mm in _rich_extract_member(buf,selected_aliases,name):
+02748:             if mm.get('competition')!=fixture_info['competition']: continue
+02749:             if normalize_club_name(mm.get('home','')) not in selected_names or normalize_club_name(mm.get('away','')) not in selected_names: continue
+02750:             post_raw.append(mm)
+02751:     post_recovered=0
+02752:     if post_raw:
+02753:         combined=[];seen_post=set()
+02754:         for mm in list(rich_raw)+post_raw:
+02755:             key=(mm.get('competition'),mm.get('home'),mm.get('away'),mm.get('home_score'),mm.get('away_score'),
+02756:                  tuple(x.get('player_id') for x in mm.get('home_players',[])),tuple(x.get('player_id') for x in mm.get('away_players',[])))
+02757:             if key in seen_post: continue
+02758:             seen_post.add(key);combined.append(mm)
+02759:         post_recovered=max(0,len(combined)-len(rich_raw));rich_raw=combined
+02760: 
+02761:     fixture_name={tid:normalize_club_name(selected[tid-shift].short or selected[tid-shift].name) for tid in team_ids}
+02762:     for i,f in enumerate(sorted(fixtures,key=lambda x:(x['gameweek'],x['date'],x['home_tid'],x['away_tid'])),1):
+02763:         f['fixture_id']=i; f['home']=fixture_name[f['home_tid']]; f['away']=fixture_name[f['away_tid']]
+02764:     results=scan_completed_results(db,fixtures)
+02765: 
+02766:     # Recover senior squads first.  Then, for saves where FM no longer exposes separate rich
+02767:     # match members, use each *known played league result* as an anchor in game_db.dat and
+02768:     # search locally for the already-validated 214-byte player match-stat records.  The score
+02769:     # and both senior-squad overlaps must agree before a historical match is accepted.
+02770:     squads,squad_diag=scan_first_team_squads(db,selected,rich_raw)
+02771: 
+02772:     # v19: recover current-league match blocks that do not carry a competition-name string.
+02773:     member_rich,member_rich_diag=recover_unlabelled_rich_members(
+02774:         rich_names,selected,squads,fixtures,shift,fixture_info['competition'])
+02775:     if member_rich:
+02776:         existing={(normalize_club_name(mm.get('home','')),normalize_club_name(mm.get('away','')),
+02777:                    int(mm.get('home_score') or 0),int(mm.get('away_score') or 0),mm.get('date')) for mm in rich_raw}
+02778:         for mm in member_rich:
+02779:             k=(normalize_club_name(mm.get('home','')),normalize_club_name(mm.get('away','')),
+02780:                int(mm.get('home_score') or 0),int(mm.get('away_score') or 0),mm.get('date'))
+02781:             if k not in existing:
+02782:                 rich_raw.append(mm);existing.add(k)
+02783:         squads,squad_diag=scan_first_team_squads(db,selected,rich_raw)
+02784: 
+02785:     game_db_rich,game_db_rich_diag=recover_game_db_rich_matches(
+02786:         db,fixtures,selected,squads,shift,fixture_info['competition'])
+02787:     if game_db_rich:
+02788:         existing={(normalize_club_name(mm.get('home','')),normalize_club_name(mm.get('away','')),
+02789:                    int(mm.get('home_score') or 0),int(mm.get('away_score') or 0)) for mm in rich_raw}
+02790:         for mm in game_db_rich:
+02791:             k=(normalize_club_name(mm.get('home','')),normalize_club_name(mm.get('away','')),
+02792:                int(mm.get('home_score') or 0),int(mm.get('away_score') or 0))
+02793:             if k not in existing:
+02794:                 rich_raw.append(mm);existing.add(k)
+02795:         # Re-run squad identity with recovered participation as extra evidence.
+02796:         squads,squad_diag=scan_first_team_squads(db,selected,rich_raw)
+02797: 
+02798:     for i,_name in enumerate(rich_names):
+02799:         Path(f'/tmp/rich_{i}.bin').unlink(missing_ok=True)
+02800: 
+02801:     target_eids={p for vals in squads.values() for p in vals}
+02802:     for mm in rich_raw:
+02803:         for side in ('home_players','away_players'):
+02804:             for r in mm.get(side,[]):
+02805:                 try: target_eids.add(int(r['player_id']))
+02806:                 except Exception: pass
+02807:     people=bind_target_people(db,target_eids)
+02808:     players,unresolved,ambiguous=build_players(squads,selected,people,rich_raw)
+02809:     pbyeid={int(p['pid']):p for p in players}
+02810:     rich_matches=join_rich_matches(rich_raw,fixtures,pbyeid) if rich_raw else []
+02811:     aggregate_player_history(players,rich_matches)
+02812:     availability_diag=_structural_availability_from_fs(players,fixtures)
+02813:     # V76: every accepted browser import carries a dated historical boundary.  This is
+02814:     # a data cutoff, never the browser clock.  Supabase freezes accepted history behind
+02815:     # the previous boundary while current-state fields continue to refresh.
+02816:     snapshot_date=availability_diag.get('save_date')
+02817:     snapshot_date_source='structural_save_or_fixture_floor_v1' if snapshot_date else None
+02818:     if not snapshot_date:
+02819:         played_dates=[]
+02820:         for _f in fixtures:
+02821:             if _f.get('status')!='played' or not _f.get('date'):continue
+02822:             try:played_dates.append(dt.date.fromisoformat(str(_f['date'])[:10]))
+02823:             except Exception:pass
+02824:         if played_dates:
+02825:             snapshot_date=max(played_dates).isoformat();snapshot_date_source='latest_played_league_fixture'
+02826:     if not snapshot_date:snapshot_date_source='preseason_undated'
+02827: 
+02828:     reprice_players(players,fixtures)
+02829:     fixtures.sort(key=lambda x:(x['gameweek'],x['date'],x['fixture_id']))
+02830:     sched=gameweek_schedule_meta(fixtures,fixture_info['total_gameweeks'])
+02831:     current=sched['completed_contiguous']
+02832:     table=build_table(fixtures); star_teams=build_star_teams(players,current)
+02833:     meta={'fingerprint':fingerprint,'competition':fixture_info['competition'],'competition_code':fixture_info['competition_code'],'competition_fixture_id':fixture_info['competition_id'],'fixture_season_start':fixture_info['season_start'],'fixture_to_club_shift':shift,'fixture_candidates_considered':fixture_info['candidate_groups'],'fixture_exact_candidates':fixture_info['exact_candidate_groups'],'fixture_rich_name_overlap':fixture_info['rich_name_overlap'],'rich_competition_counts':dict(comp_counts),'rich_selected_competition':expected_league,'requested_league':requested_league,'requested_league_honoured':(not requested_league or fixture_info['competition']==requested_league),'league_selection_source':fixture_info.get('selection_mode',('user_preference_locked' if requested_league else 'auto_latest_season')),'current_season_candidates':fixture_info.get('current_season_candidates',[]),'gameweek_relabels':fixture_info['gameweek_relabels'],'calendar_gameweek_model':'deadline-window-v1','calendar_gameweek_windows':fixture_info['calendar_gameweek_windows'],'calendar_reassigned_fixtures':fixture_info['calendar_reassigned_count'],'calendar_reassigned_examples':fixture_info['calendar_reassigned_examples'],'gameweek_fixture_counts':sched['fixture_counts'],'gameweek_played_counts':sched['played_counts'],'double_gameweek_clubs':sched['double_gameweek_clubs'],'blank_gameweek_clubs':sched['blank_gameweek_clubs'],'pricing_model':'fpl-shaped-v65-role-projection-guardrails','snapshot_date':snapshot_date,'snapshot_date_source':snapshot_date_source,'snapshot_date_semantics':'FM data boundary; not browser time','historical_freeze_policy':'append-only-by-snapshot-date-v1','availability_decoder':'structural-v1','injured_players':availability_diag.get('injured_players',0),'suspended_players':availability_diag.get('suspended_players',0),'availability_save_date':availability_diag.get('save_date'),'availability_diagnostics':availability_diag,'observed_position_reclassifications':sum(1 for p in players if p.get('position_source','').startswith('observed_')),'squad_scan_fallbacks':squad_diag['fallbacks'],'squad_scan_missing_club_eids':squad_diag['missing_club_eids'],'squad_rich_augmented_players':squad_diag['rich_augmented_players'],'game_db_rich_matches_recovered':game_db_rich_diag['recovered'],'game_db_rich_recovery_attempted':game_db_rich_diag['attempted'],'game_db_rich_windows_with_stats':game_db_rich_diag['windows_with_stats'],'game_db_rich_candidate_pairs':game_db_rich_diag['candidate_pairs'],'post_selection_rich_matches_recovered':post_recovered,'selected_rich_team_aliases':len(selected_aliases),'unlabelled_rich_members_scanned':member_rich_diag['members_scanned'],'unlabelled_rich_members_with_stats':member_rich_diag['members_with_stats'],'unlabelled_rich_stat_records':member_rich_diag['stat_records'],'unlabelled_rich_candidate_pairs':member_rich_diag['candidate_pairs'],'unlabelled_rich_matches_recovered':member_rich_diag['matches_recovered'],'unlabelled_rich_cached_candidate_pairs':member_rich_diag.get('cached_candidate_pairs',0),'unlabelled_rich_side_clusters':member_rich_diag.get('side_clusters',0),'unlabelled_rich_labelled_side_clusters':member_rich_diag.get('labelled_side_clusters',0),'unlabelled_rich_strict_seed_matches':member_rich_diag.get('strict_seed_matches',0),'unlabelled_rich_cluster_matches':member_rich_diag.get('cluster_matches',0),'unlabelled_rich_propagation_rounds':member_rich_diag.get('propagation_rounds',0),'unlabelled_rich_propagation_matches':member_rich_diag.get('propagation_matches',0),'unlabelled_rich_cohort_side_labels':member_rich_diag.get('cohort_side_labels',0),'unlabelled_rich_fixture_identity_matches':member_rich_diag.get('fixture_identity_matches',0),'unlabelled_rich_single_side_bridge_matches':member_rich_diag.get('single_side_bridge_matches',0),'unlabelled_rich_identity_rounds':member_rich_diag.get('identity_rounds',0),'unlabelled_rich_ambiguous_seed_player_ids':member_rich_diag.get('ambiguous_seed_player_ids',0),'unlabelled_rich_transfer_conflict_neutralized_players':member_rich_diag.get('transfer_conflict_neutralized_players',0),'unlabelled_rich_adaptive_cluster_edges':member_rich_diag.get('adaptive_cluster_edges',0),'unlabelled_rich_adaptive_cluster_edges_rejected_conflict':member_rich_diag.get('adaptive_cluster_edges_rejected_conflict',0),'unlabelled_rich_unmatched_cached_pairs':member_rich_diag.get('unmatched_cached_pairs',0),'unlabelled_rich_missing_fixture_fallback_matches':member_rich_diag.get('missing_fixture_fallback_matches',0),'clubs':fixture_info['team_count'],'team_count':fixture_info['team_count'],'total_gameweeks':fixture_info['total_gameweeks'],'fixtures':len(fixtures),'played_results':len(results),'rich_matches':len(rich_matches),'players':len(players),'unresolved_squad_eids':unresolved,'ambiguous_memberships':ambiguous,'fully_completed_gameweeks':sched['fully_completed'],'latest_gameweek_with_result':sched['latest_result'],'completed_gameweek':current,'current_gameweek':min(fixture_info['total_gameweeks'],current+1) if current<fixture_info['total_gameweeks'] else fixture_info['total_gameweeks'],'next_gameweek':min(fixture_info['total_gameweeks'],current+1) if current<fixture_info['total_gameweeks'] else fixture_info['total_gameweeks'],'hidden_unresolved':len(unresolved),'scoring_note':'Bonus uses an FM-derived BPS proxy; MID/FWD DEFCON uses FM possession-won as the recovery-equivalent.'}
+02834:     clubs_payload=[{'eid':c.eid,'uid':c.uid,'name':c.name,'short_name':normalize_club_name(c.short)} for c in sorted(selected.values(),key=lambda c:c.name)]
+02835:     return json.dumps({'meta':meta,'clubs':clubs_payload,'players':players,'fixtures':fixtures,'matches':rich_matches,'table':table,'star_teams':star_teams},ensure_ascii=False)
+02836: 
