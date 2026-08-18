@@ -1,6 +1,6 @@
 {
-  "verified_live_sha": "859b9086a249dc189185344937e5579c4e6ab771",
-  "verified_at": "2026-08-18T12:05:14Z",
+  "verified_live_sha": "e1d3c8a82eefafd1a04e933a7a79561e1317a042",
+  "verified_at": "2026-08-18T12:05:53Z",
   "verification": "v76-dated-append-only-snapshot-live",
   "authfix": "v12-authoritative-cloud",
   "availability_truth": "v4-direct-structural-evidence",
