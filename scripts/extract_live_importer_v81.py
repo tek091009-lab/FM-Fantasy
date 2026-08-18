@@ -17,3 +17,4 @@ js_end=html.find('</script>',m.end())
 if js_end<0: js_end=min(len(html),m.end()+40000)
 (ROOT/'_current_import_runtime_live_v81.txt').write_text(html[js_start:js_end],encoding='utf-8')
 print('extracted live importer',len(py),'chars; runtime',js_end-js_start,'chars')
+# v81 extraction trigger
