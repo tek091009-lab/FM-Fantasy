@@ -442,7 +442,7 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
                 options.extend(candidate_fixture_options(ci,leid=lh[0],reid=None))
             if rh:
                 options.extend(candidate_fixture_options(ci,leid=None,reid=rh[0]))
-            uniq={int(o[0].get('fixture_id') or 0):(o) for o in options}
+            uniq={fixture_identity(o[0]):o for o in options}
             if len(uniq)!=1:continue
             f,rev,leid,reid=next(iter(uniq.values()))
             heid=int(f['home_tid'])-int(fixture_shift);aeid=int(f['away_tid'])-int(fixture_shift)
