@@ -1,7 +1,7 @@
 {
-  "verified_live_sha": "b9092fd2988499405d51fba4ec7bfba38a3a5233",
-  "verified_at": "2026-08-18T10:30:24Z",
-  "verification": "v73-current-squad-fixture-club-proof-live",
+  "verified_live_sha": "3dbf88e697610c96588d7ac79cf6658d251ca1cb",
+  "verified_at": "2026-08-18T10:31:01Z",
+  "verification": "v74-fixture-db-handoff-live",
   "authfix": "v12-authoritative-cloud",
   "availability_truth": "v4-direct-structural-evidence",
   "current_squad_identity": "v68-strict-db-membership-only",
@@ -9,6 +9,7 @@
   "name_pool_runtime": "v71-historical-header-pat-restored-and-executed",
   "league_selector": "v72-auto-prompt-plus-sticky-manual-choice",
   "fixture_club_mapping": "v73-current-squad-validated-shift",
+  "fixture_db_handoff": "v74-loaded-game-db-bytes-to-every-browser-selector-call",
   "update_guard": "v4-fixture-club-proof",
   "clear_database": "v3-backed-up-reset-plus-stale-manager-wipe"
 }
