@@ -1,0 +1,69 @@
+--- workflows ---
+337068724	Align V79 roster guards	.github/workflows/align-v79-roster-guards.yml	active
+336297368	Apply availability and pricing v6	.github/workflows/apply-availability-pricing-v6.yml	active
+336303037	Apply availability and pricing v6.1	.github/workflows/apply-availability-pricing-v61.yml	active
+337132626	Apply current squad consensus v82	.github/workflows/apply-current-squad-consensus-v82.yml	active
+336911283	Apply current squad footer confidence v76	.github/workflows/apply-current-squad-footer-confidence-v76.yml	active
+336990240	Apply current squad UID pair v78	.github/workflows/apply-current-squad-uid-pair-v78.yml	active
+336889434	Apply fixture DB handoff v74	.github/workflows/apply-fixture-db-handoff-v74.yml	active
+336853008	Apply fixture mapping v73	.github/workflows/apply-fixture-mapping-v73.yml	active
+336830398	Apply importer runtime fixes v71-v72	.github/workflows/apply-header-pat-v71.yml	active
+336787703	Apply identity history safety v68	.github/workflows/apply-identity-history-safety-v68.yml	active
+336922474	Apply V76 Pages gate diagnostic	.github/workflows/apply-pages-gate-v76-debug.yml	active
+336921602	Apply V76 Pages gate	.github/workflows/apply-pages-gate-v76.yml	active
+336955075	Apply V77 Pages gate	.github/workflows/apply-pages-gate-v77.yml	active
+336996890	Apply V79 retained fixture identity	.github/workflows/apply-retained-fixture-identity-v79.yml	active
+337040889	Apply V80 retained fixture identity	.github/workflows/apply-retained-fixture-identity-v80.yml	active
+336795558	Apply rich match validation v69	.github/workflows/apply-rich-match-validation-v69.yml	active
+336406321	Apply v6.7 post-payload pricing correction	.github/workflows/apply-role-first-v63.yml	active
+336275459	Apply transfer bank fix	.github/workflows/apply-transfer-bank-fix.yml	active
+336280736	Apply transfer bank v64	.github/workflows/apply-transfer-bank-v64.yml	active
+336912963	Apply V75 current squad resolver	.github/workflows/apply-v75-current-squad.yml	active
+336916345	Apply V76 snapshot boundary diagnostic	.github/workflows/apply-v76-snapshot-boundary-debug.yml	active
+336915530	Apply V76 snapshot boundary	.github/workflows/apply-v76-snapshot-boundary.yml	active
+336953392	Apply V77 single-missing current squad resolver	.github/workflows/apply-v77-single-missing-current-squad.yml	active
+337067810	Apply V79 strict current roster fix	.github/workflows/apply-v79-strict-roster.yml	active
+336782324	Audit history binding v68	.github/workflows/audit-history-binding-v68.yml	active
+336828869	Diagnose HEADER_PAT	.github/workflows/diag-header-pat.yml	active
+337071664	Diagnose V79 Pages verifier	.github/workflows/diag-pages-v79.yml	active
+336803125	Diagnose final rebuild readiness	.github/workflows/diagnose-final-readiness.yml	active
+336836477	Diagnose league selector v72	.github/workflows/diagnose-league-selector-v72.yml	active
+337163158	Diagnose Pages workflow runs	.github/workflows/diagnose-pages-runs.yml	active
+--- recent pages deployments ---
+32162698914	Diagnose Pages workflow runs	.github/workflows/diagnose-pages-runs.yml	0bd54e52f97556cb4b02d82054c358b388239dcb	in_progress		push	2026-08-18T16:53:26Z	2026-08-18T16:53:31Z
+32162698847	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	0bd54e52f97556cb4b02d82054c358b388239dcb	in_progress		push	2026-08-18T16:53:26Z	2026-08-18T16:53:32Z
+32162638037	Diagnose Pages source	.github/workflows/diagnose-pages-source.yml	82f4b318a441b92fb21c3696a9561326312cc5e4	completed	success	push	2026-08-18T16:52:44Z	2026-08-18T16:52:54Z
+32162637970	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	82f4b318a441b92fb21c3696a9561326312cc5e4	completed	failure	push	2026-08-18T16:52:44Z	2026-08-18T16:52:58Z
+32162515878	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	87b61521f43393f4d076a3fa983d93d9fccb39cd	completed	failure	push	2026-08-18T16:51:22Z	2026-08-18T16:51:38Z
+32162351195	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	1b35391d6db22eedbbd4e2432b194c934924f143	completed	failure	push	2026-08-18T16:49:31Z	2026-08-18T16:49:45Z
+32162328555	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	c64f705441bc508430ad975a4bdc7ce61bd5d932	completed	failure	push	2026-08-18T16:49:15Z	2026-08-18T16:49:27Z
+32162232065	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	6a6fb68d2f0ff4e124a940dc30467eac57602b0c	completed	failure	push	2026-08-18T16:48:09Z	2026-08-18T16:48:22Z
+32162200924	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	acbc8eb1ccab419f6a96f7c741834c1016c2993f	completed	failure	push	2026-08-18T16:47:47Z	2026-08-18T16:48:03Z
+32162165581	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	ecb34f5f06037e6d7444b4ec68cbe60ed326378a	completed	failure	push	2026-08-18T16:47:24Z	2026-08-18T16:47:39Z
+32160706793	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	80fc4e931c49f2108a7ce2979e526d4f68587589	completed	failure	push	2026-08-18T16:30:55Z	2026-08-18T16:31:05Z
+32160677842	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	9f4a1823bd1de880766d8708200571994f045c22	completed	failure	push	2026-08-18T16:30:35Z	2026-08-18T16:30:52Z
+32160664509	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	8eb6191e1febb5934226deba0e5d7d9cb1d38036	completed	cancelled	push	2026-08-18T16:30:26Z	2026-08-18T16:30:41Z
+32160653123	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	8dd3164570ebdcce4fd8d5b4367ceba741e0255e	completed	cancelled	push	2026-08-18T16:30:19Z	2026-08-18T16:30:28Z
+32160638402	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	08c4c5b1e506cbdf65a14dcb5e4643cac77aa008	completed	cancelled	push	2026-08-18T16:30:10Z	2026-08-18T16:30:26Z
+32160623062	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	d64a874c7852b8eab29358cca825e269d7c43ddc	completed	cancelled	push	2026-08-18T16:30:01Z	2026-08-18T16:30:15Z
+32160283270	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	113e029d88ab00cd263bfe94e5ca5c2c178333df	completed	failure	push	2026-08-18T16:26:14Z	2026-08-18T16:26:29Z
+32160252014	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	b96620750e04016f6a3f27f71f4a09237fff40de	completed	failure	push	2026-08-18T16:25:52Z	2026-08-18T16:26:07Z
+32159403057	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	0fd872934ddd4a335849a911288826340581d463	completed	failure	push	2026-08-18T16:16:27Z	2026-08-18T16:16:43Z
+32159356686	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	4c53d3cd16fb8be7b798335471cfd9ef7124564b	completed	failure	push	2026-08-18T16:15:58Z	2026-08-18T16:16:10Z
+32159274054	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	82710745e47dba58cf910ac3cd76c4e75a7b5291	completed	failure	push	2026-08-18T16:15:08Z	2026-08-18T16:15:20Z
+32158766213	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	fc6fef32618e76752c434175c32b469e3188d303	completed	failure	push	2026-08-18T16:09:41Z	2026-08-18T16:09:58Z
+32158553315	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	a2addf42f62fcf4aacdf26a4cdd63b3eff0be1df	completed	failure	push	2026-08-18T16:07:30Z	2026-08-18T16:07:45Z
+32158542443	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	f12d373394990350013abf90609498485a3a2162	completed	cancelled	push	2026-08-18T16:07:22Z	2026-08-18T16:07:34Z
+32158480484	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	0a7e96728fdfa2ab4a41c4ddf8dbe224d5be547a	completed	failure	push	2026-08-18T16:06:44Z	2026-08-18T16:06:58Z
+32158380650	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	e7b0260eb7f907033969f8985a90319413a0d396	completed	failure	push	2026-08-18T16:05:41Z	2026-08-18T16:05:57Z
+32158280384	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	ffcaebe3ee60031850812f7f541d563214d2444f	completed	failure	push	2026-08-18T16:04:42Z	2026-08-18T16:04:58Z
+32158263403	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	893e4995607beb6b814f629eeb1e7ffe50044a71	completed	cancelled	push	2026-08-18T16:04:32Z	2026-08-18T16:04:46Z
+32158195667	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	ade0ca117048a6edb25473f07321934b45a4dee2	completed	failure	push	2026-08-18T16:03:49Z	2026-08-18T16:04:04Z
+32158104363	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	e025824fa2a481ffd30ee2a3032afc41361b6e6a	completed	failure	push	2026-08-18T16:02:54Z	2026-08-18T16:03:05Z
+32158072148	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	ee34c8b02d301808d64e6acda35ba3702aa93d78	completed	failure	push	2026-08-18T16:02:33Z	2026-08-18T16:02:44Z
+32156686402	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	41dec0ef8fab102974220712b177d946bb27c5c2	completed	failure	push	2026-08-18T15:48:32Z	2026-08-18T15:48:43Z
+32156653974	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	6f75455624fb932fbb86961ba9ffe70d0f5f37a4	completed	failure	push	2026-08-18T15:48:12Z	2026-08-18T15:48:29Z
+32155811459	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	b24fb127ba51593e504eca3c0fd1a35f8bd33399	completed	failure	push	2026-08-18T15:39:48Z	2026-08-18T15:40:00Z
+32155715371	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	a2e77fd20f7c70ee3b8b2e36040738b5ed62fe52	completed	failure	push	2026-08-18T15:38:51Z	2026-08-18T15:39:09Z
+32155694346	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	b602a6fcd534f5bc2f891f84f292fa28b3372fe9	completed	cancelled	push	2026-08-18T15:38:39Z	2026-08-18T15:38:54Z
+32153054831	Deploy FM Fantasy to GitHub Pages	.github/workflows/pages.yml	21fb0ccffb93de56352d6c6ecbf2e14887627882	completed	failure	push	2026-08-18T15:12:35Z	2026-08-18T15:12:48Z
