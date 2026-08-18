@@ -1,5 +1,5 @@
 from __future__ import annotations
-import base64,gzip,json,re,traceback
+import base64,gzip,json,re,traceback,sys,types
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -17,7 +17,6 @@ def main():
         required=[
             'strict_current_db_membership_only_v68',
             'strict-db-membership-only-no-history-mutation-v68',
-            'v68_current-squad-authority_previous-gws_quarantined',
             'v68_current-squad-authority_previous-gws-quarantined',
             'def _rich_candidate_twenty_pairs',
             'named_header_candidate_v69',
@@ -25,8 +24,6 @@ def main():
             'rich_fixture_coverage',
             'same_match_both_clubs',
         ]
-        # The quarantine marker had one spelling across intermediate builds; accept the final hyphenated marker.
-        required.remove('v68_current-squad-authority_previous-gws_quarantined')
         result['checks']['required_tokens']={x:(x in py) for x in required}
         forbidden=[
             "cur.extend(add);diag['rich_augmented_players']+=len(add)",
@@ -36,10 +33,12 @@ def main():
             'bounded 18-22 rows per side',
         ]
         result['checks']['forbidden_tokens']={x:(x in py) for x in forbidden}
-        compile(py,'fm_importer_preflight_v70.py','exec')
+        code=compile(py,'fm_importer_preflight_v70.py','exec')
         result['checks']['compile']=True
-        ns={'__name__':'fm_importer_preflight_v70'}
-        exec(compile(py,'fm_importer_preflight_v70.py','exec'),ns,ns)
+        module_name='fm_importer_preflight_v70'
+        mod=types.ModuleType(module_name);mod.__file__='fm_importer_preflight_v70.py';sys.modules[module_name]=mod
+        exec(code,mod.__dict__,mod.__dict__)
+        ns=mod.__dict__
         result['checks']['candidate_function']=callable(ns.get('_rich_candidate_twenty_pairs'))
         def row(pid,off): return {'player_id':pid,'offset':off,'goals':0,'own_goals':0}
         left=[row(i+1,i*100) for i in range(20)]
