@@ -1,6 +1,6 @@
 {
-  "verified_live_sha": "0ba186f775205e6e38eeadcd118966badb74d4d7",
-  "verified_at": "2026-08-18T11:14:32Z",
+  "verified_live_sha": "1bd2d05b2bff12c30d1af11cd1313b6377bb7c1e",
+  "verified_at": "2026-08-18T11:16:12Z",
   "verification": "v74-fixture-db-handoff-live",
   "authfix": "v12-authoritative-cloud",
   "availability_truth": "v4-direct-structural-evidence",
