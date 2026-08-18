@@ -1,0 +1,70 @@
+name: Apply fixture mapping v73
+on:
+  push:
+    paths:
+      - 'scripts/fix_fixture_mapping_v73.py'
+      - '.github/workflows/apply-fixture-mapping-v73.yml'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply V73 current-squad validated fixture mapping
+        shell: bash
+        run: |
+          set +e
+          : > _v73_apply_status.txt
+          python scripts/fix_fixture_mapping_v73.py >> _v73_apply_status.txt 2>&1
+          rc=$?
+          echo "apply_rc=$rc" >> _v73_apply_status.txt
+          if [ "$rc" -eq 0 ]; then
+            python - <<'PY' >> _v73_apply_status.txt 2>&1
+          from pathlib import Path
+          import base64,gzip,re,sys,types
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode('utf-8')
+          req=['current-squad-validated-shift-v73','_fixture_to_club_shift_candidates','_fixture_shift_current_squad_evidence','every-current-senior-squad-size-12..45-v73',"'current_squad_identity_policy':'strict-db-membership-only-no-history-mutation-v68'", "'rich_match_validation_policy':'official-score-plus-strict-current-cohort-v69'",'select_championship_fixtures(fix,all_clubs,expected_names,requested_league,db)']
+          assert all(x in py for x in req),[x for x in req if x not in py]
+          code=compile(py,'fm_importer_v73.py','exec')
+          name='fm_importer_v73_probe';mod=types.ModuleType(name);mod.__file__='fm_importer_v73.py';sys.modules[name]=mod;exec(code,mod.__dict__,mod.__dict__)
+          # Runtime regression: two full English shifts exist; only shift 132 has 24 safe current squads.
+          Club=mod.__dict__['Club'];team_ids={eid+132 for eid in [299,302,304,309,312,315,318,335,364,374,375,380,388,389,390,397,402,410,413,420,422,423,428,429]}
+          clubs={}
+          correct=[299,302,304,309,312,315,318,335,364,374,375,380,388,389,390,397,402,410,413,420,422,423,428,429]
+          for eid in set(correct+[x+1 for x in correct]):clubs[eid]=Club(eid,eid+1000,f'C{eid}',f'C{eid}',139)
+          original=mod.__dict__['scan_first_team_squads']
+          def fake_scan(db,selected,rich=None):
+              is_correct=set(selected)==set(correct)
+              out={eid:list(range(eid*100,eid*100+(28 if is_correct else (0 if i<2 else 28)))) for i,eid in enumerate(selected)}
+              return out,{'policy':'strict_current_db_membership_only_v68','missing_club_eids':[]}
+          mod.__dict__['scan_first_team_squads']=fake_scan
+          shifts=mod.__dict__['_fixture_to_club_shift_candidates'](team_ids,clubs)
+          assert 131 in shifts and 132 in shifts,shifts
+          e131=mod.__dict__['_fixture_shift_current_squad_evidence'](team_ids,clubs,131,b'x')
+          e132=mod.__dict__['_fixture_shift_current_squad_evidence'](team_ids,clubs,132,b'x')
+          assert e131['safe_squad_clubs']==22,e131
+          assert e132['safe_squad_clubs']==24,e132
+          mod.__dict__['scan_first_team_squads']=original
+          print('verify_ok=1; synthetic adjacent-EID regression rejects 131 and proves 132')
+          PY
+            vrc=$?
+          else
+            vrc=99
+          fi
+          echo "verify_rc=$vrc" >> _v73_apply_status.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if [ "$rc" -eq 0 ] && [ "$vrc" -eq 0 ]; then
+            git add app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20 _v73_apply_status.txt
+            git commit -m 'Use current squad evidence for fixture club mapping v73' || true
+          else
+            git add _v73_apply_status.txt
+            git commit -m 'Record V73 fixture mapping apply failure' || true
+          fi
+          git pull --rebase origin main
+          git push
+          exit $(( rc != 0 || vrc != 0 ))
