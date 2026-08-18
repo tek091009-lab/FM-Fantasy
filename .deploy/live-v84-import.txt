@@ -1,5 +1,5 @@
-verified_sha=933d5a95e866d42e333f17b1ff9fc5bd80c74f33
-verified_at=2026-08-18T17:00:28Z
+verified_sha=5824f9049acc90fb6eb605e15f07d62a171003f5
+verified_at=2026-08-18T17:00:48Z
 entrypoint=v84.html
 guard=world-update-guard-v7-explicit-season-partial
 mode=import-mode-v83-season-publish
