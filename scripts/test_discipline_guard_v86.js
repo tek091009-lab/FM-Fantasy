@@ -1,0 +1,21 @@
+const fs=require('fs');
+const vm=require('vm');
+const assert=require('assert');
+function load(path,ctx){vm.runInContext(fs.readFileSync(path,'utf8'),ctx,{filename:path})}
+const timers=[];
+const window={addEventListener(){},FMCloud:null};window.window=window;
+const ctx=vm.createContext({window,globalThis:window,console,structuredClone,JSON,setInterval:(fn)=>{timers.push(fn);return timers.length},clearInterval(){},setTimeout:(fn)=>{fn();return 1}});
+window.fmApplyPostPayloadPricingCorrections=(payload)=>payload;
+load('disciplineguardv86pre.js',ctx);
+assert(window.fmApplyPostPayloadPricingCorrections.__fmV86Pre,'pre wrapper missing');
+const base=window.fmApplyPostPayloadPricingCorrections;
+const v85=function(payload,...args){const out=base(payload,...args);for(const p of payload.players){for(const k of ['suspended','suspension_status','suspension_remaining','suspension_games_remaining','ban_games_remaining','banned_until','suspension_until','suspension_detail','suspension_evidence','suspension_evidence_structural'])delete p[k];p.suspended=true;p.suspension_status='suspended';p.suspension_remaining=1;p.suspension_evidence_structural={source:'selected_competition_history_v85',competition_scope:'selected_league_only',games_remaining:1,reason:'league yellow-card threshold'}}return out};v85.__fmV85Wrapped=true;window.fmApplyPostPayloadPricingCorrections=v85;
+load('disciplineguardv86post.js',ctx);
+assert(window.fmApplyPostPayloadPricingCorrections.__fmV86Post,'post wrapper missing');
+const direct={pid:1,suspended:true,suspension_status:'Suspended',ban_games_remaining:2,suspension_evidence_structural:{source:'discipline.dat/active-ban-v1',games_remaining:2}};
+const derived={pid:2};const payload={players:[direct,derived],meta:{}};
+window.fmApplyPostPayloadPricingCorrections(payload);
+assert.equal(direct.ban_games_remaining,2);assert.equal(direct.suspension_evidence_structural.source,'discipline.dat/active-ban-v1');
+assert(!derived.suspended);assert(!derived.suspension_evidence_structural);assert.equal(derived.discipline_derived_evidence.history_threshold_candidate.policy,'diagnostic_only_not_current_state_v86');
+assert.equal(payload.meta.discipline_v86.restored_current_evidence,1);assert.equal(payload.meta.discipline_v86.history_derived_candidates_quarantined,1);
+console.log('discipline guard v86 OK');
