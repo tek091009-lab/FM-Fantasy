@@ -1,16 +1,13 @@
 {
-  "verified_live_sha": "28d21721ac8b712cf0e3cd38edcb6b4c011aece9",
-  "verified_at": "2026-08-18T09:12:17Z",
-  "verification": "v71-name-pool-runtime-clean-rebuild-live",
+  "verified_live_sha": "620c42825e69883adafb214ba32ba7bd009aad8c",
+  "verified_at": "2026-08-18T09:12:58Z",
+  "verification": "v72-league-selector-runtime-clean-rebuild-live",
   "authfix": "v12-authoritative-cloud",
   "availability_truth": "v4-direct-structural-evidence",
   "current_squad_identity": "v68-strict-db-membership-only",
   "retained_match_validation": "v69-official-score-plus-current-cohort",
   "name_pool_runtime": "v71-historical-header-pat-restored-and-executed",
+  "league_selector": "v72-auto-prompt-plus-sticky-manual-choice",
   "update_guard": "v3-identity-history-safe",
-  "clear_database": "v3-backed-up-reset-plus-stale-manager-wipe",
-  "server_history_lock": "accepted-gameweeks-immutable",
-  "server_price_history_lock": "accepted-price-events-immutable",
-  "identity_guard": "v3-diagnostic-only",
-  "world_scorer": "v5-chip-persistence"
+  "clear_database": "v3-backed-up-reset-plus-stale-manager-wipe"
 }
