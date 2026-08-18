@@ -1,5 +1,6 @@
 name: Apply V79 retained fixture identity
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
