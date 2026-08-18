@@ -1,0 +1,4 @@
+v73: fixture->club shift is now proven by current first-team squad records before selection
+apply_rc=0
+verify_ok=1; synthetic adjacent-EID regression rejects 131 and proves 132
+verify_rc=0
