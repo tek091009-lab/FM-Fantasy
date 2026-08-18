@@ -1,0 +1,52 @@
+name: Upgrade current squad ambiguity quarantine v72
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/upgrade_current_squad_quarantine_v72.py'
+      - '.github/workflows/upgrade-current-squad-quarantine-v72.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply v72 importer upgrade
+        run: python scripts/upgrade_current_squad_quarantine_v72.py
+      - name: Verify embedded importer invariants
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode()
+          compile(py,'fm_importer_v72_verify.py','exec')
+          for t in ['strict_current_db_membership_only_v68','strict-db-membership-only-no-history-mutation-v68','quarantined_from_fantasy_selection','v72-quarantine-preserve-evidence-no-history-guess','candidate_clubs','person_evidence']:
+              assert t in py,t
+          for t in ['import blocked instead of resolving from match/opponent history','if played_club.get(eid) in clubs: ceid=played_club[eid]']:
+              assert t not in py,t
+          print('v72 importer invariants verified')
+          PY
+      - name: Commit packed production importer
+        run: |
+          if git diff --quiet -- app; then
+            echo 'No packed importer changes required.'
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app
+          git commit -m 'Apply v72 current squad ambiguity quarantine'
+          git pull --rebase origin main
+          git push origin HEAD:main
