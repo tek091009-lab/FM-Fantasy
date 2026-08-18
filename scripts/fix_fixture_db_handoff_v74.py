@@ -20,9 +20,9 @@ m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
 if not m: raise RuntimeError('embedded importer missing')
 py=base64.b64decode(m.group(1)).decode('utf-8')
 
-# V74: game_db.dat is intentionally read into memory and unlinked early. The fixture selector
-# must consume those already-loaded bytes. Patch EVERY browser call, not merely the first
-# matching string in the module.
+# game_db.dat is intentionally read into memory and unlinked early. The fixture selector must
+# consume those already-loaded bytes. Patch EVERY browser call, not merely the first matching
+# string in the module.
 legacy=re.compile(r'select_championship_fixtures\(\s*fix\s*,\s*all_clubs\s*,\s*expected_names\s*,\s*requested_league\s*\)')
 py,n=legacy.subn('select_championship_fixtures(fix,all_clubs,expected_names,requested_league,db)',py)
 
@@ -48,10 +48,12 @@ def verify_runtime_path(src:str):
             if not (positional_ok or keyword_ok): bad.append((fn.lineno,node.lineno,ast.unparse(node)))
     if checked==0: raise RuntimeError('browser importer never calls select_championship_fixtures')
     if bad: raise RuntimeError('browser fixture selector does not receive loaded db bytes: '+repr(bad))
-    # Prove the browser function reads bytes before unlinking the temp file and retains the db variable.
-    text='\n'.join(src.splitlines()[fn.lineno-1:getattr(fn,'end_lineno',fn.lineno)] for fn in defs)
+    lines=src.splitlines()
+    text='\n'.join('\n'.join(lines[fn.lineno-1:getattr(fn,'end_lineno',fn.lineno)]) for fn in defs)
     if 'db=dbp.read_bytes()' not in text.replace(' ',''):
         raise RuntimeError('browser importer no longer loads game_db.dat bytes into db')
+    if 'dbp.unlink(' not in text.replace(' ',''):
+        raise RuntimeError('expected early temp-file cleanup path missing; handoff regression test is no longer meaningful')
     return len(defs),checked
 
 defs,calls=verify_runtime_path(py)
