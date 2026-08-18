@@ -1,0 +1,35 @@
+name: Diagnose final rebuild readiness
+on:
+  push:
+    paths:
+      - '.github/workflows/diagnose-final-readiness.yml'
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run readiness audit and always record output
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap,traceback
+          y=Path('.github/workflows/final-rebuild-readiness.yml').read_text()
+          marker="          python - <<'PY'\n"
+          s=y.index(marker)+len(marker);e=y.index("\n          PY",s)
+          code=textwrap.dedent(y[s:e]).replace("if not result['ok']:raise SystemExit('final rebuild readiness audit failed')","pass")
+          try:
+              exec(compile(code,'readiness_inline.py','exec'),{'__name__':'__main__'})
+              Path('_rebuild_readiness_exception.txt').write_text('none\n')
+          except Exception:
+              Path('_rebuild_readiness_exception.txt').write_text(traceback.format_exc())
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add _rebuild_readiness.json _rebuild_readiness_exception.txt 2>/dev/null || true
+          git commit -m 'Record rebuild readiness diagnostic' || exit 0
+          git pull --rebase origin main
+          git push
