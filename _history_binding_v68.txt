@@ -130,6 +130,19 @@
 00434: HEADER_PAT=re.compile(rb'.{3}[\x00-\x4c][\x00-\xfa]\x00\x00\x00', re.S)
 00435: 
 
+### _rich_read_lp_utf8
+01124: def _rich_read_lp_utf8(buf:bytes,pos:int,max_len:int=80):
+01125:     if pos+4>len(buf): return None,pos
+01126:     n=u32(buf,pos)
+01127:     if n>max_len or pos+4+n>len(buf): return None,pos
+01128:     raw=buf[pos+4:pos+4+n]
+01129:     try:s=raw.decode('utf-8')
+01130:     except UnicodeDecodeError:return None,pos
+01131:     if any(ord(c)<32 for c in s):return None,pos
+01132:     return s,pos+4+n
+01133: 
+01134: 
+
 ### _rich_stat_record_at
 01135: def _rich_stat_record_at(buf:bytes,p:int):
 01136:     if p+214>len(buf) or buf[p]!=2:return None
@@ -168,6 +181,83 @@
 01169:     return out
 01170: 
 01171: 
+
+### _rich_scan_stats
+01172: def _rich_scan_stats(buf:bytes,start:int,end:int):
+01173:     out=[];p=start
+01174:     while p<end-214:
+01175:         if buf[p]==2:
+01176:             r=_rich_stat_record_at(buf,p)
+01177:             if r:
+01178:                 out.append(r);p+=140;continue
+01179:         p+=1
+01180:     return out
+01181: 
+01182: 
+
+### _rich_pick_two_squads
+01183: def _rich_pick_two_squads(stats:list[dict[str,Any]]):
+01184:     if len(stats)<40:return None
+01185:     candidates=[]
+01186:     for j in range(19,len(stats)-20):
+01187:         gap=stats[j+1]['offset']-stats[j]['offset']
+01188:         left=stats[j-19:j+1];right=stats[j+1:j+21]
+01189:         max_l=max((left[k+1]['offset']-left[k]['offset'] for k in range(19)),default=0)
+01190:         max_r=max((right[k+1]['offset']-right[k]['offset'] for k in range(19)),default=0)
+01191:         if gap>800 and max_l<1200 and max_r<1200:candidates.append((gap,j,left,right))
+01192:     if not candidates:return None
+01193:     _,_,left,right=min(candidates,key=lambda x:x[2][0]['offset'])
+01194:     return left,right
+01195: 
+01196: 
+
+### _rich_decorate
+01197: def _rich_decorate(rows:list[dict[str,Any]]):
+01198:     result=[]
+01199:     for idx,r0 in enumerate(rows):
+01200:         r=dict(r0);starter=idx<11
+01201:         if starter:
+01202:             r['appearance']='Started'
+01203:             if r['sub_off']:
+01204:                 r['minutes']=r['sub_off'];r['appearance']+=f", off {r['sub_off']}'"
+01205:             elif r['red_cards'] and r['sent_off_minute']:
+01206:                 r['minutes']=r['sent_off_minute'];r['appearance']+=f", sent off {r['sent_off_minute']}'"
+01207:             else:r['minutes']=90
+01208:         else:
+01209:             if r['sub_on']:
+01210:                 r['appearance']=f"On {r['sub_on']}'";r['minutes']=max(0,90-r['sub_on'])
+01211:             else:
+01212:                 r['appearance']='Unused';r['minutes']=0;r['rating']=None
+01213:         result.append(r)
+01214:     return result
+01215: 
+01216: 
+01217: 
+
+### _rich_header
+01218: def _rich_header(buf:bytes,comp_pos:int,rich_team_names:dict[int,str],competition_text:bytes):
+01219:     p=comp_pos+len(competition_text)
+01220:     short,p2=_rich_read_lp_utf8(buf,p,80)
+01221:     # FM stores a second competition label immediately after the long label. Accept the
+01222:     # label generically; team identity and league fixture matching provide the validation.
+01223:     if not short:return None
+01224:     stadium=None;stadium_end=None
+01225:     for q in range(p2,min(p2+120,len(buf)-8)):
+01226:         text,nxt=_rich_read_lp_utf8(buf,q,80)
+01227:         if text and len(text)>=3 and nxt+12<len(buf) and buf[nxt:nxt+2]==b'\x03\x02':
+01228:             stadium=text;stadium_end=nxt;break
+01229:     if not stadium:return None
+01230:     q=stadium_end
+01231:     if buf[q:q+2]!=b'\x03\x02' or buf[q+6]!=2:return None
+01232:     home_tid=u32(buf,q+7)
+01233:     marker=buf.find(b'\x00\x03\x02',q+11,q+70)
+01234:     if marker<0 or buf[marker+7]!=2:return None
+01235:     away_tid=u32(buf,marker+8)
+01236:     home=rich_team_names.get(home_tid);away=rich_team_names.get(away_tid)
+01237:     if not home or not away:return None
+01238:     return {'stadium':stadium,'home':home,'away':away,'home_tid':home_tid,'away_tid':away_tid,'competition_short':short}
+01239: 
+01240: 
 
 ### _rich_extract_member
 01241: def _rich_extract_member(buf:bytes,rich_team_names:dict[int,str],source_member:str):
