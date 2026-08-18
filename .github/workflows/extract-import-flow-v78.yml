@@ -1,0 +1,21 @@
+name: Extract import flow v78
+on:
+  push:
+    paths:
+      - 'scripts/extract_import_flow_v78.py'
+      - '.github/workflows/extract-import-flow-v78.yml'
+permissions:
+  contents: write
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python scripts/extract_import_flow_v78.py
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add _import_flow_v78.txt
+          git commit -m 'Record V78 import flow' || true
+          git pull --rebase origin main
+          git push
