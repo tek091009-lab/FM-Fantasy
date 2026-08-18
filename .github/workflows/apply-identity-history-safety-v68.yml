@@ -26,7 +26,7 @@ jobs:
           html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
           m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m
           py=base64.b64decode(m.group(1)).decode('utf-8')
-          required=['strict_current_db_membership_only_v68','strict-db-membership-only-no-history-mutation-v68','v68_current-squad-authority_previous-gws-quarantined','import blocked rather than guessing from match history']
+          required=['strict_current_db_membership_only_v68','strict-db-membership-only-no-history-mutation-v68','v68_current-squad-authority_previous-gws-quarantined','blocked rather than guessing from match history']
           forbidden=['cur.extend(add);diag[\'rich_augmented_players\']+=len(add)','if played_club.get(eid) in clubs: ceid=played_club[eid]','infer_hybrid_positions_from_match_markers(rich,players_by_eid)']
           assert all(x in py for x in required),[x for x in required if x not in py]
           assert all(x not in py for x in forbidden),[x for x in forbidden if x in py]
