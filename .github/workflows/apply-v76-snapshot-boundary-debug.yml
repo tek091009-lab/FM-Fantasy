@@ -1,0 +1,30 @@
+name: Apply V76 snapshot boundary diagnostic
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-v76-snapshot-boundary-debug.yml'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Apply and capture
+        shell: bash
+        run: |
+          set +e
+          python scripts/upgrade_snapshot_boundary_v76.py > /tmp/v76.out 2>&1
+          rc=$?
+          cat /tmp/v76.out
+          printf 'rc=%s\n' "$rc" > _v76_snapshot_apply_status.txt
+          cat /tmp/v76.out >> _v76_snapshot_apply_status.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add _v76_snapshot_apply_status.txt app/part* app/fix*
+          git commit -m "Record V76 snapshot boundary apply result" || true
+          git push
+          exit $rc
