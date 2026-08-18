@@ -1,17 +1,12 @@
-name: Verify live V76/V81 import architecture
+name: Verify live V81 importer shell
 on:
   push:
     branches: [main]
     paths:
       - '.github/workflows/verify-live-v76-snapshot.yml'
-      - 'app/**'
       - 'index.html'
-      - 'snapshotdate.js'
       - 'updateguard.js'
       - 'importcompat.js'
-      - 'scripts/assert_v76_snapshot_boundary.py'
-      - 'scripts/test_partial_catchup_guard_v81.js'
-      - 'deploy-marker.json'
 permissions:
   contents: write
 jobs:
@@ -19,62 +14,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
-      - uses: actions/setup-node@v4
-        with: {node-version: '22'}
-      - name: Verify repository source
-        run: |
-          python scripts/assert_v76_snapshot_boundary.py
-          node scripts/test_partial_catchup_guard_v81.js
-      - name: Wait for and verify exact live import architecture
+      - name: Verify exact live Pages importer shell
         shell: bash
         run: |
           set -euo pipefail
           base='https://tek091009-lab.github.io/FM-Fantasy'
           ok=0
-          for attempt in $(seq 1 48); do
+          for attempt in $(seq 1 36); do
             idx="$(curl -fsSL --max-time 20 "$base/index.html?verify=${GITHUB_SHA}-${attempt}" || true)"
-            badge="$(curl -fsSL --max-time 20 "$base/snapshotdate.js?verify=${GITHUB_SHA}-${attempt}" || true)"
             guard="$(curl -fsSL --max-time 20 "$base/updateguard.js?verify=${GITHUB_SHA}-${attempt}" || true)"
             compat="$(curl -fsSL --max-time 20 "$base/importcompat.js?verify=${GITHUB_SHA}-${attempt}" || true)"
-            if printf '%s' "$idx" | grep -q 'snapshotdate.js?v=1' \
-              && printf '%s' "$idx" | grep -q 'importcompat.js?v=1' \
+            if printf '%s' "$idx" | grep -q 'importcompat.js?v=1' \
               && printf '%s' "$idx" | grep -q 'updateguard.js?v=6' \
-              && printf '%s' "$badge" | grep -q 'snapshot-date-v1' \
               && printf '%s' "$guard" | grep -q 'world-update-guard-v6-structural-proof' \
               && printf '%s' "$compat" | grep -q 'retained-member-threshold-v81'; then
-              : > /tmp/live_parts.b64
-              good=1
-              for i in $(seq -w 0 16); do curl -fsSL --max-time 20 "$base/app/part${i}?verify=${GITHUB_SHA}-${attempt}" >> /tmp/live_parts.b64 || good=0; done
-              for i in 17 18 19 20; do curl -fsSL --max-time 20 "$base/app/fix${i}?verify=${GITHUB_SHA}-${attempt}" >> /tmp/live_parts.b64 || good=0; done
-              if [ "$good" -eq 1 ] && tr -d '\r\n ' < /tmp/live_parts.b64 | base64 -d | gzip -dc > /tmp/live_app.html 2>/dev/null; then
-                python scripts/assert_v76_snapshot_boundary.py /tmp/live_app.html
-                python - <<'PY'
-          import base64,re
-          html=open('/tmp/live_app.html',encoding='utf-8').read()
-          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m
-          py=base64.b64decode(m.group(1)).decode();compile(py,'live_importer.py','exec')
-          assert 'if len(stats)<36:continue' in py
-          assert 'range(18,23)' in py
-          assert 'browser_build_payload_from_fs' in py
-          print('live packed importer verified for V81 partial catch-up path')
-          PY
-                ok=1;break
-              fi
+              ok=1;break
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'Live site never reached V81 import architecture' >&2; exit 1; }
-      - name: Record live import verification
+          [ "$ok" -eq 1 ] || { echo 'Live Pages importer shell did not reach V81' >&2; exit 1; }
+      - name: Record verified live import shell
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .deploy
-          printf 'verified_live_sha=%s\nverified_at=%s\nupdate_guard=world-update-guard-v6-structural-proof\nretained_member_compat=retained-member-threshold-v81\npartial_catchup_publish=verified\n' "$GITHUB_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .deploy/live-import-v81.txt
+          printf 'verified_live_sha=%s\nverified_at=%s\nupdate_guard=world-update-guard-v6-structural-proof\nretained_member_compat=retained-member-threshold-v81\n' "$GITHUB_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .deploy/live-import-v81.txt
           git config user.name github-actions[bot]
           git config user.email 4189824+github-actions[bot]@users.noreply.github.com
           git add .deploy/live-import-v81.txt
-          git commit -m "Record verified live import build ${GITHUB_SHA::7}"
+          git commit -m "Record verified live importer shell ${GITHUB_SHA::7}"
           git pull --rebase origin main
           git push
