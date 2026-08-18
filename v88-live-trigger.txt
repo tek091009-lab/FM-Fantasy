@@ -1,0 +1,2 @@
+FM Fantasy importer/UI v88 production trigger
+Includes application commit: 973dddfa109c5817eb33483a333514c8e4dfba78
