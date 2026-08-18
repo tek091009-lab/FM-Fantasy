@@ -1,0 +1,46 @@
+name: Apply fixture DB handoff v74
+on:
+  push:
+    paths:
+      - 'scripts/fix_fixture_db_handoff_v74.py'
+      - '.github/workflows/apply-fixture-db-handoff-v74.yml'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply and verify V74 loaded DB handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/fix_fixture_db_handoff_v74.py | tee _v74_apply_status.txt
+          python - <<'PY' | tee -a _v74_apply_status.txt
+          from pathlib import Path
+          import ast,base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode()
+          assert "FIXTURE_DB_HANDOFF_POLICY='loaded-game-db-bytes-v74'" in py
+          tree=ast.parse(py)
+          defs=[x for x in ast.walk(tree) if isinstance(x,(ast.FunctionDef,ast.AsyncFunctionDef)) and x.name=='browser_build_payload_from_fs']
+          assert defs
+          calls=0
+          for fn in defs:
+              for node in ast.walk(fn):
+                  if isinstance(node,ast.Call) and isinstance(node.func,ast.Name) and node.func.id=='select_championship_fixtures':
+                      calls+=1
+                      assert len(node.args)>=5 and isinstance(node.args[4],ast.Name) and node.args[4].id=='db',ast.unparse(node)
+          assert calls>0
+          assert not re.search(r'select_championship_fixtures\(\s*fix\s*,\s*all_clubs\s*,\s*expected_names\s*,\s*requested_league\s*\)',py)
+          compile(py,'fm_importer_v74_verify.py','exec')
+          print(f'verify_ok=1 browser_defs={len(defs)} selector_calls={calls}')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20 _v74_apply_status.txt
+          git commit -m 'Pass loaded game DB bytes into fixture selector v74' || true
+          git pull --rebase origin main
+          git push
