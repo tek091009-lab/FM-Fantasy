@@ -1,0 +1,30 @@
+name: Apply V76 Pages gate diagnostic
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-pages-gate-v76-debug.yml'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Apply and capture
+        shell: bash
+        run: |
+          set +e
+          python scripts/upgrade_pages_gate_v76.py > /tmp/pagesv76.out 2>&1
+          rc=$?
+          cat /tmp/pagesv76.out
+          printf 'rc=%s\n' "$rc" > _pages_v76_apply_status.txt
+          cat /tmp/pagesv76.out >> _pages_v76_apply_status.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add _pages_v76_apply_status.txt .github/workflows/pages.yml
+          git commit -m "Record V76 Pages gate apply result" || true
+          git push
+          exit $rc
