@@ -1,0 +1,44 @@
+name: Apply identity history safety v68
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-identity-history-safety-v68.yml'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply v68 importer safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/upgrade_identity_history_safety_v68.py
+      - name: Verify decoded importer
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode('utf-8')
+          required=['strict_current_db_membership_only_v68','strict-db-membership-only-no-history-mutation-v68','v68_current-squad-authority_previous-gws-quarantined','import blocked rather than guessing from match history']
+          forbidden=['cur.extend(add);diag[\'rich_augmented_players\']+=len(add)','if played_club.get(eid) in clubs: ceid=played_club[eid]','infer_hybrid_positions_from_match_markers(rich,players_by_eid)']
+          assert all(x in py for x in required),[x for x in required if x not in py]
+          assert all(x not in py for x in forbidden),[x for x in forbidden if x in py]
+          compile(py,'fm_importer_v68.py','exec')
+          print('v68 decoded importer safety verified')
+          PY
+      - name: Commit production bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20
+          git commit -m 'Apply v68 current-squad and history safety' || exit 0
+          git push
