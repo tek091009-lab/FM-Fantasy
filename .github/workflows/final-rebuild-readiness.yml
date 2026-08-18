@@ -1,0 +1,138 @@
+name: Final rebuild readiness
+on:
+  push:
+    paths:
+      - '.github/workflows/final-rebuild-readiness.yml'
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deep audit and synthetic importer tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,json,re,traceback
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m,'embedded importer missing'
+          py=base64.b64decode(m.group(1)).decode('utf-8')
+          result={'static':{},'synthetic':{},'ui':{},'availability':{},'errors':[]}
+          required=[
+            'strict_current_db_membership_only_v68',
+            'strict-db-membership-only-no-history-mutation-v68',
+            'v68_current-squad-authority_previous-gws-quarantined',
+            'def _rich_candidate_twenty_pairs',
+            'named_header_candidate_v69',
+            'official-score-plus-strict-current-cohort-v69',
+            'rich_fixture_coverage',
+            'same_match_both_clubs',
+            "history_identity_diag=aggregate_player_history(players,rich_matches)",
+          ]
+          forbidden=[
+            "cur.extend(add);diag['rich_augmented_players']+=len(add)",
+            'if played_club.get(eid) in clubs: ceid=played_club[eid]',
+            'infer_hybrid_positions_from_match_markers(rich,players_by_eid)',
+            "candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates",
+            'bounded 18-22 rows per side',
+          ]
+          result['static']['required']={x:(x in py) for x in required}
+          result['static']['forbidden']={x:(x in py) for x in forbidden}
+          compile(py,'fm_importer_final.py','exec')
+          ns={'__name__':'fm_importer_final'}
+          exec(compile(py,'fm_importer_final.py','exec'),ns,ns)
+          result['static']['functions']={n:callable(ns.get(n)) for n in ['scan_first_team_squads','build_players','aggregate_player_history','_rich_candidate_twenty_pairs','join_rich_matches']}
+
+          # Candidate block scanner: exactly one clean 20+20 compact pair.
+          def rr(pid,off,goals=0):
+            return {'player_id':pid,'offset':off,'goals':goals,'own_goals':0,'assists':0,'minutes':90,'yc':0,'rc':0,'saves':0,'gc':0,'rating':6.5,'possession_won':0,'defcon_actions':0,'penalties_missed':0}
+          left=[rr(i+1,i*100,1 if i==0 else 0) for i in range(20)]
+          right=[rr(101+i,5000+i*100,1 if i==0 else 0) for i in range(20)]
+          pairs=ns['_rich_candidate_twenty_pairs'](left+right)
+          result['synthetic']['candidate_pairs']=len(pairs)
+          result['synthetic']['candidate_pair_exact_20x20']=bool(pairs and len(pairs[0][0])==20 and len(pairs[0][1])==20)
+
+          players={}
+          for r in left: players[int(r['player_id'])]={'pid':str(r['player_id']),'id':str(r['player_id']),'name':f'A {r["player_id"]}','club':'Alpha','pos':'MID'}
+          for r in right: players[int(r['player_id'])]={'pid':str(r['player_id']),'id':str(r['player_id']),'name':f'B {r["player_id"]}','club':'Beta','pos':'MID'}
+          fixture={'fixture_id':1,'gameweek':1,'date':'2025-08-01','home':'Alpha','away':'Beta','home_score':1,'away_score':1,'status':'played'}
+          rich={'home':'Alpha','away':'Beta','home_score':1,'away_score':1,'date':'2025-08-01','home_players':left,'away_players':right,'identity_source':'named_header_candidate_v69'}
+          try:
+            ok=ns['join_rich_matches']([rich],[fixture],players)
+            result['synthetic']['valid_match_accepted']=len(ok)==1
+            if ok:
+              result['synthetic']['valid_match_side_sizes']=[len(ok[0].get('home_players',[])),len(ok[0].get('away_players',[]))]
+          except Exception as e:
+            result['synthetic']['valid_match_accepted']=False
+            result['errors'].append('valid_match:'+repr(e))
+
+          bad_left=[dict(r) for r in left];bad_left[1]['goals']=1
+          bad_rich=dict(rich);bad_rich['home_players']=bad_left
+          try:
+            bad=ns['join_rich_matches']([bad_rich],[fixture],players)
+            result['synthetic']['score_mismatch_rejected']=len(bad)==0
+          except Exception as e:
+            result['synthetic']['score_mismatch_rejected']=False
+            result['errors'].append('score_mismatch:'+repr(e))
+
+          forty_left=[dict(r) for r in left]+[dict(r,player_id=201+idx,offset=8000+idx*100,goals=0) for idx,r in enumerate(left)]
+          forty_players=dict(players)
+          for r in forty_left[20:]:forty_players[int(r['player_id'])]={'pid':str(r['player_id']),'id':str(r['player_id']),'name':'X','club':'Alpha','pos':'MID'}
+          forty_rich=dict(rich);forty_rich['home_players']=forty_left
+          try:
+            bad=ns['join_rich_matches']([forty_rich],[fixture],forty_players)
+            result['synthetic']['fused_40_player_side_rejected']=len(bad)==0
+          except Exception as e:
+            result['synthetic']['fused_40_player_side_rejected']=False
+            result['errors'].append('forty_side:'+repr(e))
+
+          # UI/server-facing guard scripts must carry the strict versions and backed-up reset.
+          ug=Path('updateguard.js').read_text();cf=Path('clearfix.js').read_text();idx=Path('index.html').read_text()
+          result['ui']={
+            'update_guard_v3':'world-update-guard-v3-identity-history-safe' in ug,
+            'client_score_validation':'retained matches do not reproduce the official score' in ug,
+            'client_side_size_validation':'unsafe current squad size' in ug,
+            'backed_up_reset':'fmfantasy_reset_world_season' in cf,
+            'reset_backup_key':'fmFantasyLastSeasonResetBackup' in cf,
+            'updateguard_loaded':'updateguard.js' in idx,
+            'clearfix_loaded':'clearfix.js' in idx,
+          }
+
+          # Core availability must be structural/direct evidence only.
+          start=html.find('function fmAvailabilityTruthDate(payload){');end=html.find('function fmBuildInitialNews(payload){',start)
+          block=html[start:end] if start>=0 and end>start else ''
+          result['availability']={
+            'block_found':bool(block),
+            'injury_direct':'injury_manager.dat/current-window' in block,
+            'ban_direct':'discipline.dat/active-ban-v1' in block,
+            'no_yellow_heuristic':'5 yellow cards' not in block,
+            'no_second_yellow_heuristic':'second-yellow red' not in block,
+            'fixture_floor':'structural-v2-fixture-floor' in py and 'fixture_floor' in py,
+            'expired_injury_rejected':'full<=save_date' in py,
+            'expired_ban_rejected':'expiry<=save_date' in py,
+          }
+          checks=[]
+          checks += list(result['static']['required'].values())
+          checks += [not x for x in result['static']['forbidden'].values()]
+          checks += list(result['static']['functions'].values())
+          checks += [result['synthetic'].get('candidate_pair_exact_20x20',False),result['synthetic'].get('valid_match_accepted',False),result['synthetic'].get('score_mismatch_rejected',False),result['synthetic'].get('fused_40_player_side_rejected',False)]
+          checks += list(result['ui'].values())+list(result['availability'].values())
+          result['ok']=all(checks) and not result['errors']
+          Path('_rebuild_readiness.json').write_text(json.dumps(result,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(result,indent=2,sort_keys=True))
+          if not result['ok']:raise SystemExit('final rebuild readiness audit failed')
+          PY
+      - name: Commit readiness result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add _rebuild_readiness.json
+          git commit -m 'Record final clean-rebuild readiness audit' || exit 0
+          git pull --rebase origin main
+          git push
