@@ -1,0 +1,30 @@
+name: Apply V77 Pages gate
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/upgrade_pages_gate_v77.py'
+      - '.github/workflows/apply-pages-gate-v77.yml'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python scripts/upgrade_pages_gate_v77.py
+      - name: Verify workflow text
+        run: |
+          grep -q 'assert_v77_single_missing_current_squad.py' .github/workflows/pages.yml
+          grep -q '23-of-24-strong-plus-current-person-proof-v77' .github/workflows/pages.yml
+          grep -q 'v77-single-missing-current-squad-plus-dated-snapshot-live' .github/workflows/pages.yml
+      - name: Commit V77 Pages gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/pages.yml
+          git commit -m 'Gate Pages on V77 single-missing squad proof' || exit 0
+          git pull --rebase origin main
+          git push
