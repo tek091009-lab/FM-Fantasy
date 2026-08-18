@@ -1,0 +1,28 @@
+name: Diagnose Pages source
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/diagnose-pages-source.yml']
+permissions:
+  contents: write
+  pages: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Capture Pages configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set +e
+          mkdir -p .deploy
+          gh api "repos/${GITHUB_REPOSITORY}/pages" > .deploy/pages-source.json 2>&1
+          echo "status=$?" >> .deploy/pages-source.json
+          git config user.name github-actions[bot]
+          git config user.email 4189824+github-actions[bot]@users.noreply.github.com
+          git add .deploy/pages-source.json
+          git commit -m "Record Pages source diagnostic ${GITHUB_SHA::7}"
+          git pull --rebase origin main
+          git push
