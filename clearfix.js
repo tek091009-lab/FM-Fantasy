@@ -3,6 +3,7 @@
   const RX_DB=/(fm|fantasy|world|save|import|database)/i;
   const RX_AUTH=/(supabase|auth|session|token|login|user)/i;
   const CLEAR_KEY='fmFantasyCloudDatabaseCleared';
+  const RESET_BACKUP_KEY='fmFantasyLastSeasonResetBackup';
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
   async function callFirst(names){
@@ -19,21 +20,38 @@
     return null;
   }
 
+  async function resetSharedSeasonSafely(){
+    if(!(window.FMCloud?.ready?.()&&window.FMCloud?.isCreator?.()))return null;
+    const cfg=window.FM_FANTASY_CONFIG||{},world=window.FMCloud.getWorld?.();
+    if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey||!world?.id)throw new Error('Cloud reset service is not ready.');
+    // Deliberately create this client only inside the explicit reset click. It never runs during login/hydration.
+    const c=supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:false,detectSessionInUrl:false}});
+    const {data:sessionData,error:sessionError}=await c.auth.getSession();
+    if(sessionError||!sessionData?.session)throw new Error('Your login session could not be confirmed for the reset.');
+    const {data,error}=await c.rpc('fmfantasy_reset_world_season',{p_world_id:world.id});
+    if(error)throw error;
+    const backupId=String(data||'');
+    try{localStorage.setItem(RESET_BACKUP_KEY,backupId)}catch(_){ }
+    try{world.payload=null}catch(_){ }
+    return backupId;
+  }
+
   async function clearSharedWorld(){
-    try{localStorage.setItem(CLEAR_KEY,'1')}catch(_){ }
-    try{sessionStorage.setItem(CLEAR_KEY,'1')}catch(_){ }
     try{
-      if(window.FMCloud?.ready?.()&&window.FMCloud?.isCreator?.()&&typeof window.FMCloud.publishWorld==='function'){
-        await window.FMCloud.publishWorld(null);
+      if(window.FMCloud?.ready?.()&&window.FMCloud?.isCreator?.()){
+        const backupId=await resetSharedSeasonSafely();
+        if(!backupId)throw new Error('Season reset did not return a backup id.');
       }
+      try{localStorage.setItem(CLEAR_KEY,'1')}catch(_){ }
+      try{sessionStorage.setItem(CLEAR_KEY,'1')}catch(_){ }
     }catch(e){
-      console.error('[FM clear] shared payload clear failed',e);
-      throw new Error('Could not clear the shared saved database. Please try again.');
+      console.error('[FM clear] safe shared reset failed',e);
+      throw new Error(`Could not safely reset the shared season. Nothing has been cleared. ${e?.message||''}`.trim());
     }
   }
 
   function isImportedFantasyKey(k){
-    if(!k||k===CLEAR_KEY||RX_AUTH.test(k))return false;
+    if(!k||k===CLEAR_KEY||k===RESET_BACKUP_KEY||RX_AUTH.test(k))return false;
     const fm=/(fm|fantasy)/i.test(k);
     const imported=/(db|database|world|save|import|payload|fixture|player|history|injur|suspend|ban|availability|status|news|discipline|match|club|competition|gameweek)/i.test(k);
     return fm&&imported;
@@ -72,19 +90,12 @@
       }catch(e){console.warn('[FM clear] storage fallback failed',e)}
     }
 
-    // Clear in-memory imported availability/news state before reload as well, so a
-    // delayed renderer cannot re-persist stale injury/suspension rows during teardown.
     for(const name of ['PLAYERS','MATCHES','SEASON_FIXTURES','NEWS','INJURIES','SUSPENSIONS']){
-      try{
-        const v=window[name];
-        if(Array.isArray(v))v.length=0;
-      }catch(_){ }
+      try{const v=window[name];if(Array.isArray(v))v.length=0}catch(_){ }
     }
-
     if(!helper&&typeof window.fmStoredSetLocalOnly==='function'){
       try{await window.fmStoredSetLocalOnly(null)}catch(e){console.warn('[FM clear] null setter fallback failed',e)}
     }
-
     try{if('caches' in window){for(const key of await caches.keys())if(/fm|fantasy/i.test(key))await caches.delete(key)}}catch(_){ }
     await sleep(80);
     location.reload();
@@ -103,18 +114,19 @@
     if(b.dataset.fmClearing==='1')return;
     const cloud=!!window.FMCloud?.isCreator?.();
     const ok=window.confirm(cloud
-      ?'Clear the imported FM database from this device AND remove the saved shared database? Your account, league and join code will be kept.'
+      ?'Reset this FM Fantasy season and clear the imported database? A full server backup is created first. Accounts, world membership, league/join code are kept; squads, points, chips, transfers, prices and imported FM data are reset for a clean rebuild.'
       :'Clear the imported FM database from this device? Your account/login will be kept.');
     if(!ok)return;
     b.dataset.fmClearing='1';b.disabled=true;
-    const old=b.textContent;b.textContent='Clearing…';
+    const old=b.textContent;b.textContent='Backing up & clearing…';
     clearImportedWorld().catch(err=>{
       console.error('[FM clear] failed',err);
       b.disabled=false;b.dataset.fmClearing='0';b.textContent=old;
-      alert(err?.message||'Could not clear the FM database. Please export debug and send it over.');
+      alert(err?.message||'Could not safely clear the FM database. Nothing has been reset.');
     });
   },true);
 
   window.FMClearImportedDatabase=clearImportedWorld;
   window.FMCloudDatabaseClearKey=CLEAR_KEY;
+  window.FMSeasonResetBackupKey=RESET_BACKUP_KEY;
 })();
