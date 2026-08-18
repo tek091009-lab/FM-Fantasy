@@ -1,0 +1,48 @@
+name: Apply current squad consensus v82
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/upgrade_current_squad_consensus_v82.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply v82 importer upgrade
+        run: python scripts/upgrade_current_squad_consensus_v82.py
+      - name: Verify packed importer
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode()
+          compile(py,'fm_importer_v82.py','exec')
+          for t in ['current_person_ability_profile_evidence_v82','ability_only_resolution_quarantined','v82-current-db-consensus-only-ability-non-authoritative','high_overlap_current_db_union_v75']:
+              assert t in py,t
+          assert "'method':'current_person_senior_quality_v75'" not in py
+          print('v82 verified')
+          PY
+      - name: Commit production chunks
+        run: |
+          if git diff --quiet -- app; then echo 'No changes'; exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app
+          git commit -m 'Apply v82 current squad consensus-only resolver'
+          git pull --rebase origin main
+          git push origin HEAD:main
