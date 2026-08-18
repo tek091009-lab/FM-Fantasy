@@ -394,6 +394,41 @@ syncBusy(false)}
 
 let FM_PENDING_SEASON_LEAGUE=null;
 
+const FM_LEAGUE_PREF_KEY='fmFantasySeasonLeaguePreferenceV72';
+
+function fmNormaliseLeaguePreference(v){
+return v==='Premier League'||v==='EFL Championship'?v:null}
+
+function fmRememberLeaguePreference(v){
+const p=fmNormaliseLeaguePreference(v);
+try{
+if(p)sessionStorage.setItem(FM_LEAGUE_PREF_KEY,p);
+else sessionStorage.removeItem(FM_LEAGUE_PREF_KEY)}
+catch(_){
+}
+return p}
+
+function fmCurrentLeaguePreference(){
+const ui=fmNormaliseLeaguePreference($('leagueImportPreference')?.value);
+if(ui)return ui;
+const pending=fmNormaliseLeaguePreference(FM_PENDING_SEASON_LEAGUE);
+if(pending)return pending;
+try{
+return fmNormaliseLeaguePreference(sessionStorage.getItem(FM_LEAGUE_PREF_KEY))}
+catch(_){
+return null}
+}
+
+try{
+const sel=$('leagueImportPreference'),saved=fmNormaliseLeaguePreference(sessionStorage.getItem(FM_LEAGUE_PREF_KEY));
+if(sel&&saved&&!sel.value)sel.value=saved;
+if(sel)sel.onchange=()=>{
+FM_PENDING_SEASON_LEAGUE=fmRememberLeaguePreference(sel.value)}
+}
+catch(_){
+}
+
+
 async function sendFMImport(file,mode,autoRetry=false,explicitPreference=undefined){
 
  if(!file)return;
@@ -410,7 +445,7 @@ syncMessage(mode==='season'?'Reading FM season/database…':'Checking FM gamewee
   const old=await fmStoredGet();
 if(mode==='update'&&!old)throw new Error('Run Season / Database Import first.');
 
-  const preferredLeague=mode==='update'?(old?.meta?.competition||null):(explicitPreference!==undefined?explicitPreference:(FM_PENDING_SEASON_LEAGUE!==null?FM_PENDING_SEASON_LEAGUE:($('leagueImportPreference')?.value||null)));
+  const preferredLeague=mode==='update'?(old?.meta?.competition||null):(explicitPreference!==undefined?fmNormaliseLeaguePreference(explicitPreference):fmCurrentLeaguePreference());
 fmDebugAdd('info',`League request: ${
 preferredLeague||'AUTO'}
 ${
@@ -499,61 +534,175 @@ const live=mode==='update'?liveManagerGameweek():null;
 
   if(mode==='season'){
 
-    const played=Number(payload.meta.played_results||0),rich=Number(payload.meta.rich_matches||0),missing=Math.max(0,played-rich);
-
-    if(played>0&&missing>0)syncMessage(`${
-payload.meta.players}
- players · ${
-payload.meta.fixtures}
- fixtures · ${
-played}
- results loaded · player detail ${
-rich}
-/${
-played}
- matches (${
-missing}
- missing). Database loaded with partial historical player coverage — no automatic re-scan was run.`,'warn');
-
-    else syncMessage(`${
-payload.meta.players}
- players · ${
-payload.meta.fixtures}
- fixtures · ${
-played}
- results loaded · player detail ${
-rich}
-/${
-played}
- matches. Historical coverage complete. Calendar Gameweeks ready.`,'ok');
-
-  }
-
-  else{
-const pts=processed.reduce((s,x)=>s+Number(x.net||0),0);
-syncMessage(`${
-changes.new_results.length}
- new results · ${
-changes.new_rich_matches}
- new rich matches · ${
-processed.length}
- Gameweek${
-processed.length===1?'':'s'}
- finalised${
-processed.length?` · ${
-pts}
- net pts`:''}
-${
-live?` · GW ${
-live.gw}
- ongoing: ${
-live.gross}
- l
+    const played=Number(payload.meta.played_results||0),rich=Number(payl
 
 === HTML msg.includes('Multiple supported English league seasons') ===
-index=797164
+index=-1
 
-f(retained.length){
+=== HTML seasonImportBtn').addEventListener ===
+index=-1
+
+=== HTML updateImportBtn').addEventListener ===
+index=-1
+
+=== HTML sendFMImport( ===
+index=793394
+
+yncProgress');
+wrap.classList.add('show');
+wrap.classList.toggle('bad',!!bad);
+$('syncProgressFill').style.width=n+'%';
+$('syncProgressPct').textContent=n+'%';
+if(label)$('syncProgressLabel').textContent=label}
+
+function syncBusy(on){
+$('seasonImportBtn').disabled=on;
+$('updateImportBtn').disabled=on;
+$('clearDatabaseBtn').disabled=on}
+
+async function clearFMDatabase(){
+
+ if(!confirm('Clear the imported FM database and reset this fantasy save, squad, points and leagues on this browser?'))return;
+
+ syncBusy(true);
+
+ try{
+await fmStoredClear();
+PLAYERS.splice(0);
+MATCHES.splice(0);
+SEASON_FIXTURES.splice(0);
+CHAMP_TABLE.splice(0);
+for(const k of Object.keys(STAR_TEAMS))delete STAR_TEAMS[k];
+for(const k of Object.keys(META))delete META[k];
+Object.assign(META,{
+named_players:0,hidden_unresolved:0,completed_gameweek:0,current_gameweek:1,total_matches_extracted:0,fully_completed_gameweeks:[]}
+);
+state=fmDeepClone(DEFAULT);
+state.chips=fmDeepClone(DEFAULT.chips);
+localStorage.removeItem('fmfantasy_final_v5');
+localStorage.removeItem(FM_DEBUG_KEY);
+FM_DEBUG={
+version:'v27-postpayload-pricing',startedAt:null,mode:null,file:null,events:[],lastError:null,lastMeta:null}
+;
+fixtureViewGW=1;
+starViewGW=1;
+teamViewGW=1;
+refreshCompetitionUI();
+refreshClubFilters();
+save();
+renderAll();
+$('syncProgress').classList.remove('show','bad');
+syncMessage('Database cleared — ready for a fresh Season / Database Import.','ok')}
+
+ catch(e){
+syncMessage('Could not clear database: '+String(e?.message||e),'bad')}
+
+ finally{
+syncBusy(false)}
+
+}
+
+let FM_PENDING_SEASON_LEAGUE=null;
+
+const FM_LEAGUE_PREF_KEY='fmFantasySeasonLeaguePreferenceV72';
+
+function fmNormaliseLeaguePreference(v){
+return v==='Premier League'||v==='EFL Championship'?v:null}
+
+function fmRememberLeaguePreference(v){
+const p=fmNormaliseLeaguePreference(v);
+try{
+if(p)sessionStorage.setItem(FM_LEAGUE_PREF_KEY,p);
+else sessionStorage.removeItem(FM_LEAGUE_PREF_KEY)}
+catch(_){
+}
+return p}
+
+function fmCurrentLeaguePreference(){
+const ui=fmNormaliseLeaguePreference($('leagueImportPreference')?.value);
+if(ui)return ui;
+const pending=fmNormaliseLeaguePreference(FM_PENDING_SEASON_LEAGUE);
+if(pending)return pending;
+try{
+return fmNormaliseLeaguePreference(sessionStorage.getItem(FM_LEAGUE_PREF_KEY))}
+catch(_){
+return null}
+}
+
+try{
+const sel=$('leagueImportPreference'),saved=fmNormaliseLeaguePreference(sessionStorage.getItem(FM_LEAGUE_PREF_KEY));
+if(sel&&saved&&!sel.value)sel.value=saved;
+if(sel)sel.onchange=()=>{
+FM_PENDING_SEASON_LEAGUE=fmRememberLeaguePreference(sel.value)}
+}
+catch(_){
+}
+
+
+async function sendFMImport(file,mode,autoRetry=false,explicitPreference=undefined){
+
+ if(!file)return;
+
+ if(mode==='season'&&state.teamConfirmed&&!confirm('Season / Database Import rebuilds the FM world and resets your fantasy squad. Continue?'))return;
+
+ if(!autoRetry)fmDebugReset(file,mode);
+syncBusy(true);
+syncProgress(1,mode==='season'?'Starting season import…':'Starting Gameweek update…');
+syncMessage(mode==='season'?'Reading FM season/database…':'Checking FM gameweek update…');
+
+ try{
+
+  const old=await fmStoredGet();
+if(mode==='update'&&!old)throw new Error('Run Season / Database Import first.');
+
+  const preferredLeague=mode==='update'?(old?.meta?.competition||null):(explicitPreference!==undefined?fmNormaliseLeaguePreference(explicitPreference):fmCurrentLeaguePreference());
+fmDebugAdd('info',`League request: ${
+preferredLeague||'AUTO'}
+${
+mode==='season'?' (captured before file selection)':''}
+`);
+const result=await FM_RUNTIME.importFile(file,(t,pct)=>{
+syncMessage(t);
+syncProgress(pct,t);
+fmDebugAdd('progress',t,{
+percent:pct}
+)}
+,mode==='update'?old?.meta?.fingerprint:null,preferredLeague);
+
+  if(result.duplicate&&String(old?.meta?.price_merge_policy||'').includes('v67')){
+fmDebugAdd('result','Duplicate save detected — no database changes applied.');
+applyImportedPayload(old,'update');
+const processed=fmProcessCompletedGameweeks(),live=liveManagerGameweek();
+syncProgress(100,'Already up to date');
+syncMessage(processed.length?`Same save · repaired ${
+processed.length}
+ completed Gameweek${
+processed.length===1?'':'s'}
+ into your team total.`:live?`Same save · GW ${
+live.gw}
+ remains ongoing at ${
+live.gross}
+ live team pts.`:'Same save already imported — 0 database changes, nothing double-counted.','ok');
+return}
+
+  if(result.duplicate){
+result.duplicate=false;
+fmDebugAdd('info','Same save accepted once to apply v6.7 pricing correction.');
+}
+
+  let payload=result.payload,changes=null;
+
+  fmApplyPostPayloadPricingCorrections(payload);
+
+  if(mode==='update'){
+
+   changes=fmDiff(old,payload);
+const newIds=new Set((payload.players||[]).map(p=>String(p.pid))),retained=(old.players||[]).filter(p=>!newIds.has(String(p.pid))).map(p=>Object.assign({
+}
+,p,{
+available:false,departed:true,visible:true}
+));
+if(retained.length){
 payload.players.push(...retained);
 payload.meta.historical_players_retained=retained.length}
 
@@ -651,417 +800,7 @@ live.gross}
 catch(e){
 
   const msg=String(e?.message||e||'');
-console.error(e);
-FM_DEBUG.lastError=fmDebugSafeError(e);
-fmDebugAdd('error',FM_DEBUG.lastError.message);
-fmDebugPersist();
-
-  if(mode==='season'&&!autoRetry&&!($('leagueImportPreference')?.value)&&msg.includes('Multiple supported English league seasons')){
-
-    const isPrem=confirm('Auto-detect found both Premier League and Championship data in this FM save and cannot safely guess the human-managed league.\n\nPress OK for Premier League.\nPress Cancel for EFL Championship.\n\nThe same save will retry automatically — you do not need to upload it again.');
-
-    const chosen=isPrem?'Premier League':'EFL Championship';
-$('leagueImportPreference').value=chosen;
-fmDebugAdd('info',`Auto-detect ambiguity resolved in-page as ${
-chosen}
-;
- retrying the same file.`);
-syncProgress(1,`Retrying as ${
-chosen}
-…`);
-syncMessage(`Auto-detect needed one safe league choice. Retrying as ${
-chosen}
-…`);
-
-    return await sendFMImport(file,mode,true,chosen);
-
-  }
-
-  syncProgress(Number($('syncProgressPct').textContent.replace('%',''))||0,'Import failed',true);
-syncMessage(fmFriendlyError(e)+' · Use Export Debug to copy the full traceback.','bad')
- }
-
- finally{
-syncBusy(false);
-$('seasonImportFile').value='';
-$('updateImportFile').value=''}
-
-}
-
-async function loadServerImportState(){
-
- let p=null;
-try{
-if(window.FMCloud?.ready())p=await window.FMCloud.loadWorld()}
-catch(e){
-console.warn('Cloud world load failed',e)}
-if(!p)p=await fmStoredGet();
-if(p){
-await fmStoredSetLocalOnly(p);
-applyImportedPayload(p,'load');
-const processed=fmProcessCompletedGameweeks();
-syncMessage(processed.length?`${
-p.meta.players}
- players loaded · ${
-processed.length}
- completed Gameweek${
-processed.length===1?'':'s'}
- added to your team.`:`${
-p.meta.players}
- players · ${
-p.meta.fixtures}
- fixtures loaded.`,'ok')}
-else syncMessage(window.FMCloud?.ready()?'Creator has not published an FM database yet.':'No FM save imported yet.','')
-}
-
-$('seasonImportBtn').onclick=()=>{
-FM_PENDING_SEASON_LEAGUE=$('leagueImportPreference')?.value||null;
-$('seasonImportFile').click()}
-;
-$('updateImportBtn').onclick=()=>$('updateImportFile').click();
-$('exportDebugBtn').onclick=exportFMDebug;
-$('clearDatabaseBtn').onclick=clearFMDatabase;
-
-$('seasonImportFile').onchange=e=>{
-const pref=FM_PENDING_SEASON_LEAGUE;
-sendFMImport(e.target.files[0],'season',false,pref).finally(()=>{
-FM_PENDING_SEASON_LEAGUE=null}
-)}
-;
-$('updateImportFile').onchange=e=>sendFMImport(e.target.files[0],'update');
-
-
-document.querySelectorAll('.nav').forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.page)));
-document.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.go)));
-document.querySelectorAll('[data-table-view]').forEach(b=>b.addEventListener('click',()=>{
-tableView=b.dataset.tableView;
-renderTable();
-requestAnimationFrame(fitActivePage)}
-));
-
-$('search').addEventListener('input',renderMarket);
-$('comparePlayersBtn').onclick=openComparePlayers;
-['A','B'].forEach(side=>$('compareSearch'+side).addEventListener('input',()=>compareSuggestions(side)));
-['clubFilter','posFilter','sortFilter'].forEach(id=>$(id).addEventListener('change',renderMarket));
-$('resetFilters').onclick=()=>{
-$('search').value='';
-$('clubFilter').value='';
-$('posFilter').value='';
-$('sortFilter').value='recommended';
-renderMarket()}
-;
-
-$('autoFill').onclick=autoFill;
-$('restoreUnreplaced').onclick=restoreUnreplacedTransfers;
-$('revertTransfers').onclick=revertAllTransfers;
-$('clearDraft').onclick=()=>{
-state.squad=[];
-state.starters=[];
-state.bench=[];
-state.captain=null;
-state.vice=null;
-fmRecalculateBank();
-save();
-renderAll()}
-;
-$('confirmTeam').onclick=confirmTeam;
-$('autoXI').onclick=()=>{
-autoXI();
-save();
-renderAll()}
-;
-$('confirmEntry').onclick=confirmEntry;
-$('confirmTransfers').onclick=confirmTransfers;
-$('wildcard').onclick=activateWildcard;
-$('triple').onclick=()=>toggleChip('triple');
-$('benchBoost').onclick=()=>toggleChip('bench');
-$('cancelSub').onclick=()=>{
-subFrom=null;
-renderTeam()}
-;
-$('backLeague').onclick=()=>{
-viewManager=null;
-showPage('leagues');
-if(lastLeagueIndex!==null)setTimeout(()=>openLeague(lastLeagueIndex),0)}
-;
-
-$('fixtureGW').onchange=()=>{
-fixtureViewGW=Number($('fixtureGW').value);
-renderFixtures();
-requestAnimationFrame(fitActivePage)}
-;
-$('fixtureClub').onchange=()=>{
-renderFixtures();
-requestAnimationFrame(fitActivePage)}
-;
-['fixtureShowDoubles','fixtureShowBlanks','fixtureShowRescheduled','fixtureShowPostponed'].forEach(id=>$(id).onchange=()=>renderFixtures());
-$('fixtureReset').onclick=()=>{
-$('fixtureClub').value='';
-for(const id of ['fixtureShowDoubles','fixtureShowBlanks','fixtureShowRescheduled','fixtureShowPostponed'])$(id).checked=true;
-fixtureViewGW=Math.max(1,state.currentGameweek||META.current_gameweek||1);
-$('fixtureGW').value=String(fixtureViewGW);
-ren
-
-=== HTML seasonImportBtn').addEventListener ===
-index=-1
-
-=== HTML updateImportBtn').addEventListener ===
-index=-1
-
-=== HTML sendFMImport( ===
-index=792439
-
-leted_gameweek,currentGameweek:META.current_gameweek,bank:100,lockedBank:100,news:null}
-);
-
-   state.chips=JSON.parse(JSON.stringify(DEFAULT.chips));
-state.news=fmBuildInitialNews(payload);
-
- }
-else if(!state.teamConfirmed){
-state.completedGameweek=META.completed_gameweek;
-state.currentGameweek=META.current_gameweek}
-
- else syncManagerProgressFromHistory();
-
- if(mode==='load'&&!state.news){
-state.news=fmBuildInitialNews(payload)}
-
- fixtureViewGW=(state.teamConfirmed?state.currentGameweek:META.current_gameweek)||1;
-starViewGW=Math.max(1,META.completed_gameweek||1);
-teamViewGW=state.teamConfirmed?state.currentGameweek:(META.current_gameweek||1);
-
- fmRecalculateBank();
-refreshCompetitionUI();
-refreshClubFilters();
-save();
-renderAll();
-
-}
-
-function syncMessage(text,kind=''){
-const el=$('syncStatus');
-el.textContent=text;
-el.className='syncStatus '+kind}
-
-function syncProgress(pct,label='',bad=false){
-const n=Math.max(0,Math.min(100,Math.round(Number(pct)||0))),wrap=$('syncProgress');
-wrap.classList.add('show');
-wrap.classList.toggle('bad',!!bad);
-$('syncProgressFill').style.width=n+'%';
-$('syncProgressPct').textContent=n+'%';
-if(label)$('syncProgressLabel').textContent=label}
-
-function syncBusy(on){
-$('seasonImportBtn').disabled=on;
-$('updateImportBtn').disabled=on;
-$('clearDatabaseBtn').disabled=on}
-
-async function clearFMDatabase(){
-
- if(!confirm('Clear the imported FM database and reset this fantasy save, squad, points and leagues on this browser?'))return;
-
- syncBusy(true);
-
- try{
-await fmStoredClear();
-PLAYERS.splice(0);
-MATCHES.splice(0);
-SEASON_FIXTURES.splice(0);
-CHAMP_TABLE.splice(0);
-for(const k of Object.keys(STAR_TEAMS))delete STAR_TEAMS[k];
-for(const k of Object.keys(META))delete META[k];
-Object.assign(META,{
-named_players:0,hidden_unresolved:0,completed_gameweek:0,current_gameweek:1,total_matches_extracted:0,fully_completed_gameweeks:[]}
-);
-state=fmDeepClone(DEFAULT);
-state.chips=fmDeepClone(DEFAULT.chips);
-localStorage.removeItem('fmfantasy_final_v5');
-localStorage.removeItem(FM_DEBUG_KEY);
-FM_DEBUG={
-version:'v27-postpayload-pricing',startedAt:null,mode:null,file:null,events:[],lastError:null,lastMeta:null}
-;
-fixtureViewGW=1;
-starViewGW=1;
-teamViewGW=1;
-refreshCompetitionUI();
-refreshClubFilters();
-save();
-renderAll();
-$('syncProgress').classList.remove('show','bad');
-syncMessage('Database cleared — ready for a fresh Season / Database Import.','ok')}
-
- catch(e){
-syncMessage('Could not clear database: '+String(e?.message||e),'bad')}
-
- finally{
-syncBusy(false)}
-
-}
-
-let FM_PENDING_SEASON_LEAGUE=null;
-
-async function sendFMImport(file,mode,autoRetry=false,explicitPreference=undefined){
-
- if(!file)return;
-
- if(mode==='season'&&state.teamConfirmed&&!confirm('Season / Database Import rebuilds the FM world and resets your fantasy squad. Continue?'))return;
-
- if(!autoRetry)fmDebugReset(file,mode);
-syncBusy(true);
-syncProgress(1,mode==='season'?'Starting season import…':'Starting Gameweek update…');
-syncMessage(mode==='season'?'Reading FM season/database…':'Checking FM gameweek update…');
-
- try{
-
-  const old=await fmStoredGet();
-if(mode==='update'&&!old)throw new Error('Run Season / Database Import first.');
-
-  const preferredLeague=mode==='update'?(old?.meta?.competition||null):(explicitPreference!==undefined?explicitPreference:(FM_PENDING_SEASON_LEAGUE!==null?FM_PENDING_SEASON_LEAGUE:($('leagueImportPreference')?.value||null)));
-fmDebugAdd('info',`League request: ${
-preferredLeague||'AUTO'}
-${
-mode==='season'?' (captured before file selection)':''}
-`);
-const result=await FM_RUNTIME.importFile(file,(t,pct)=>{
-syncMessage(t);
-syncProgress(pct,t);
-fmDebugAdd('progress',t,{
-percent:pct}
-)}
-,mode==='update'?old?.meta?.fingerprint:null,preferredLeague);
-
-  if(result.duplicate&&String(old?.meta?.price_merge_policy||'').includes('v67')){
-fmDebugAdd('result','Duplicate save detected — no database changes applied.');
-applyImportedPayload(old,'update');
-const processed=fmProcessCompletedGameweeks(),live=liveManagerGameweek();
-syncProgress(100,'Already up to date');
-syncMessage(processed.length?`Same save · repaired ${
-processed.length}
- completed Gameweek${
-processed.length===1?'':'s'}
- into your team total.`:live?`Same save · GW ${
-live.gw}
- remains ongoing at ${
-live.gross}
- live team pts.`:'Same save already imported — 0 database changes, nothing double-counted.','ok');
-return}
-
-  if(result.duplicate){
-result.duplicate=false;
-fmDebugAdd('info','Same save accepted once to apply v6.7 pricing correction.');
-}
-
-  let payload=result.payload,changes=null;
-
-  fmApplyPostPayloadPricingCorrections(payload);
-
-  if(mode==='update'){
-
-   changes=fmDiff(old,payload);
-const newIds=new Set((payload.players||[]).map(p=>String(p.pid))),retained=(old.players||[]).filter(p=>!newIds.has(String(p.pid))).map(p=>Object.assign({
-}
-,p,{
-available:false,departed:true,visible:true}
-));
-if(retained.length){
-payload.players.push(...retained);
-payload.meta.historical_players_retained=retained.length}
-
-   fmMergeHistoricalFixtures(old,payload);
-fmMergeHistoricalMatches(old,payload);
-fmRebuildPlayerAggregates(payload);
-const priceMoves=fmApplyDynamicPricing(old,payload,changes);
-state.news=fmBuildImportNews(changes,priceMoves,payload,old);
-
-  }
-else{
-fmInitialiseLaunchPrices(payload)}
-
-  fmDeduplicateRichMatches(payload);
-fmRebuildPlayerAggregates(payload);
-payload.star_teams=fmBuildStars(payload.players||[],Number(payload.meta?.completed_gameweek||0));
-FM_DEBUG.lastMeta=payload.meta||null;
-fmDebugAdd('result','Payload built successfully.',payload.meta||{
-}
-);
-try{
-const lm=JSON.parse(localStorage.getItem('fmfantasy_league_by_fingerprint_v1')||'{
-}
-');
-if(payload.meta?.fingerprint&&payload.meta?.competition){
-lm[payload.meta.fingerprint]=payload.meta.competition;
-localStorage.setItem('fmfantasy_league_by_fingerprint_v1',JSON.stringify(lm))}
-}
-catch(_e){
-}
-;
-syncProgress(99,'Applying imported database…');
-await fmStoredSet(payload);
-applyImportedPayload(payload,mode);
-const processed=mode==='update'?fmProcessCompletedGameweeks():[];
-const live=mode==='update'?liveManagerGameweek():null;
-
-  syncProgress(100,'Import complete');
-
-  if(mode==='season'){
-
-    const played=Number(payload.meta.played_results||0),rich=Number(payload.meta.rich_matches||0),missing=Math.max(0,played-rich);
-
-    if(played>0&&missing>0)syncMessage(`${
-payload.meta.players}
- players · ${
-payload.meta.fixtures}
- fixtures · ${
-played}
- results loaded · player detail ${
-rich}
-/${
-played}
- matches (${
-missing}
- missing). Database loaded with partial historical player coverage — no automatic re-scan was run.`,'warn');
-
-    else syncMessage(`${
-payload.meta.players}
- players · ${
-payload.meta.fixtures}
- fixtures · ${
-played}
- results loaded · player detail ${
-rich}
-/${
-played}
- matches. Historical coverage complete. Calendar Gameweeks ready.`,'ok');
-
-  }
-
-  else{
-const pts=processed.reduce((s,x)=>s+Number(x.net||0),0);
-syncMessage(`${
-changes.new_results.length}
- new results · ${
-changes.new_rich_matches}
- new rich matches · ${
-processed.length}
- Gameweek${
-processed.length===1?'':'s'}
- finalised${
-processed.length?` · ${
-pts}
- net pts`:''}
-${
-live?` · GW ${
-live.gw}
- ongoing: ${
-live.gross}
- live team pts`:''}
-.`,'ok')}
-
- }
-catch(e){
-
-  const
+console.error(
 
 === HTML function refreshCompetitionUI ===
 index=767808
