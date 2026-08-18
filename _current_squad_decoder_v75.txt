@@ -1,0 +1,139 @@
+def read_squad_list(db: bytes, head: int, next_head: int|None=None) -> list[int]:
+    end=min(next_head or len(db), head+6000)
+    at=head+26
+    while at+6<end:
+        p=db.find(b'\xff\xff\xff\xff',at,end)
+        if p<0:return []
+        cnt=u16(db,p+4)
+        if 1<=cnt<=80:
+            list_at=p+6; list_end=list_at+cnt*4
+            if list_end+8<=end:
+                vals=[u32(db,list_at+i*4) for i in range(cnt)]
+                if all(0<v<3_000_000 for v in vals) and len(set(vals))==cnt:
+                    cap=u32(db,list_end); vice=u32(db,list_end+4)
+                    consistent=lambda v: v in (0,0xFFFFFFFF) or v in vals
+                    asc=sum(1 for a,b in zip(vals[:7],vals[1:8]) if a<b)
+                    if (asc>=min(6,max(0,len(vals)-1)) or cap in vals or vice in vals or (consistent(cap) and consistent(vice))):
+                        return vals
+        at=p+1
+    return []
+
+
+def _rich_members_by_club(rich:list[dict[str,Any]]|None, selected_clubs:dict[int,Club])->dict[int,set[int]]:
+    out=collections.defaultdict(set)
+    if not rich:return out
+    byname={}
+    for eid,c in selected_clubs.items():
+        byname[normalize_club_name(c.name)]=eid
+        byname[normalize_club_name(c.short)]=eid
+    for m in rich:
+        for side,key in (('home','home_players'),('away','away_players')):
+            ceid=byname.get(normalize_club_name(m.get(side,'')))
+            if ceid is None:continue
+            for r in m.get(key,[]):
+                try:out[ceid].add(int(r['player_id']))
+                except Exception:pass
+    return out
+
+
+def selected_rich_team_aliases(selected_clubs:dict[int,Club])->dict[int,str]:
+    """Build unambiguous match-header aliases only for clubs in the already-selected league.
+
+    This is deliberately post-selection: it cannot influence which league/season is selected.
+    It exists only to recover player history in saves whose retained match headers use a
+    different team-id namespace from the original Championship regression save.
+    """
+    aliases=collections.defaultdict(set)
+    for c in selected_clubs.values():
+        name=normalize_club_name(c.short or c.name)
+        for key in (c.uid+1,c.uid,c.eid,c.eid+1):
+            if isinstance(key,int) and key>0: aliases[key].add(name)
+    return {k:next(iter(v)) for k,v in aliases.items() if len(v)==1}
+
+
+def scan_first_team_squads(db: bytes, selected_clubs: dict[int,Club], rich:list[dict[str,Any]]|None=None):
+    """Decode CURRENT senior squad membership from club/team records only.
+
+    Retained match history is deliberately forbidden from adding, moving, selecting or
+    resolving current club membership. If a current first-team list cannot be decoded
+    conservatively, the import must fail upstream rather than inventing a squad.
+    """
+    heads=[]
+    for eid,c in selected_clubs.items():
+        needle=struct.pack('<I',eid)+b'\x00'*10
+        p=0
+        while True:
+            p=db.find(needle,p)
+            if p<0:break
+            if p+26<=len(db) and u32(db,p+18)==c.uid and u32(db,p+22)==c.uid:
+                heads.append((p,eid,'strict'))
+            p+=1
+    heads.sort()
+    byclub=collections.defaultdict(list)
+    for p,eid,kind in heads:byclub[eid].append((p,kind))
+    all_heads=sorted(p for ps in byclub.values() for p,_ in ps)
+    out={};diag={'fallbacks':[],'missing_club_eids':[],'rich_augmented_players':0,
+                 'policy':'strict_current_db_membership_only_v68','rejected_options':0,
+                 'ambiguous_squad_blocks':[],'consensus_squad_blocks':0}
+    conflicted_clubs=set()
+
+    def choose_options(eid,options):
+        valid=[]
+        for p,vals,kind in options:
+            if not (12<=len(vals)<=45):
+                diag['rejected_options']+=1;continue
+            priority=2 if kind=='strict' else 1
+            valid.append((priority,p,vals,kind))
+        if not valid:return None
+        best_priority=max(x[0] for x in valid)
+        peers=[x for x in valid if x[0]==best_priority]
+        byset=collections.defaultdict(list)
+        for priority,p,vals,kind in peers:byset[tuple(sorted(set(vals)))].append((p,vals,kind))
+        if len(byset)==1:
+            group=next(iter(byset.values()))
+            if len(group)>1:diag['consensus_squad_blocks']+=1
+            group.sort(key=lambda x:(abs(len(x[1])-28),x[0]))
+            return group[0]
+        # v74: equally-authoritative current-DB blocks that disagree on membership are
+        # evidence of schema ambiguity, not permission to select the earliest/28-sized block.
+        conflicted_clubs.add(eid)
+        diag['ambiguous_squad_blocks'].append({'club_eid':eid,'priority':best_priority,'candidates':[{'offset':p,'kind':kind,'players':len(vals),'sample_player_eids':list(vals[:8])} for _,p,vals,kind in peers]})
+        return None
+
+    # Exact team-eid + duplicated club-uid header is the authoritative path.
+    for eid in selected_clubs:
+        options=[]
+        for p,kind in byclub.get(eid,[]):
+            i=bisect.bisect_right(all_heads,p);nxt=all_heads[i] if i<len(all_heads) else None
+            vals=read_squad_list(db,p,nxt)
+            if vals:options.append((p,vals,kind))
+        chosen=choose_options(eid,options)
+        if chosen:
+            _p,vals,_kind=chosen;out[eid]=vals
+
+    # Conservative fallback: same selected team eid, its club uid nearby, plausible senior size.
+    # No retained-match overlap is used for selection.
+    for eid,c in selected_clubs.items():
+        if eid in out or eid in conflicted_clubs:continue
+        options=[];needle=struct.pack('<I',eid);p=0;seen=set();uidb=struct.pack('<I',c.uid)
+        while True:
+            p=db.find(needle,p)
+            if p<0:break
+            if p in seen:p+=1;continue
+            seen.add(p)
+            window=db[p:min(len(db),p+72)]
+            if uidb not in window:
+                p+=1;continue
+            vals=read_squad_list(db,p,None)
+            if vals:options.append((p,vals,'relaxed_uid'))
+            p+=1
+        chosen=choose_options(eid,options)
+        if chosen:
+            _p,vals,kind=chosen;out[eid]=vals
+            diag['fallbacks'].append({'club_eid':eid,'method':kind,'players':len(vals)})
+
+    for eid in selected_clubs:
+        if eid not in out:
+            out[eid]=[];diag['missing_club_eids'].append(eid)
+    return out,diag
+
