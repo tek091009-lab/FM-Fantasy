@@ -1,0 +1,72 @@
+from __future__ import annotations
+import base64,gzip,json,re,traceback
+from pathlib import Path
+
+ROOT=Path(__file__).resolve().parents[1]
+PARTS=[ROOT/'app'/f'part{i:02d}' for i in range(17)]+[ROOT/'app'/f'fix{i}' for i in range(17,21)]
+OUT=ROOT/'_preflight_v70.json'
+
+def main():
+    result={'ok':False,'checks':{},'errors':[]}
+    try:
+        html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in PARTS))).decode('utf-8')
+        m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
+        result['checks']['embedded_importer']=bool(m)
+        if not m: raise RuntimeError('embedded importer missing')
+        py=base64.b64decode(m.group(1)).decode('utf-8')
+        required=[
+            'strict_current_db_membership_only_v68',
+            'strict-db-membership-only-no-history-mutation-v68',
+            'v68_current-squad-authority_previous-gws_quarantined',
+            'v68_current-squad-authority_previous-gws-quarantined',
+            'def _rich_candidate_twenty_pairs',
+            'named_header_candidate_v69',
+            'official-score-plus-strict-current-cohort-v69',
+            'rich_fixture_coverage',
+            'same_match_both_clubs',
+        ]
+        # The quarantine marker had one spelling across intermediate builds; accept the final hyphenated marker.
+        required.remove('v68_current-squad-authority_previous-gws_quarantined')
+        result['checks']['required_tokens']={x:(x in py) for x in required}
+        forbidden=[
+            "cur.extend(add);diag['rich_augmented_players']+=len(add)",
+            'if played_club.get(eid) in clubs: ceid=played_club[eid]',
+            'infer_hybrid_positions_from_match_markers(rich,players_by_eid)',
+            "candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates",
+            'bounded 18-22 rows per side',
+        ]
+        result['checks']['forbidden_tokens']={x:(x in py) for x in forbidden}
+        compile(py,'fm_importer_preflight_v70.py','exec')
+        result['checks']['compile']=True
+        ns={'__name__':'fm_importer_preflight_v70'}
+        exec(compile(py,'fm_importer_preflight_v70.py','exec'),ns,ns)
+        result['checks']['candidate_function']=callable(ns.get('_rich_candidate_twenty_pairs'))
+        def row(pid,off): return {'player_id':pid,'offset':off,'goals':0,'own_goals':0}
+        left=[row(i+1,i*100) for i in range(20)]
+        right=[row(101+i,5000+i*100) for i in range(20)]
+        pairs=ns['_rich_candidate_twenty_pairs'](left+right) if callable(ns.get('_rich_candidate_twenty_pairs')) else []
+        result['checks']['synthetic_20x20']=bool(pairs and len(pairs[0][0])==20 and len(pairs[0][1])==20)
+        result['checks']['availability_tokens']={x:(x in py) for x in ['structural-v2-fixture-floor','fixture_floor','full<=save_date','expiry<=save_date']}
+        start=html.find('function fmAvailabilityTruthDate(payload){');end=html.find('function fmBuildInitialNews(payload){',start)
+        block=html[start:end] if start>=0 and end>start else ''
+        result['checks']['availability_block']=bool(block)
+        result['checks']['availability_direct']={x:(x in block) for x in ['discipline.dat/active-ban-v1','injury_manager.dat/current-window']}
+        result['checks']['availability_forbidden']={x:(x in block) for x in ['5 yellow cards','second-yellow red','fmClubPlayedAfter(payload,p.club,inc.date)']}
+        ug=(ROOT/'updateguard.js').read_text();cf=(ROOT/'clearfix.js').read_text();idx=(ROOT/'index.html').read_text()
+        result['checks']['update_guard_v3']='world-update-guard-v3-identity-history-safe' in ug
+        result['checks']['backed_reset']='fmfantasy_reset_world_season' in cf and 'fmFantasyLastSeasonResetBackup' in cf
+        result['checks']['index_versions']={x:(x in idx) for x in ['availabilitytruth.js?v=4','updateguard.js?v=3','clearfix.js?v=2']}
+        values=[]
+        for k,v in result['checks'].items():
+            if isinstance(v,bool): values.append(v)
+            elif isinstance(v,dict):
+                if k in ('forbidden_tokens','availability_forbidden'): values.extend(not x for x in v.values())
+                else: values.extend(v.values())
+        result['ok']=all(values)
+    except Exception as e:
+        result['errors'].append(repr(e));result['traceback']=traceback.format_exc()
+    OUT.write_text(json.dumps(result,indent=2,sort_keys=True)+'\n')
+    print(json.dumps(result,indent=2,sort_keys=True))
+    return 0
+
+if __name__=='__main__': raise SystemExit(main())
