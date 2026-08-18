@@ -1,0 +1,34 @@
+name: Upgrade retained member minimum v65
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/upgrade_history_min_member_v65.py'
+      - '.github/workflows/upgrade-history-min-member-v65.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch embedded importer
+        run: python scripts/upgrade_history_min_member_v65.py
+      - name: Verify generated importer
+        run: |
+          git diff --check
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('scripts/history_recovery_v53.pyfrag').read_text()
+          assert 'if len(stats)<36:continue' in s
+          assert "sub40_stat_members" in s
+          assert 'range(18,23)' in Path('scripts/upgrade_history_variable_squads_v64.py').read_text()
+          print('retained member minimum checks passed')
+          PY
+      - name: Commit production upgrade
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/history_recovery_v53.pyfrag app/part* app/fix*
+          git commit -m "Admit smaller retained match blocks"
+          git push origin HEAD:main
