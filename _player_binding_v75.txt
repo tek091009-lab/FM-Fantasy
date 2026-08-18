@@ -1,0 +1,686 @@
+def bind_target_people(db:bytes,target_eids:set[int]):
+    fore_index,sur_index,_common_index,bounds,table_end=find_name_pool_index(db)
+    # Full person offset spine is compact (~75k integers) and is needed to stop an
+    # ability block belonging to a neighbouring non-target person being misbound.
+    person_offsets=scan_person_offsets(db,table_end,fore_index,sur_index)
+    chain=identity_chain(db,table_end)
+    targets={eid:(iat,uid) for iat,eid,uid in chain if eid in target_eids}
+    target_prefix={}
+    for eid,(iat,_uid) in targets.items():
+        idx=bisect.bisect_right(person_offsets,iat)-1
+        if idx<0:continue
+        pat=person_offsets[idx]
+        if iat-pat<=650:target_prefix[eid]=pat
+    # Resolve only the few hundred string IDs the Championship squad actually uses.
+    first_ids=set();sur_ids=set();common_ids=set();details={}
+    for eid,pat in target_prefix.items():
+        first,sur,com,inline=_prefix_ids(db,pat);details[eid]=(first,sur,com,inline)
+        first_ids.add(first);sur_ids.add(sur)
+        if com!=0xFFFFFFFF:common_ids.add(com)
+    fore=resolve_pool_ids(db,bounds[0],first_ids);sur=resolve_pool_ids(db,bounds[1],sur_ids);common=resolve_pool_ids(db,bounds[2],common_ids)
+    ability=scan_target_abilities(db,person_offsets,set(target_prefix.values()))
+    out={}
+    for eid,pat in target_prefix.items():
+        iat,uid=targets[eid];first,surname,com,inline=details[eid]
+        if first not in fore or surname not in sur:continue
+        first_text=fore[first]; surname_text=sur[surname]
+        name=inline or f'{first_text} {surname_text}'
+        cname=None if com==0xFFFFFFFF else common.get(com)
+        positions=None;ca=pa=None
+        if pat in ability:positions,ca,pa=ability[pat]
+        person_obj=Person(eid,uid,pat,name,cname,first_text,surname_text,positions,ca,pa)
+        person_obj.first_name=fore.get(first)
+        person_obj.surname_name=sur.get(surname)
+        person_obj.common_name_id=None if com==0xFFFFFFFF else com
+        person_obj.first_name_id=first
+        person_obj.surname_name_id=surname
+        out[eid]=person_obj
+    return out
+
+def fantasy_position(positions:list[int]|None)->str:
+    if not positions:return 'MID'
+    gk=positions[0]
+    d=max(positions[i] for i in DEF_SLOTS)
+    m=max(positions[i] for i in MID_SLOTS)
+    f=positions[FWD_SLOT]
+    overall=max(gk,d,m,f)
+    if gk==overall and gk>=15:return 'GK'
+    # Keep a genuine natural midfield role over an equally-rated ST (e.g. Bowen).
+    # Exact match-by-match position usage is not guessed until its FM marker is decoded.
+    if m==overall and m>=15:return 'MID'
+    if d==overall and d>=15:return 'DEF'
+    if f==overall and f>=15:return 'FWD'
+    if gk==overall:return 'GK'
+    if m==overall:return 'MID'
+    if d==overall:return 'DEF'
+    return 'FWD'
+
+def price_from_ca(pos:str,ca:int|None)->float:
+    # Provisional only. The final launch price is assigned by reprice_players after role/depth/history are known.
+    ca=ca or 100
+    base={'GK':4.0,'DEF':4.0,'MID':4.5,'FWD':4.5}[pos]
+    extra=max(0.0,(ca-110)/25.0)
+    return round(max(base,min(10.0,base+extra))*2)/2
+
+
+def _clamp(x:float,a:float=0.0,b:float=1.0)->float:return max(a,min(b,x))
+
+
+def _fm_struct_date(v:int):
+    try:
+        year=int(v)>>16; doy=int(v)&0x1FF
+        if year<1900 or year>2200 or doy<1 or doy>366:return None
+        return dt.date(year,1,1)+dt.timedelta(days=doy-1)
+    except Exception:return None
+
+
+def _structural_availability_from_fs(players:list[dict[str,Any]],fixtures:list[dict[str,Any]]|None=None)->dict[str,Any]:
+    """Read active availability from FM's dedicated manager members.
+
+    This deliberately binds records by player EID. It does not infer an injury from missed
+    matches, names, cards or nearby bytes. Unknown structure remains unknown.
+    """
+    fixtures=fixtures or []
+    byid={int(p.get('pid') or p.get('id') or 0):p for p in players}
+    out={'decoder':'structural-v2-fixture-floor','save_date':None,'injury_records':0,'injured_players':0,
+         'suspension_records':0,'suspended_players':0,'injury_source':'injury_manager.dat',
+         'suspension_source':'discipline.dat'}
+    save_date=None
+    # Dates inside injury_manager.dat describe injury windows, not necessarily the current
+    # save date. The latest played league fixture is a hard lower bound for the save timeline.
+    # Never allow an older injury-table date to move the availability clock backwards.
+    fixture_dates=[]
+    for f in fixtures:
+        if f.get('status')!='played' or not f.get('date'):continue
+        try:fixture_dates.append(dt.date.fromisoformat(str(f['date'])[:10]))
+        except Exception:pass
+    fixture_floor=max(fixture_dates) if fixture_dates else None
+
+    ip=Path('/tmp/injury_manager.dat')
+    if ip.exists():
+        try:
+            b=ip.read_bytes();ip.unlink(missing_ok=True)
+            c1=u32(b,12);s1=16;e1=s1+c1*14
+            if 0<c1<2_000_000 and e1+4<=len(b):
+                c2=u32(b,e1);s2=e1+4;e2=s2+c2*14
+                if 0<=c2<2_000_000 and e2+4<=len(b):
+                    c3=u32(b,e2);s3=e2+4;e3=s3+c3*13
+                    if 0<=c3<2_000_000 and e3+4<=len(b):
+                        c4=u32(b,e3);s4=e3+4;e4=s4+c4*15
+                        if 0<=c4<5_000_000 and e4<=len(b):
+                            past=[];future=[]
+                            for i in range(c4):
+                                d=_fm_struct_date(u32(b,s4+i*15+1))
+                                if d:past.append(d)
+                            for i in range(c1):
+                                d=_fm_struct_date(u32(b,s1+i*14+1))
+                                if d:future.append(d)
+                            if past:save_date=max(past)
+                            if save_date is None and future:save_date=min(future)
+                            if fixture_floor and (save_date is None or fixture_floor>save_date):save_date=fixture_floor
+                            seen=set();recs=0
+                            for i in range(c2):
+                                o=s2+i*14
+                                earliest=_fm_struct_date(u32(b,o+1));full=_fm_struct_date(u32(b,o+5));eid=u32(b,o+9)
+                                if not full or not save_date or full<=save_date:continue
+                                p=byid.get(int(eid))
+                                if not p:continue
+                                days=max(0,(full-save_date).days)
+                                p['injury_status']='injured';p['injured']=True
+                                p['injury_type']=p.get('injury_type') or 'Injury'
+                                p['expected_return_date']=full.isoformat();p['injury_return_date']=full.isoformat();p['injured_until']=full.isoformat()
+                                p['injury_days_remaining']=days
+                                p['injury_evidence']={'source':'injury_manager.dat/current-window-v1','earliest_return':earliest.isoformat() if earliest else None,'expected_return':full.isoformat(),'days_remaining':days}
+                                seen.add(int(eid));recs+=1
+                            out['injury_records']=recs;out['injured_players']=len(seen)
+        except Exception as e:out['injury_error']=str(e)[:220]
+
+    if fixture_floor and (save_date is None or fixture_floor>save_date):save_date=fixture_floor
+    out['save_date']=save_date.isoformat() if save_date else None
+
+    dp=Path('/tmp/discipline.dat')
+    if dp.exists():
+        try:
+            b=dp.read_bytes();dp.unlink(missing_ok=True);count=u32(b,12) if len(b)>=16 else 0
+            # FM26 active discipline rows have a stable entity prefix but a 59/60-byte variant,
+            # so locate starts structurally rather than stepping a guessed row size.
+            starts=[];pos=16
+            while pos+20<=len(b) and len(starts)<count:
+                found=-1
+                for q in range(pos,min(len(b)-20,pos+96)):
+                    if b[q]==0 and q+13<len(b) and b[q+7:q+13]==b'\x02\x00\xff\xff\x06\x01':found=q;break
+                if found<0:break
+                starts.append(found);pos=found+1
+            seen=set();recs=0
+            for s in starts:
+                eid=u32(b,s+1);expiry=_fm_struct_date(u32(b,s+14));p=byid.get(int(eid))
+                if not p or not expiry or (save_date and expiry<=save_date):continue
+                # A row in discipline.dat is itself evidence of an active FM ban.
+                # Count unplayed league fixtures through the expiry date where possible,
+                # including a same-day fixture when the save was taken before kick-off.
+                games=1
+                if save_date and p.get('club'):
+                    upcoming=set()
+                    for f in fixtures:
+                        try:fd=dt.date.fromisoformat(str(f.get('date') or '')[:10])
+                        except Exception:continue
+                        if fd<save_date or fd>expiry:continue
+                        if f.get('status')=='played':continue
+                        if p.get('club') in (f.get('home'),f.get('away')):upcoming.add(fd)
+                    if upcoming:games=max(1,len(upcoming))
+                p['suspension_status']='suspended';p['suspended']=True;p['banned_until']=expiry.isoformat()
+                p['suspension_games_remaining']=games;p['suspension_remaining']=games;p['ban_games_remaining']=games
+                p['suspension_detail']='Active FM suspension'
+                p['suspension_evidence_structural']={'source':'discipline.dat/active-ban-v1','expiry':expiry.isoformat(),'games_remaining':games}
+                seen.add(int(eid));recs+=1
+            out['suspension_records']=recs;out['suspended_players']=len(seen)
+        except Exception as e:out['suspension_error']=str(e)[:220]
+    return out
+
+def _role_profile(p:dict[str,Any])->tuple[str,float]:
+    ps=p.get('positions') or {}
+    v=lambda k:float(ps.get(k,0) or 0)
+    pos=p.get('pos')
+    if pos=='GK':return 'Goalkeeper',0.0
+    if pos=='DEF':
+        wing=max(v('DL'),v('DR'),v('WBL'),v('WBR'))/20.0
+        midfield_wide=max(v('ML'),v('MR'),v('AML'),v('AMR'))/20.0
+        cb=v('DC')/20.0
+        attack=_clamp(0.08+0.38*wing+0.20*midfield_wide)
+        label='Wide DEF/MID hybrid' if midfield_wide>=0.75 else ('Attacking full-back / wing-back' if wing>=0.75 and wing>=cb else 'Centre-back / defensive defender')
+        return label,attack
+    if pos=='FWD':return 'Forward',0.98
+    attacking=max(v('AML'),v('AMC'),v('AMR'),v('ST'))/20.0
+    wide=max(v('ML'),v('MR'))/20.0
+    central=v('MC')/20.0; defensive=v('DM')/20.0
+    attack=_clamp(max(attacking,0.72*wide,0.40*central))
+    if defensive>=0.75 and attacking<0.60 and wide<0.70:
+        attack=min(attack,0.28);return 'Defensive midfielder',attack
+    if attacking>=0.75:return 'Attacking midfielder / winger',attack
+    if wide>=0.70:return 'Wide midfielder',attack
+    return 'Central midfielder',max(0.30,attack)
+
+
+
+def reprice_players(players:list[dict[str,Any]], fixtures:list[dict[str,Any]]|None=None)->None:
+    """FPL-shaped v6.5 role-projection launch pricing.
+
+    Launch prices are set once at Season / Database Import.  Later Gameweek imports do
+    not re-run this model as the market price; the browser applies small, sustained-form
+    changes from the launch value.  This model therefore focuses on the player's value
+    *at the import date*: quality, role, actual availability, depth and team strength.
+    """
+    if not players:return
+    fixtures=fixtures or []
+    bypos=collections.defaultdict(list)
+    for p in players:bypos[p['pos']].append(p)
+    pct={}
+    for pos,arr in bypos.items():
+        vals=sorted(float(p.get('ca') or 100) for p in arr)
+        for p in arr:
+            ca=float(p.get('ca') or 100);rank=bisect.bisect_right(vals,ca)-1;rel=rank/max(1,len(vals)-1)
+            absolute=_clamp((ca-100.0)/80.0)
+            pct[p['id']]=0.40*rel+0.60*absolute
+
+    club_quality_raw={}
+    for club in {p['club'] for p in players}:
+        vals=sorted((float(p.get('ca') or 90) for p in players if p['club']==club),reverse=True)[:16]
+        club_quality_raw[club]=sum(vals)/max(1,len(vals))
+    qvals=sorted(club_quality_raw.values())
+    club_quality={c:(bisect.bisect_right(qvals,v)-1)/max(1,len(qvals)-1) for c,v in club_quality_raw.items()}
+
+    perf=collections.defaultdict(lambda:{'p':0,'pts':0,'gd':0,'dates':[]})
+    for f in fixtures:
+        if f.get('status')!='played':continue
+        h,a=f.get('home'),f.get('away');hs=int(f.get('home_score') or 0);as_=int(f.get('away_score') or 0);date=f.get('date')
+        if not h or not a:continue
+        for c in (h,a):
+            perf[c]['p']+=1
+            if date:perf[c]['dates'].append(date)
+        perf[h]['gd']+=hs-as_;perf[a]['gd']+=as_-hs
+        if hs>as_:perf[h]['pts']+=3
+        elif hs<as_:perf[a]['pts']+=3
+        else:perf[h]['pts']+=1;perf[a]['pts']+=1
+
+    club_strength={}
+    for c in club_quality:
+        d0=perf[c]
+        if d0['p']>=3:
+            ppg=d0['pts']/(3*d0['p']);gdpg=d0['gd']/d0['p'];live=_clamp(0.74*ppg+0.26*((gdpg+2.0)/4.0))
+            live_weight=0.64 if d0['p']>=5 else 0.48
+            club_strength[c]=(1-live_weight)*club_quality[c]+live_weight*live
+        else:club_strength[c]=club_quality[c]
+
+    club_matches={c:int(perf[c]['p']) for c in club_quality}
+    # Some FM saves expose league results but no retained player-match detail. In that case
+    # '0 minutes' means unknown coverage, not a genuine unused reserve. Never collapse an
+    # entire league to basement prices because match-detail coverage is absent.
+    club_usage_coverage={c:any(float(p.get('minutes') or 0)>0 or bool(p.get('history')) for p in players if p.get('club')==c) for c in club_quality}
+    groups=collections.defaultdict(list)
+    for p in players:groups[(p['club'],p['pos'])].append(p)
+    depth={};group_active={};usage_rank={}
+    for (club,pos),arr in groups.items():
+        ability_order=sorted(arr,key=lambda p:(float(p.get('ca') or 0),float(p.get('pa') or 0)),reverse=True)
+        used_order=sorted(arr,key=lambda p:(float(p.get('minutes') or 0),float(p.get('starts') or 0),float(p.get('ca') or 0)),reverse=True)
+        group_active[(club,pos)]=used_order[0] if used_order else None
+        usage_rank.update({p['id']:i for i,p in enumerate(used_order)})
+        for i,p in enumerate(ability_order):
+            if pos=='GK':d=[1.0,0.35,0.07][min(i,2)] if i<3 else 0.03
+            elif pos=='FWD':d=max(0.18,1.0-0.24*i)
+            elif pos=='DEF':d=max(0.28,1.0-0.12*i)
+            else:d=max(0.25,1.0-0.12*i)
+            depth[p['id']]=d
+
+    raw_scores={}
+    for p in players:
+        q=_clamp(pct.get(p['id'],0.35));role,attack=_role_profile(p);club=p['club'];games=club_matches.get(club,0);d=depth.get(p['id'],0.5)
+        mins=float(p.get('minutes',0) or 0);starts=float(p.get('starts',0) or 0);hist=p.get('history') or []
+        # A recent signing should be judged on fixtures he could actually have played.
+        first_dates=sorted(str(h.get('date')) for h in hist if h.get('date') and float(h.get('minutes') or 0)>0)
+        first_play=first_dates[0] if first_dates else None
+        club_dates=sorted(perf[club]['dates'])
+        available_games=games;late_arrival=False
+        if first_play and club_dates and first_play>club_dates[0]:
+            after=sum(1 for x in club_dates if x>=first_play)
+            # Only use the late-arrival window when the player has clearly participated
+            # in it; this stops pre-transfer league matches making a new signing look unused.
+            if after and len(first_dates)>=min(1,after):
+                available_games=max(1,after);late_arrival=(available_games<games)
+        share=_clamp(mins/(90.0*available_games)) if available_games else 0.0
+        start_share=_clamp(starts/available_games) if available_games else 0.0
+        active=group_active.get((club,p['pos']));ca=float(p.get('ca') or 100);active_ca=float(active.get('ca') or 100) if active else ca
+        _status_text=' '.join(str(p.get(k) or '').lower() for k in ('injury_status','suspension_status','status'))
+        current_unavailable=bool(p.get('injured') or p.get('suspended') or 'injur' in _status_text or 'suspend' in _status_text or p.get('injury_return_date') or p.get('injury_evidence'))
+        # Missing games are excused only for a ZERO-MINUTE player who has real senior-role
+        # evidence. This prevents a low-CA injured reserve being treated as a nailed starter.
+        established_absence=bool(current_unavailable and mins<=0 and (q>=0.55 or d>=0.55 or ca>=130))
+        absence_excused=established_absence
+        expected_exception=established_absence
+        if available_games>=1 and club_usage_coverage.get(club,False):
+            actual_role=_clamp(0.66*share+0.34*start_share)
+            nailed=_clamp(0.86*actual_role+0.14*d)
+            if expected_exception:nailed=max(0.68,d*0.80)
+        else:nailed=d
+        team=_clamp(club_strength.get(club,0.5));pos=p['pos']
+
+        # Add real attacking output to the positional-role estimate without letting a tiny
+        # sample dominate.  This separates an attacking wing-back/creator from a CB/DM.
+        ga=float(p.get('goals',0) or 0)+float(p.get('assists',0) or 0)
+        ga90=(ga*90.0/mins) if mins>=90 else 0.0
+        output_weight=_clamp(mins/720.0,0.0,0.42)
+        observed_attack=_clamp(ga90/0.62)
+        attack=_clamp((1-output_weight)*attack+output_weight*observed_attack)
+
+        if games>=2 and mins==0 and not expected_exception and club_usage_coverage.get(club,False):
+            raw=min(4.5,3.5+0.42*q+0.20*d);availability='No minutes · basement price'
+        else:
+            availability=('Recent arrival · judged since first appearance' if late_arrival else
+                          ('Expected role exception' if expected_exception else ('Observed role' if games>=2 and club_usage_coverage.get(club,False) else ('Squad-role projection · player match detail unavailable' if games>=2 else 'Pre-season projection'))))
+            if pos=='GK':
+                raw=3.70+0.30*q+0.78*nailed+0.82*team;raw=min(5.5,raw)
+            elif pos=='DEF':
+                # Team quality matters, but attacking threat is required for true premium territory.
+                raw=3.60+0.48*q+0.92*nailed+0.78*attack+1.42*team+0.18*(q**4)
+            elif pos=='MID' and attack<0.34:
+                raw=4.10+0.48*q+1.00*nailed+0.26*attack+0.72*team+0.12*(q**3);raw=min(6.8,raw)
+            elif pos=='MID':
+                raw=4.10+0.72*q+1.18*nailed+1.70*attack+0.82*team+4.15*(q**4)*(0.30+0.70*nailed)*(0.40+0.60*attack)
+                if q>=0.94 and nailed>=0.82 and attack>=0.72 and team>=0.65:raw+=0.8
+                raw=min(15.0,raw)
+            else:
+                raw=4.10+0.76*q+1.28*nailed+1.22*attack+0.92*team+3.85*(q**4)*(0.24+0.76*nailed)
+                if q>=0.95 and nailed>=0.82 and team>=0.58:raw+=0.6
+                raw=min(14.5,raw)
+
+        # Usage beats reputation once there is evidence, but use AVAILABLE games rather
+        # than all club games so a newly-signed starter is not labelled a backup.
+        if available_games>=3 and club_usage_coverage.get(club,False) and not expected_exception:
+            if share<0.15:
+                raw=min(raw,{'GK':4.0,'DEF':4.5,'MID':4.5,'FWD':5.0}[pos]);availability='Rarely used backup'
+            elif share<0.35:
+                raw=min(raw,{'GK':4.5,'DEF':5.0,'MID':5.2,'FWD':5.5}[pos]);availability='Backup / rotation'
+            elif share<0.55:
+                raw-=0.35;availability='Rotation / partial starter'
+
+        # League position/performance should materially separate equivalent players.
+        if games>=3:
+            if pos=='FWD':
+                if team<0.28:raw=min(raw,6.0)
+                elif team<0.45:raw=min(raw,6.5)
+                elif team<0.58:raw=min(raw,7.0)
+            elif pos=='DEF':
+                if team<0.28:raw=min(raw,4.7)
+                elif team<0.42:raw=min(raw,5.2)
+            elif pos=='MID' and attack<0.45 and team<0.45:raw=min(raw,5.5)
+
+        raw_scores[p['id']]=raw
+        p['price_context']={'quality':round(q,3),'nailedness':round(nailed,3),'minutes_share':round(share,3),
+                            'start_share':round(start_share,3),'usage_rank':usage_rank.get(p['id'],0)+1,'role':role,
+                            'attack_profile':round(attack,3),'depth_score':round(d,3),'team_strength':round(team,3),
+                            'observed_matches':games,'available_matches':available_games,'late_arrival':late_arrival,
+                            'first_appearance_date':first_play,'availability_signal':availability,
+                            'zero_minute_exception':expected_exception,'ga_per90':round(ga90,3)}
+
+    # v6.1: the raw FM-derived model decides ordering; positional rank then controls
+    # the shape of the market. Premium prices are deliberately scarce and the middle/
+    # value tiers step down rather than bunching at one high cap.
+    ranked={pos:sorted((p for p in players if p['pos']==pos),key=lambda p:raw_scores[p['id']],reverse=True) for pos in ('GK','DEF','MID','FWD')}
+    for pos,arr in ranked.items():
+        for i,p in enumerate(arr):
+            raw=raw_scores[p['id']];c=p['price_context'];att=float(c['attack_profile']);team=float(c['team_strength']);nailed=float(c['nailedness']);q=float(c['quality'])
+            c['position_price_rank']=i+1
+            if p.get('minutes',0)==0 and c['observed_matches']>=2 and club_usage_coverage.get(p.get('club'),False) and not c['zero_minute_exception']:
+                raw=min(raw,{'GK':4.0,'DEF':4.5,'MID':4.5,'FWD':5.0}[pos])
+            elif p.get('minutes',0)==0 and c['zero_minute_exception']:
+                _floor={'GK':4.5,'DEF':5.0,'MID':5.5,'FWD':6.0}[pos]
+                _cap={'GK':5.0,'DEF':5.5,'MID':7.0,'FWD':7.5}[pos]
+                raw=max(_floor,min(raw,_cap))
+            elif pos=='GK':
+                # Two genuine premium keepers, a small £5.0m tier, then normal £4.5m territory.
+                cap=5.5 if i<2 else 5.0 if i<8 else 4.5
+                raw=min(raw,cap)
+            elif pos=='DEF':
+                # £6.0m+ is premium. After the premium group, force distinct £5.5/£5.0/£4.5
+                # ceilings so a strong league cannot turn most starting defenders expensive.
+                if att<0.42:
+                    if i<3 and team>=0.78 and nailed>=0.84:cap=6.0
+                    elif i<18:cap=5.5
+                    elif i<60:cap=5.0
+                    else:cap=4.5
+                    raw=min(raw,cap)
+                elif i==0 and team>=0.70 and att>=0.58:
+                    raw=min(7.5,raw+0.35)
+                elif i<3 and team>=0.58:
+                    raw=min(raw,6.5)
+                elif i<6:
+                    raw=min(raw,6.0)
+                elif i<18:
+                    raw=min(raw,5.5)
+                elif i<60:
+                    raw=min(raw,5.0)
+                else:
+                    raw=min(raw,4.5)
+            elif pos=='MID':
+                if att<0.34:
+                    # Defensive midfielders are priced for fantasy role, not reputation.
+                    if i<8 and q>=0.88 and team>=0.62 and nailed>=0.80:cap=6.0
+                    elif i<45:cap=5.5
+                    else:cap=5.0
+                    raw=min(raw,cap)
+                else:
+                    cap=(15.0 if i<2 else 12.5 if i<5 else 10.5 if i<10 else 9.0 if i<20
+                         else 8.0 if i<40 else 7.0 if i<80 else 6.5 if i<140 else 6.0)
+                    raw=min(raw,cap)
+            else: # FWD
+                cap=(14.0 if i<2 else 11.5 if i<5 else 9.5 if i<10 else 8.0 if i<20
+                     else 7.5 if i<40 else 7.0 if i<80 else 6.5)
+                raw=min(raw,cap)
+            obs=max(0,int(c.get('observed_matches') or 0))
+            arrival=None
+            for _k in ('club_join_date','joined_date','date_joined','transfer_date','arrival_date','signed_date'):
+                _v=p.get(_k)
+                if not _v:continue
+                try:arrival=dt.date.fromisoformat(str(_v)[:10]);break
+                except Exception:pass
+            if arrival and p.get('club'):
+                eligible=set()
+                for _f in fixtures:
+                    if _f.get('status')!='played' or p.get('club') not in (_f.get('home'),_f.get('away')):continue
+                    try:_fd=dt.date.fromisoformat(str(_f.get('date') or '')[:10])
+                    except Exception:continue
+                    if _fd>=arrival:eligible.add(_fd)
+                obs=len(eligible)
+                c['current_club_observed_matches']=obs
+                c['arrival_date']=arrival.isoformat()
+                c['new_arrival']=obs<2
+            else:
+                c['new_arrival']=False
+            mins=max(0.0,float(p.get('minutes') or 0))
+            minute_share=min(1.0,mins/max(1.0,obs*90.0)) if obs else 0.0
+            _status_text=' '.join(str(p.get(k) or '').lower() for k in ('injury_status','suspension_status','status'))
+            current_unavailable=bool(p.get('injured') or p.get('suspended') or 'injur' in _status_text or 'suspend' in _status_text or p.get('injury_return_date') or p.get('injury_evidence'))
+            q0=float(c.get('quality') or 0);d0=float(c.get('depth_score') or 0);ca0=float(p.get('ca') or 0)
+            absence_excused=bool(current_unavailable and mins<=0 and (q0>=0.55 or d0>=0.55 or ca0>=130))
+            c['current_unavailable']=current_unavailable
+            c['established_absence']=absence_excused
+            c['observed_minute_share']=round(minute_share,3)
+            if obs>=2 and not absence_excused:
+                if minute_share<0.20:
+                    role='backup';role_floor={'GK':4.0,'DEF':4.0,'MID':4.5,'FWD':4.5}[pos];role_cap={'GK':4.0,'DEF':4.5,'MID':4.5,'FWD':5.0}[pos]
+                elif minute_share<0.45:
+                    role='rotation';role_floor={'GK':4.0,'DEF':4.5,'MID':4.5,'FWD':5.0}[pos];role_cap={'GK':4.5,'DEF':4.5,'MID':5.0,'FWD':6.0}[pos]
+                elif minute_share<0.70:
+                    role='squad';role_floor={'GK':4.5,'DEF':4.5,'MID':5.0,'FWD':5.5}[pos];role_cap={'GK':5.0,'DEF':5.0,'MID':6.0,'FWD':7.0}[pos]
+                else:
+                    role='starter';role_floor={'GK':4.5,'DEF':5.0,'MID':5.5,'FWD':6.0}[pos];role_cap={'GK':6.0,'DEF':8.0,'MID':15.0,'FWD':14.0}[pos]
+                raw=max(role_floor,min(raw,role_cap))
+                c['usage_role']=role;c['usage_role_floor']=role_floor;c['usage_role_cap']=role_cap
+            elif c.get('new_arrival'):
+                c['usage_role']='new_arrival_unproven'
+            elif absence_excused:
+                c['usage_role']='absence_excused'
+            else:
+                c['usage_role']='unproven'
+            raw_scores[p['id']]=raw
+            c['distribution_cap']=round(raw,2)
+
+    for p in players:
+        c=p['price_context'];basement=(c['observed_matches']>=2 and club_usage_coverage.get(p.get('club'),False) and float(p.get('minutes',0) or 0)==0 and not c['zero_minute_exception'])
+        base=3.5 if basement else {'GK':4.0,'DEF':4.0,'MID':4.5,'FWD':4.5}[p['pos']]
+        price=round(max(base,raw_scores[p['id']])*2)/2
+        if basement:price=min(4.5,price)
+        p['price']=price;c['price']=price
+        c['summary']=(f"{c['role']} · available-minute share {round(c['minutes_share']*100)}% · starts {round(c['start_share']*100)}% · "
+                      f"attack {round(c['attack_profile']*100)}/100 · team strength {round(c['team_strength']*100)}/100 · "
+                      f"quality {round(c['quality']*100)}/100 · {c['availability_signal']}")
+
+
+    # v6.5 final launch-price guardrails. Earlier stages build the market shape, but these
+    # two cases must never be flattened into ordinary zero-minute backups:
+    #   1) established senior players currently unavailable through injury/suspension;
+    #   2) strong recent arrivals with too little eligible-club evidence to judge by minutes.
+    # This is generic evidence-based logic: no player names or club-specific exceptions.
+    _starter_price={}
+    for _p in players:
+        _c=_p.get('price_context') or {}
+        _key=(_p.get('club'),_p.get('pos'))
+        if (float(_p.get('minutes') or 0)>=120 and int(_p.get('starts') or 0)>=2) or _c.get('usage_role')=='starter':
+            _starter_price[_key]=max(float(_starter_price.get(_key,0) or 0),float(_p.get('price') or 0))
+
+    for _p in players:
+        _c=_p.get('price_context') or {};_pos=_p.get('pos')
+        if _pos not in ('GK','DEF','MID','FWD'):continue
+        _price=float(_p.get('price') or 0);_q=float(_c.get('quality') or 0);_d=float(_c.get('depth_score') or 0);_ca=float(_p.get('ca') or 0)
+        _mins=float(_p.get('minutes') or 0);_apps=int(_p.get('apps') or 0)
+        _st=' '.join(str(_p.get(k) or '').lower() for k in ('injury_status','suspension_status','status'))
+        _unavailable=bool(_p.get('injured') or _p.get('suspended') or 'injur' in _st or 'suspend' in _st or _p.get('return_date') or _p.get('injury_return_date') or _p.get('injury_evidence'))
+
+        # An unavailable established senior option keeps a sensible FPL-like launch floor.
+        # Ability/depth only proves they belong in the senior pricing band; it does not make
+        # an absent player premium by itself.
+        if _mins<=0 and _unavailable and (_q>=0.55 or _d>=0.55 or _ca>=130):
+            _floor={'GK':4.5,'DEF':5.0,'MID':5.5,'FWD':6.0}[_pos]
+            if _q>=0.80 and _d>=0.70:_floor+=0.5
+            _price=max(_price,_floor)
+            _c['usage_role']='established_absence'
+            _c['availability_signal']='Established senior role · currently unavailable'
+            _c['pricing_guardrail']='v65_established_absence'
+
+        # A genuine recent arrival cannot be labelled a £4.5/£5.0 backup from one cameo.
+        # Project from quality + depth until there are at least two eligible current-club
+        # matches. Keep the projection below a proven starter in the same club/position.
+        _avail=int(_c.get('available_matches') or 0);_late=bool(_c.get('late_arrival'))
+        if _late and _avail<=1 and _apps<=1 and _q>=0.60 and _d>=0.45:
+            if _pos=='GK':_proj=4.0+0.60*_q+0.40*_d
+            elif _pos=='DEF':_proj=4.5+0.80*_q+0.50*_d
+            elif _pos=='MID':_proj=5.0+1.30*_q+0.60*_d
+            else:_proj=5.5+1.40*_q+0.70*_d
+            _ahead=float(_starter_price.get((_p.get('club'),_pos),0) or 0)
+            if _ahead>0:_proj=min(_proj,max({'GK':4.5,'DEF':5.0,'MID':5.5,'FWD':6.0}[_pos],_ahead-0.5))
+            _proj=round(_proj*2)/2
+            _price=max(_price,_proj)
+            _c['usage_role']='new_arrival_projected'
+            _c['availability_signal']='Recent arrival · projected from quality and squad role'
+            _c['pricing_guardrail']='v65_new_arrival_projection'
+            _c['projected_arrival_price']=_proj
+
+        _p['price']=round(_price*2)/2;_c['price']=_p['price']
+        _c['summary']=(f"{_c.get('role','Player')} · available-minute share {round(float(_c.get('minutes_share') or 0)*100)}% · "
+                       f"starts {round(float(_c.get('start_share') or 0)*100)}% · attack {round(float(_c.get('attack_profile') or 0)*100)}/100 · "
+                       f"team strength {round(float(_c.get('team_strength') or 0)*100)}/100 · quality {round(_q*100)}/100 · {_c.get('availability_signal','')}")
+
+def scan_completed_results(db:bytes,fixtures:list[dict[str,Any]]):
+    keys={(r['home_tid'],r['away_tid'],r['date']):r for r in fixtures}
+    teams=sorted({x for r in fixtures for x in (r['home_tid'],r['away_tid'])})
+    pat=re.compile(b'|'.join(re.escape(struct.pack('<I',x)) for x in teams))
+    found={}
+    for m in pat.finditer(db):
+        p=m.start()
+        if p+86>len(db):continue
+        home=u32(db,p); away=u32(db,p+4)
+        if away not in teams:continue
+        stamp=u16(db,p+8);year=u16(db,p+10);doy=stamp&0x1ff
+        if not (1<=doy<=366 and 2024<=year<=2045):continue
+        date=fm_date(stamp,year)
+        key=(home,away,date)
+        if key not in keys:continue
+        hs,as_=db[p+84],db[p+85]
+        if hs>30 or as_>30:continue
+        found[key]=(hs,as_,p)
+    # one result per completed fixture; 50 in current regression save
+    for key,(hs,as_,p) in found.items():
+        f=keys[key];f['status']='played';f['home_score']=hs;f['away_score']=as_;f['result_offset']=p
+    return found
+
+
+def _rich_read_lp_utf8(buf:bytes,pos:int,max_len:int=80):
+    if pos+4>len(buf): return None,pos
+    n=u32(buf,pos)
+    if n>max_len or pos+4+n>len(buf): return None,pos
+    raw=buf[pos+4:pos+4+n]
+    try:s=raw.decode('utf-8')
+    except UnicodeDecodeError:return None,pos
+    if any(ord(c)<32 for c in s):return None,pos
+    return s,pos+4+n
+
+
+
+
+=====
+
+def browser_build_payload_from_fs(fingerprint:str, rich_names_json:str, preferred_league:str|None=None):
+    dbp=Path('/tmp/game_db.dat'); db=dbp.read_bytes(); dbp.unlink(missing_ok=True)
+    fixp=Path('/tmp/fix_man.dat'); fix=fixp.read_bytes(); fixp.unlink(missing_ok=True)
+    all_clubs=scan_clubs(db)
+    rich_team_names={c.uid+1:normalize_club_name(c.short or c.name) for c in all_clubs.values()}
+    raw=[]
+    rich_names=json.loads(rich_names_json)
+    # Pass 1 uses the broad club aliases only to collect any retained match objects and
+    # identity hints. Keep the temp members for a second, league-scoped pass below.
+    for i,name in enumerate(rich_names):
+        p=Path(f'/tmp/rich_{i}.bin')
+        if not p.exists(): continue
+        buf=p.read_bytes()
+        raw.extend(_rich_extract_member(buf,rich_team_names,name))
+    rich_raw=[]; seen=set()
+    for m in raw:
+        key=(m['home'],m['away'],m['home_score'],m['away_score'],tuple(x['player_id'] for x in m['home_players']),tuple(x['player_id'] for x in m['away_players']))
+        if key in seen: continue
+        seen.add(key); rich_raw.append(m)
+    comp_counts=collections.Counter(m.get('competition') for m in rich_raw if m.get('competition'))
+    requested_league=preferred_league if preferred_league in SUPPORTED_LEAGUES else None
+    preselect_rich=[m for m in rich_raw if (not requested_league or m.get('competition')==requested_league)]
+    expected_names={normalize_club_name(m[k]) for m in preselect_rich for k in ('home','away')} if (requested_league and preselect_rich) else None
+    fixtures,fixture_info=select_championship_fixtures(fix,all_clubs,expected_names,requested_league,db)
+    expected_league=fixture_info['competition']
+    rich_raw=[m for m in rich_raw if m.get('competition')==expected_league]
+    team_ids={x for f in fixtures for x in (f['home_tid'],f['away_tid'])}
+    shift=fixture_info['fixture_to_club_shift']
+    selected={tid-shift:all_clubs[tid-shift] for tid in team_ids}
+
+    # IMPORTANT: browser imports previously stopped here and never ran the historical
+    # recovery logic that existed in the non-browser payload builder.  This second pass
+    # re-decodes the exact same retained members using aliases ONLY from the already-selected
+    # current league. It cannot change the selected competition or clubs.
+    selected_aliases=selected_rich_team_aliases(selected)
+    selected_names={normalize_club_name(c.short or c.name) for c in selected.values()}
+    post_raw=[]
+    for i,name in enumerate(rich_names):
+        p=Path(f'/tmp/rich_{i}.bin')
+        if not p.exists(): continue
+        buf=p.read_bytes()
+        for mm in _rich_extract_member(buf,selected_aliases,name):
+            if mm.get('competition')!=fixture_info['competition']: continue
+            if normalize_club_name(mm.get('home','')) not in selected_names or normalize_club_name(mm.get('away','')) not in selected_names: continue
+            post_raw.append(mm)
+    post_recovered=0
+    if post_raw:
+        combined=[];seen_post=set()
+        for mm in list(rich_raw)+post_raw:
+            key=(mm.get('competition'),mm.get('home'),mm.get('away'),mm.get('home_score'),mm.get('away_score'),
+                 tuple(x.get('player_id') for x in mm.get('home_players',[])),tuple(x.get('player_id') for x in mm.get('away_players',[])))
+            if key in seen_post: continue
+            seen_post.add(key);combined.append(mm)
+        post_recovered=max(0,len(combined)-len(rich_raw));rich_raw=combined
+
+    fixture_name={tid:normalize_club_name(selected[tid-shift].short or selected[tid-shift].name) for tid in team_ids}
+    for i,f in enumerate(sorted(fixtures,key=lambda x:(x['gameweek'],x['date'],x['home_tid'],x['away_tid'])),1):
+        f['fixture_id']=i; f['home']=fixture_name[f['home_tid']]; f['away']=fixture_name[f['away_tid']]
+    results=scan_completed_results(db,fixtures)
+
+    # Recover senior squads first.  Then, for saves where FM no longer exposes separate rich
+    # match members, use each *known played league result* as an anchor in game_db.dat and
+    # search locally for the already-validated 214-byte player match-stat records.  The score
+    # and both senior-squad overlaps must agree before a historical match is accepted.
+    squads,squad_diag=scan_first_team_squads(db,selected,rich_raw)
+
+    # v19: recover current-league match blocks that do not carry a competition-name string.
+    member_rich,member_rich_diag=recover_unlabelled_rich_members(
+        rich_names,selected,squads,fixtures,shift,fixture_info['competition'])
+    if member_rich:
+        existing={(normalize_club_name(mm.get('home','')),normalize_club_name(mm.get('away','')),
+                   int(mm.get('home_score') or 0),int(mm.get('away_score') or 0),mm.get('date')) for mm in rich_raw}
+        for mm in member_rich:
+            k=(normalize_club_name(mm.get('home','')),normalize_club_name(mm.get('away','')),
+               int(mm.get('home_score') or 0),int(mm.get('away_score') or 0),mm.get('date'))
+            if k not in existing:
+                rich_raw.append(mm);existing.add(k)
+        squads,squad_diag=scan_first_team_squads(db,selected,rich_raw)
+
+    game_db_rich,game_db_rich_diag=recover_game_db_rich_matches(
+        db,fixtures,selected,squads,shift,fixture_info['competition'])
+    if game_db_rich:
+        existing={(normalize_club_name(mm.get('home','')),normalize_club_name(mm.get('away','')),
+                   int(mm.get('home_score') or 0),int(mm.get('away_score') or 0)) for mm in rich_raw}
+        for mm in game_db_rich:
+            k=(normalize_club_name(mm.get('home','')),normalize_club_name(mm.get('away','')),
+               int(mm.get('home_score') or 0),int(mm.get('away_score') or 0))
+            if k not in existing:
+                rich_raw.append(mm);existing.add(k)
+        # Re-run squad identity with recovered participation as extra evidence.
+        squads,squad_diag=scan_first_team_squads(db,selected,rich_raw)
+
+    for i,_name in enumerate(rich_names):
+        Path(f'/tmp/rich_{i}.bin').unlink(missing_ok=True)
+
+    target_eids={p for vals in squads.values() for p in vals}
+    for mm in rich_raw:
+        for side in ('home_players','away_players'):
+            for r in mm.get(side,[]):
+                try: target_eids.add(int(r['player_id']))
+                except Exception: pass
+    people=bind_target_people(db,target_eids)
+    players,unresolved,ambiguous=build_players(squads,selected,people,rich_raw)
+    pbyeid={int(p['pid']):p for p in players}
+    rich_matches=join_rich_matches(rich_raw,fixtures,pbyeid) if rich_raw else []
+    aggregate_player_history(players,rich_matches)
+    availability_diag=_structural_availability_from_fs(players,fixtures)
+    reprice_players(players,fixtures)
+    fixtures.sort(key=lambda x:(x['gameweek'],x['date'],x['fixture_id']))
+    sched=gameweek_schedule_meta(fixtures,fixture_info['total_gameweeks'])
+    current=sched['completed_contiguous']
+    table=build_table(fixtures); star_teams=build_star_teams(players,current)
+    meta={'fingerprint':fingerprint,'competition':fixture_info['competition'],'competition_code':fixture_info['competition_code'],'competition_fixture_id':fixture_info['competition_id'],'fixture_season_start':fixture_info['season_start'],'fixture_to_club_shift':shift,'fixture_candidates_considered':fixture_info['candidate_groups'],'fixture_exact_candidates':fixture_info['exact_candidate_groups'],'fixture_rich_name_overlap':fixture_info['rich_name_overlap'],'rich_competition_counts':dict(comp_counts),'rich_selected_competition':expected_league,'requested_league':requested_league,'requested_league_honoured':(not requested_league or fixture_info['competition']==requested_league),'league_selection_source':fixture_info.get('selection_mode',('user_preference_locked' if requested_league else 'auto_latest_season')),'current_season_candidates':fixture_info.get('current_season_candidates',[]),'gameweek_relabels':fixture_info['gameweek_relabels'],'calendar_gameweek_model':'deadline-window-v1','calendar_gameweek_windows':fixture_info['calendar_gameweek_windows'],'calendar_reassigned_fixtures':fixture_info['calendar_reassigned_count'],'calendar_reassigned_examples':fixture_info['calendar_reassigned_examples'],'gameweek_fixture_counts':sched['fixture_counts'],'gameweek_played_counts':sched['played_counts'],'double_gameweek_clubs':sched['double_gameweek_clubs'],'blank_gameweek_clubs':sched['blank_gameweek_clubs'],'pricing_model':'fpl-shaped-v65-role-projection-guardrails','availability_decoder':'structural-v1','injured_players':availability_diag.get('injured_players',0),'suspended_players':availability_diag.get('suspended_players',0),'availability_save_date':availability_diag.get('save_date'),'availability_diagnostics':availability_diag,'observed_position_reclassifications':sum(1 for p in players if p.get('position_source','').startswith('observed_')),'squad_scan_fallbacks':squad_diag['fallbacks'],'squad_scan_missing_club_eids':squad_diag['missing_club_eids'],'squad_rich_augmented_players':squad_diag['rich_augmented_players'],'game_db_rich_matches_recovered':game_db_rich_diag['recovered'],'game_db_rich_recovery_attempted':game_db_rich_diag['attempted'],'game_db_rich_windows_with_stats':game_db_rich_diag['windows_with_stats'],'game_db_rich_candidate_pairs':game_db_rich_diag['candidate_pairs'],'post_selection_rich_matches_recovered':post_recovered,'selected_rich_team_aliases':len(selected_aliases),'unlabelled_rich_members_scanned':member_rich_diag['members_scanned'],'unlabelled_rich_members_with_stats':member_rich_diag['members_with_stats'],'unlabelled_rich_stat_records':member_rich_diag['stat_records'],'unlabelled_rich_candidate_pairs':member_rich_diag['candidate_pairs'],'unlabelled_rich_matches_recovered':member_rich_diag['matches_recovered'],'unlabelled_rich_cached_candidate_pairs':member_rich_diag.get('cached_candidate_pairs',0),'unlabelled_rich_side_clusters':member_rich_diag.get('side_clusters',0),'unlabelled_rich_labelled_side_clusters':member_rich_diag.get('labelled_side_clusters',0),'unlabelled_rich_strict_seed_matches':member_rich_diag.get('strict_seed_matches',0),'unlabelled_rich_cluster_matches':member_rich_diag.get('cluster_matches',0),'unlabelled_rich_propagation_rounds':member_rich_diag.get('propagation_rounds',0),'unlabelled_rich_propagation_matches':member_rich_diag.get('propagation_matches',0),'unlabelled_rich_cohort_side_labels':member_rich_diag.get('cohort_side_labels',0),'unlabelled_rich_fixture_identity_matches':member_rich_diag.get('fixture_identity_matches',0),'unlabelled_rich_single_side_bridge_matches':member_rich_diag.get('single_side_bridge_matches',0),'unlabelled_rich_identity_rounds':member_rich_diag.get('identity_rounds',0),'unlabelled_rich_ambiguous_seed_player_ids':member_rich_diag.get('ambiguous_seed_player_ids',0),'unlabelled_rich_transfer_conflict_neutralized_players':member_rich_diag.get('transfer_conflict_neutralized_players',0),'unlabelled_rich_adaptive_cluster_edges':member_rich_diag.get('adaptive_cluster_edges',0),'unlabelled_rich_adaptive_cluster_edges_rejected_conflict':member_rich_diag.get('adaptive_cluster_edges_rejected_conflict',0),'unlabelled_rich_unmatched_cached_pairs':member_rich_diag.get('unmatched_cached_pairs',0),'unlabelled_rich_missing_fixture_fallback_matches':member_rich_diag.get('missing_fixture_fallback_matches',0),'clubs':fixture_info['team_count'],'team_count':fixture_info['team_count'],'total_gameweeks':fixture_info['total_gameweeks'],'fixtures':len(fixtures),'played_results':len(results),'rich_matches':len(rich_matches),'players':len(players),'unresolved_squad_eids':unresolved,'ambiguous_memberships':ambiguous,'fully_completed_gameweeks':sched['fully_completed'],'latest_gameweek_with_result':sched['latest_result'],'completed_gameweek':current,'current_gameweek':min(fixture_info['total_gameweeks'],current+1) if current<fixture_info['total_gameweeks'] else fixture_info['total_gameweeks'],'next_gameweek':min(fixture_info['total_gameweeks'],current+1) if current<fixture_info['total_gameweeks'] else fixture_info['total_gameweeks'],'hidden_unresolved':len(unresolved),'scoring_note':'Bonus uses an FM-derived BPS proxy; MID/FWD DEFCON uses FM possession-won as the recovery-equivalent.'}
+    clubs_payload=[{'eid':c.eid,'uid':c.uid,'name':c.name,'short_name':normalize_club_name(c.short)} for c in sorted(selected.values(),key=lambda c:c.name)]
+    return json.dumps({'meta':meta,'clubs':clubs_payload,'players':players,'fixtures':fixtures,'matches':rich_matches,'table':table,'star_teams':star_teams},ensure_ascii=False)
+
