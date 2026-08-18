@@ -1,0 +1,35 @@
+name: Upgrade retained lineup dedupe v66
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/upgrade_history_lineup_dedupe_v66.py'
+      - '.github/workflows/upgrade-history-lineup-dedupe-v66.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch embedded importer
+        run: python scripts/upgrade_history_lineup_dedupe_v66.py
+      - name: Verify generated importer
+        run: |
+          git diff --check
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('scripts/history_recovery_v53.pyfrag').read_text()
+          assert 'seen_side_pair_signatures' not in s
+          assert 'same_lineup_distinct_regions_preserved' in s
+          assert 'near_duplicate_candidate_pairs_soft_collapsed' in s
+          assert 'if len(stats)<36:continue' in s
+          print('retained lineup dedupe checks passed')
+          PY
+      - name: Commit production upgrade
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/history_recovery_v53.pyfrag app/part* app/fix*
+          git commit -m "Preserve distinct retained matches with repeated lineups"
+          git push origin HEAD:main
