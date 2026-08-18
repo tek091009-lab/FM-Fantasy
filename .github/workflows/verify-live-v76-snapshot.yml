@@ -1,12 +1,14 @@
-name: Verify live V81 importer shell
+name: Verify live V76 snapshot architecture
 on:
   push:
     branches: [main]
     paths:
       - '.github/workflows/verify-live-v76-snapshot.yml'
+      - 'app/**'
       - 'index.html'
-      - 'updateguard.js'
-      - 'importcompat.js'
+      - 'snapshotdate.js'
+      - 'scripts/assert_v76_snapshot_boundary.py'
+      - 'deploy-marker.json'
 permissions:
   contents: write
 jobs:
@@ -14,7 +16,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify exact live Pages importer shell
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Verify repository source
+        run: python scripts/assert_v76_snapshot_boundary.py
+      - name: Wait for and verify exact live architecture
         shell: bash
         run: |
           set -euo pipefail
@@ -22,26 +28,36 @@ jobs:
           ok=0
           for attempt in $(seq 1 36); do
             idx="$(curl -fsSL --max-time 20 "$base/index.html?verify=${GITHUB_SHA}-${attempt}" || true)"
-            guard="$(curl -fsSL --max-time 20 "$base/updateguard.js?verify=${GITHUB_SHA}-${attempt}" || true)"
-            compat="$(curl -fsSL --max-time 20 "$base/importcompat.js?verify=${GITHUB_SHA}-${attempt}" || true)"
-            if printf '%s' "$idx" | grep -q 'importcompat.js?v=1' \
-              && printf '%s' "$idx" | grep -q 'updateguard.js?v=6' \
-              && printf '%s' "$guard" | grep -q 'world-update-guard-v6-structural-proof' \
-              && printf '%s' "$compat" | grep -q 'retained-member-threshold-v81'; then
-              ok=1;break
+            badge="$(curl -fsSL --max-time 20 "$base/snapshotdate.js?verify=${GITHUB_SHA}-${attempt}" || true)"
+            if printf '%s' "$idx" | grep -q 'snapshotdate.js?v=1' && printf '%s' "$badge" | grep -q 'snapshot-date-v1'; then
+              : > /tmp/live_parts.b64
+              good=1
+              for i in $(seq -w 0 16); do curl -fsSL --max-time 20 "$base/app/part${i}?verify=${GITHUB_SHA}-${attempt}" >> /tmp/live_parts.b64 || good=0; done
+              for i in 17 18 19 20; do curl -fsSL --max-time 20 "$base/app/fix${i}?verify=${GITHUB_SHA}-${attempt}" >> /tmp/live_parts.b64 || good=0; done
+              if [ "$good" -eq 1 ] && tr -d '\r\n ' < /tmp/live_parts.b64 | base64 -d | gzip -dc > /tmp/live_app.html 2>/dev/null && python scripts/assert_v76_snapshot_boundary.py /tmp/live_app.html; then
+                ok=1;break
+              fi
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'Live Pages importer shell did not reach V81' >&2; exit 1; }
-      - name: Record verified live import shell
+          [ "$ok" -eq 1 ] || { echo 'Live site never reached V75/V76 snapshot architecture' >&2; exit 1; }
+      - name: Record V76 live marker
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p .deploy
-          printf 'verified_live_sha=%s\nverified_at=%s\nupdate_guard=world-update-guard-v6-structural-proof\nretained_member_compat=retained-member-threshold-v81\n' "$GITHUB_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .deploy/live-import-v81.txt
-          git config user.name github-actions[bot]
-          git config user.email 4189824+github-actions[bot]@users.noreply.github.com
-          git add .deploy/live-import-v81.txt
-          git commit -m "Record verified live importer shell ${GITHUB_SHA::7}"
-          git pull --rebase origin main
-          git push
+          current="$(jq -r '.verification // empty' deploy-marker.json 2>/dev/null || true)"
+          if [ "$current" = 'v76-dated-append-only-snapshot-live' ]; then
+            echo 'V76 marker already authoritative; no rewrite needed.'
+            exit 0
+          fi
+          stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"verification\": \"v76-dated-append-only-snapshot-live\",\n  \"current_squad_decoder\": \"v75-current-db-structural-senior-resolution-no-history\",\n  \"snapshot_boundary\": \"append-only-by-snapshot-date-v1\",\n  \"snapshot_badge\": \"snapshot-date-v1\",\n  \"fixture_db_handoff\": \"v74-loaded-game-db-bytes\",\n  \"server_history_authority\": \"supabase-dated-canonical-merge\",\n  \"history_identity\": \"stable-date-fixture-context-v2\"\n}\n' "$GITHUB_SHA" "$stamp")"
+          content="$(printf '%s' "$json" | base64 -w0)"
+          old="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$old" ]; then
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V76 snapshot deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$old" -f branch=main >/dev/null
+          else
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V76 snapshot deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+          fi
