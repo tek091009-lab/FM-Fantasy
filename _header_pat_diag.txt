@@ -1,0 +1,295 @@
+
+=== def find_name_pool_index ===
+
+00419: 
+00420: def _read_string_entry(db:bytes,at:int):
+00421:     if at+8>len(db): return None
+00422:     iid=u32(db,at); ln=u32(db,at+4)
+00423:     if iid>5_000_000 or ln>250 or at+8+ln>len(db): return None
+00424:     try:s=db[at+8:at+8+ln].decode('utf-8')
+00425:     except UnicodeDecodeError:return None
+00426:     if any(ord(c)<32 for c in s):return None
+00427:     return iid,s,at+8+ln
+00428: 
+00429: 
+00430: def _chain_len(db:bytes,at:int,n:int=64)->int:
+00431:     p=at
+00432:     for i in range(n):
+00433:         e=_read_string_entry(db,p)
+00434:         if not e:return i
+00435:         p=e[2]
+00436:     return n
+00437: 
+00438: 
+00439: def find_name_pool_index(db:bytes):
+00440:     # Keep only compact ID-membership bytearrays, not ~1M Python strings.
+00441:     # Target player names are resolved in a second tiny pass after EID binding.
+00442:     pos=int(len(db)*0.25);search_end=int(len(db)*0.72)
+00443:     pools=[];bounds=[];end_offset=0
+00444:     while len(pools)<3:
+00445:         found=None
+00446:         for m in HEADER_PAT.finditer(db,pos,search_end):
+00447:             if _chain_len(db,m.start(),64)>=64:
+00448:                 found=m.start();break
+00449:         if found is None:raise RuntimeError('FM name string table not found')
+00450:         q=found;membership=bytearray();count=0
+00451:         while True:
+00452:             e=_read_string_entry(db,q)
+00453:             if not e:break
+00454:             iid,_text,q=e;count+=1
+00455:             if iid>=len(membership):membership.extend(b'\x00'*(iid+1-len(membership)))
+00456:             membership[iid]=1
+00457:         if count>=10_000:
+00458:             pools.append(membership);bounds.append((found,q));end_offset=q
+00459:         pos=q+1
+00460:     return pools[0],pools[1],pools[2],bounds,end_offset
+00461: 
+00462: 
+00463: def _pool_has(pool:bytearray,iid:int)->bool:
+00464:     return 0<=iid<len(pool) and bool(pool[iid])
+00465: 
+00466: 
+00467: PERSON_PREFIX_RE=re.compile(rb'(?=(.{4}\x00.{4}\x00.{4}\x00))', re.S)
+00468: 
+00469: def scan_person_offsets(db:bytes,start:int,forenames:bytearray,surnames:bytearray):
+00470:     offsets=[]
+00471:     for m in PERSON_PREFIX_RE.finditer(db,start):
+00472:         at=m.start();first=u32(db,at);sur=u32(db,at+5)
+00473:         if not _pool_has(forenames,first) or not _pool_has(surnames,sur):continue
+---
+
+=== def bind_target_people ===
+
+00533:     inline=None
+00534:     if ln==0:body+=4
+00535:     else:
+00536:         try:inline=db[body+4:body+4+ln].decode('utf-8')
+00537:         except UnicodeDecodeError:inline=None
+00538:         body+=4+ln
+00539:     return first,sur,com,inline
+00540: 
+00541: 
+00542: def resolve_pool_ids(db:bytes,bound:tuple[int,int],wanted:set[int])->dict[int,str]:
+00543:     if not wanted:return {}
+00544:     out={};q=bound[0];end=bound[1]
+00545:     while q<end and len(out)<len(wanted):
+00546:         e=_read_string_entry(db,q)
+00547:         if not e:break
+00548:         iid,text,q=e
+00549:         if iid in wanted:out[iid]=text
+00550:     return out
+00551: 
+00552: 
+00553: def bind_target_people(db:bytes,target_eids:set[int]):
+00554:     fore_index,sur_index,_common_index,bounds,table_end=find_name_pool_index(db)
+00555:     # Full person offset spine is compact (~75k integers) and is needed to stop an
+00556:     # ability block belonging to a neighbouring non-target person being misbound.
+00557:     person_offsets=scan_person_offsets(db,table_end,fore_index,sur_index)
+00558:     chain=identity_chain(db,table_end)
+00559:     targets={eid:(iat,uid) for iat,eid,uid in chain if eid in target_eids}
+00560:     target_prefix={}
+00561:     for eid,(iat,_uid) in targets.items():
+00562:         idx=bisect.bisect_right(person_offsets,iat)-1
+00563:         if idx<0:continue
+00564:         pat=person_offsets[idx]
+00565:         if iat-pat<=650:target_prefix[eid]=pat
+00566:     # Resolve only the few hundred string IDs the Championship squad actually uses.
+00567:     first_ids=set();sur_ids=set();common_ids=set();details={}
+00568:     for eid,pat in target_prefix.items():
+00569:         first,sur,com,inline=_prefix_ids(db,pat);details[eid]=(first,sur,com,inline)
+00570:         first_ids.add(first);sur_ids.add(sur)
+00571:         if com!=0xFFFFFFFF:common_ids.add(com)
+00572:     fore=resolve_pool_ids(db,bounds[0],first_ids);sur=resolve_pool_ids(db,bounds[1],sur_ids);common=resolve_pool_ids(db,bounds[2],common_ids)
+00573:     ability=scan_target_abilities(db,person_offsets,set(target_prefix.values()))
+00574:     out={}
+00575:     for eid,pat in target_prefix.items():
+00576:         iat,uid=targets[eid];first,surname,com,inline=details[eid]
+00577:         if first not in fore or surname not in sur:continue
+00578:         first_text=fore[first]; surname_text=sur[surname]
+00579:         name=inline or f'{first_text} {surname_text}'
+00580:         cname=None if com==0xFFFFFFFF else common.get(com)
+00581:         positions=None;ca=pa=None
+00582:         if pat in ability:positions,ca,pa=ability[pat]
+00583:         person_obj=Person(eid,uid,pat,name,cname,first_text,surname_text,positions,ca,pa)
+00584:         person_obj.first_name=fore.get(first)
+00585:         person_obj.surname_name=sur.get(surname)
+00586:         person_obj.common_name_id=None if com==0xFFFFFFFF else com
+00587:         person_obj.first_name_id=first
+---
+
+=== HEADER_PAT ===
+
+00426:     if any(ord(c)<32 for c in s):return None
+00427:     return iid,s,at+8+ln
+00428: 
+00429: 
+00430: def _chain_len(db:bytes,at:int,n:int=64)->int:
+00431:     p=at
+00432:     for i in range(n):
+00433:         e=_read_string_entry(db,p)
+00434:         if not e:return i
+00435:         p=e[2]
+00436:     return n
+00437: 
+00438: 
+00439: def find_name_pool_index(db:bytes):
+00440:     # Keep only compact ID-membership bytearrays, not ~1M Python strings.
+00441:     # Target player names are resolved in a second tiny pass after EID binding.
+00442:     pos=int(len(db)*0.25);search_end=int(len(db)*0.72)
+00443:     pools=[];bounds=[];end_offset=0
+00444:     while len(pools)<3:
+00445:         found=None
+00446:         for m in HEADER_PAT.finditer(db,pos,search_end):
+00447:             if _chain_len(db,m.start(),64)>=64:
+00448:                 found=m.start();break
+00449:         if found is None:raise RuntimeError('FM name string table not found')
+00450:         q=found;membership=bytearray();count=0
+00451:         while True:
+00452:             e=_read_string_entry(db,q)
+00453:             if not e:break
+00454:             iid,_text,q=e;count+=1
+00455:             if iid>=len(membership):membership.extend(b'\x00'*(iid+1-len(membership)))
+00456:             membership[iid]=1
+00457:         if count>=10_000:
+00458:             pools.append(membership);bounds.append((found,q));end_offset=q
+00459:         pos=q+1
+00460:     return pools[0],pools[1],pools[2],bounds,end_offset
+00461: 
+00462: 
+00463: def _pool_has(pool:bytearray,iid:int)->bool:
+00464:     return 0<=iid<len(pool) and bool(pool[iid])
+00465: 
+00466: 
+00467: PERSON_PREFIX_RE=re.compile(rb'(?=(.{4}\x00.{4}\x00.{4}\x00))', re.S)
+00468: 
+00469: def scan_person_offsets(db:bytes,start:int,forenames:bytearray,surnames:bytearray):
+00470:     offsets=[]
+00471:     for m in PERSON_PREFIX_RE.finditer(db,start):
+00472:         at=m.start();first=u32(db,at);sur=u32(db,at+5)
+00473:         if not _pool_has(forenames,first) or not _pool_has(surnames,sur):continue
+00474:         body=at+15
+00475:         if body+8>len(db):continue
+00476:         ln=u32(db,body)
+00477:         if ln==0:
+00478:             body+=4
+00479:         elif 2<=ln<=64 and body+4+ln+4<=len(db) and u16(db,body+2)==0:
+00480:             raw=db[body+4:body+4+ln]
+---
+
+=== POOL ===
+
+
+=== NAME ===
+
+00003: import bisect
+00004: import collections
+00005: import datetime as dt
+00006: import hashlib
+00007: import json
+00008: import math
+00009: import re
+00010: import struct
+00011: from dataclasses import dataclass
+00012: from pathlib import Path
+00013: from typing import Any
+00014: 
+00015: 
+00016: CHAMPIONSHIP_FIXTURE_COMP_ID = 206  # Legacy FM26 hint only; never trusted without identity validation.
+00017: SUPPORTED_LEAGUES = {
+00018:     'Premier League': {'code':'eng_prem','teams':20,'rounds':38,'fixtures':380,'per_round':10,
+00019:                        'long_names':('Premier League','English Premier Division')},
+00020:     'EFL Championship': {'code':'eng_champ','teams':24,'rounds':46,'fixtures':552,'per_round':12,
+00021:                          'long_names':('Sky Bet Championship','EFL Championship')},
+00022: }
+00023: POSITION_NAMES = ["GK","SW","DL","DC","DR","DM","ML","MC","MR","AML","AMC","AMR","ST","WBL","WBR"]
+00024: DEF_SLOTS = {1,2,3,4,13,14}
+00025: MID_SLOTS = {5,6,7,8,9,10,11}
+00026: FWD_SLOT = 12
+00027: 
+00028: 
+00029: def u16(b: bytes, o: int) -> int: return struct.unpack_from('<H', b, o)[0]
+00030: def u32(b: bytes, o: int) -> int: return struct.unpack_from('<I', b, o)[0]
+00031: 
+00032: 
+00033: def fm_date(stamp: int, year: int) -> str:
+00034:     doy = stamp & 0x1FF
+00035:     return (dt.date(year, 1, 1) + dt.timedelta(days=doy - 1)).isoformat()
+00036: 
+00037: 
+00038: @dataclass
+00039: class Club:
+00040:     eid: int
+00041:     uid: int
+00042:     name: str
+00043:     short: str
+00044:     nation_id: int
+00045: 
+00046: 
+00047: @dataclass
+00048: class Person:
+00049:     eid: int
+00050:     uid: int
+00051:     offset: int
+00052:     name: str
+00053:     common_name: str | None
+00054:     first_name: str | None = None
+00055:     surname: str | None = None
+00056:     positions: list[int] | None = None
+00057:     current_ability: int | None = None
+---
+01498:     return out
+01499: 
+01500: def build_players(squads:dict[int,list[int]], selected_clubs:dict[int,Club], people:dict[int,Person], rich:list[dict[str,Any]]|None=None):
+01501:     memberships=collections.defaultdict(list)
+01502:     for ceid,eids in squads.items():
+01503:         for eid in eids: memberships[eid].append(ceid)
+01504:     # Resolve duplicate list membership from actual current-season rich match participation when available.
+01505:     # v68: retained match history is never authoritative for CURRENT club membership.
+01506:     out=[]; unresolved=[]; ambiguous=[]
+01507:     for eid,clubs in sorted(memberships.items()):
+01508:         person=people.get(eid)
+01509:         if not person:
+01510:             unresolved.append(eid);continue
+01511:         clubs=sorted(set(clubs))
+01512:         if len(clubs)!=1:
+01513:             ambiguous.append({'player_eid':eid,'club_eids':clubs,'reason':'multiple_current_squad_records'})
+01514:             continue
+01515:         ceid=clubs[0]
+01516:         c=selected_clubs[ceid]
+01517:         pos=fantasy_position(person.positions)
+01518:         out.append({'id':str(eid),'pid':str(eid),'name':person.display_name,'display_name':person.display_name,'public_name':person.display_name,'legal_name':person.name,'first_name':getattr(person,'first_name',None),'surname_name':getattr(person,'surname_name',None),'common_name':person.common_name,'first_name_id':getattr(person,'first_name_id',None),'surname_name_id':getattr(person,'surname_name_id',None),'common_name_id':getattr(person,'common_name_id',None),'identity_components_preserved':True,'name_component_evidence':{'legal_full':person.name,'first':getattr(person,'first_name',None),'surname_family':getattr(person,'surname_name',None),'common_known_as':person.common_name,'first_pool_id':getattr(person,'first_name_id',None),'surname_pool_id':getattr(person,'surname_name_id',None),'common_pool_id':getattr(person,'common_name_id',None),'nickname':None,'shirt_name':None,'preferred_short_name':None,'schema':'person_string_pools_v1'},'name_resolution_evidence':{'resolved_display':getattr(person,'display_name',None),'display_equals_legal':bool(getattr(person,'display_name',None) and getattr(person,'display_name',None)==person.name),'display_equals_common':bool(getattr(person,'display_name',None) and person.common_name and getattr(person,'display_name',None)==person.common_name),'display_contains_common':bool(getattr(person,'display_name',None) and person.common_name and person.common_name.casefold() in getattr(person,'display_name',None).casefold()),'display_contains_surname':bool(getattr(person,'display_name',None) and getattr(person,'surname_name',None) and getattr(person,'surname_name',None).casefold() in getattr(person,'display_name',None).casefold()),'source':'preserved_components_plus_current_resolver'},'preferred_name':person.common_name,'first_name':person.first_name,'surname':person.surname,'football_surname':person.surname,'legal_full_name':person.name,'club':normalize_club_name(c.short or c.name),'club_full':c.name,'club_eid':ceid,'pos':pos,'positions':{POSITION_NAMES[i]:v for i,v in enumerate(person.positions or [])},'ca':person.current_ability,'pa':person.potential_ability,'price':price_from_ca(pos,person.current_ability),'apps':0,'minutes':0,'goals':0,'assists':0,'yc':0,'rc':0,'saves':0,'gc':0,'starts':0,'avg_rating':0.0,'fantasy_points':0,'points':0,'form_points':0.0,'form':0.0,'history':[],'weekly_points':{},'visible':True,'available':True,'unresolved':False})
+01519:     return out,unresolved,ambiguous
+01520: 
+01521: 
+01522: def aggregate_player_history(players:list[dict[str,Any]],matches:list[dict[str,Any]]):
+01523:     byid={int(p['pid']):p for p in players}
+01524:     latest_gw=max((int(m.get('gameweek') or 0) for m in matches),default=0)
+01525:     occ=collections.defaultdict(list);unsafe_pids=set();unsafe_reasons=collections.defaultdict(set)
+01526:     side_seen={}
+01527:     for m in matches:
+01528:         mid=int(m.get('fixture_id') or m.get('match_id') or m.get('id') or 0)
+01529:         for key,sideclub in (('home_players',normalize_club_name(m.get('home',''))),('away_players',normalize_club_name(m.get('away','')))):
+01530:             for r in m.get(key,[]):
+01531:                 pid=int(r.get('player_id') or 0)
+01532:                 if pid<=0:continue
+01533:                 club=normalize_club_name(r.get('club') or sideclub)
+01534:                 date=str(m.get('date') or '')
+01535:                 gw=int(r.get('gameweek') or m.get('gameweek') or 0)
+01536:                 occ[pid].append((date,gw,mid,club))
+01537:                 k=(mid,pid)
+01538:                 prev=side_seen.get(k)
+01539:                 if prev is not None and prev!=club:
+01540:                     unsafe_pids.add(pid);unsafe_reasons[pid].add('same_match_both_clubs')
+01541:                 side_seen[k]=club
+01542:     for pid,recs in occ.items():
+01543:         bydate=collections.defaultdict(set)
+01544:         for date,gw,mid,club in recs:
+01545:             if date:bydate[date].add(club)
+01546:         if any(len(v)>1 for v in bydate.values()):
+01547:             unsafe_pids.add(pid);unsafe_reasons[pid].add('same_date_multiple_clubs')
+01548:         ordered=sorted(recs,key=lambda x:(x[0],x[1],x[2]))
+01549:         seq=[]
+01550:         for _date,_gw,_mid,club in ordered:
+01551:             if club and (not seq or seq[-1]!=club):seq.append(club)
+01552:         if len(seq)>2 or len(set(seq))>2:
+---
