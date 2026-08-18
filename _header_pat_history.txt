@@ -1,0 +1,34 @@
+sha=10f664549bc66e6bb21728c801e6ff5c7756c7a3
+commit=Fix v68 verification token and rerun
+00422:             if vals:diag['fallbacks'].append({'club_eid':eid,'method':'rich_match_membership','players':len(vals)})
+00423:             else:diag['missing_club_eids'].append(eid)
+00424: 
+00425:     # Rich participation is authoritative for a player who has actually appeared this season; augment stale squad lists.
+00426:     for eid,seen_players in rich_members.items():
+00427:         cur=out.setdefault(eid,[]);have=set(cur)
+00428:         add=[x for x in sorted(seen_players) if x not in have]
+00429:         if add:
+00430:             cur.extend(add);diag['rich_augmented_players']+=len(add)
+00431:     return out,diag
+00432: 
+00433: 
+00434: HEADER_PAT=re.compile(rb'.{3}[\x00-\x4c][\x00-\xfa]\x00\x00\x00', re.S)
+00435: 
+00436: def _read_string_entry(db:bytes,at:int):
+00437:     if at+8>len(db): return None
+00438:     iid=u32(db,at); ln=u32(db,at+4)
+00439:     if iid>5_000_000 or ln>250 or at+8+ln>len(db): return None
+00440:     try:s=db[at+8:at+8+ln].decode('utf-8')
+00441:     except UnicodeDecodeError:return None
+00442:     if any(ord(c)<32 for c in s):return None
+00443:     return iid,s,at+8+ln
+00444: 
+00445: 
+00446: def _chain_len(db:bytes,at:int,n:int=64)->int:
+00447:     p=at
+00448:     for i in range(n):
+00449:         e=_read_string_entry(db,p)
+00450:         if not e:return i
+00451:         p=e[2]
+00452:     return n
+00453: 
