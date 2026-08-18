@@ -8,6 +8,7 @@ on:
       - 'index.html'
       - 'snapshotdate.js'
       - 'scripts/assert_v76_snapshot_boundary.py'
+      - 'deploy-marker.json'
 permissions:
   contents: write
 jobs:
@@ -46,8 +47,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          current="$(jq -r '.verification // empty' deploy-marker.json 2>/dev/null || true)"
+          if [ "$current" = 'v76-dated-append-only-snapshot-live' ]; then
+            echo 'V76 marker already authoritative; no rewrite needed.'
+            exit 0
+          fi
           stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"verification\": \"v76-dated-append-only-snapshot-live\",\n  \"current_squad_decoder\": \"v75-current-db-structural-senior-resolution-no-history\",\n  \"snapshot_boundary\": \"append-only-by-snapshot-date-v1\",\n  \"snapshot_badge\": \"snapshot-date-v1\",\n  \"fixture_db_handoff\": \"v74-loaded-game-db-bytes\",\n  \"server_history_authority\": \"supabase-dated-canonical-merge\"\n}\n' "$GITHUB_SHA" "$stamp")"
+          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"verification\": \"v76-dated-append-only-snapshot-live\",\n  \"current_squad_decoder\": \"v75-current-db-structural-senior-resolution-no-history\",\n  \"snapshot_boundary\": \"append-only-by-snapshot-date-v1\",\n  \"snapshot_badge\": \"snapshot-date-v1\",\n  \"fixture_db_handoff\": \"v74-loaded-game-db-bytes\",\n  \"server_history_authority\": \"supabase-dated-canonical-merge\",\n  \"history_identity\": \"stable-date-fixture-context-v2\"\n}\n' "$GITHUB_SHA" "$stamp")"
           content="$(printf '%s' "$json" | base64 -w0)"
           old="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$old" ]; then
