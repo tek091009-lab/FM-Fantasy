@@ -1,4 +1,70 @@
-=== def _fixture_groups NOT FOUND ===
+=== def scan_fixture_groups lines 136-177 ===
+00136: def scan_fixture_groups(fix:bytes)->list[dict[str,Any]]:
+00137:     """Scan plausible fixture records and split them by competition and season.
+00138: 
+00139:     A candidate is considered a supported full league season when it matches either a
+00140:     20-team/38-round/380-fixture Premier League shape or a 24-team/46-round/552-fixture
+00141:     Championship shape. The competition id itself is not trusted because FM ids can move
+00142:     between databases and future seasons.
+00143:     """
+00144:     raw=[]
+00145:     for p in range(11,len(fix)-40):
+00146:         if fix[p+4:p+7] != b'\xff\x00\x00' or fix[p+11:p+13] != b'\xff\x00':
+00147:             continue
+00148:         comp=u32(fix,p-11); home,away=u32(fix,p),u32(fix,p+7)
+00149:         stamp,year=u16(fix,p+13),u16(fix,p+15); doy=stamp&0x1FF; gw0=fix[p+38]
+00150:         if not (1<=doy<=366 and 2024<=year<=2045 and 0<=gw0<=60):continue
+00151:         date=fm_date(stamp,year)
+00152:         raw.append({'fixture_offset':p,'competition_id':comp,'home_tid':home,'away_tid':away,
+00153:                     'date':date,'date_stamp':stamp,'year':year,'raw_gameweek':gw0+1,'gameweek':gw0+1,
+00154:                     'season_start':_season_start_for_date(date),'status':'future','home_score':None,'away_score':None,
+00155:                     'source':'fm_fix_man'})
+00156:     grouped=collections.defaultdict(list)
+00157:     for r in raw: grouped[(r['competition_id'],r['season_start'])].append(r)
+00158:     groups=[]
+00159:     shapes={(v['fixtures'],v['teams'],v['rounds'],v['per_round']):name for name,v in SUPPORTED_LEAGUES.items()}
+00160:     for (comp,season),rows in grouped.items():
+00161:         ded=[];seen=set()
+00162:         for r in sorted(rows,key=lambda x:x['fixture_offset']):
+00163:             k=(r['home_tid'],r['away_tid'],r['date'],r['raw_gameweek'])
+00164:             if k in seen:continue
+00165:             seen.add(k);ded.append(r)
+00166:         teams={x for r in ded for x in (r['home_tid'],r['away_tid'])}
+00167:         gws=collections.Counter(r['raw_gameweek'] for r in ded)
+00168:         league_name=None
+00169:         for (fixture_count,team_count,round_count,per_round),name in shapes.items():
+00170:             if (len(ded)==fixture_count and len(teams)==team_count and
+00171:                 set(gws)==set(range(1,round_count+1)) and all(v==per_round for v in gws.values())):
+00172:                 league_name=name;break
+00173:         groups.append({'competition_id':comp,'season_start':season,'rows':ded,'teams':teams,'gws':gws,
+00174:                        'exact':league_name is not None,'league_shape':league_name})
+00175:     return groups
+00176: 
+00177: 
+
+=== def derive_fixture_to_club_shift lines 273-294 ===
+00273: def derive_fixture_to_club_shift(team_ids: set[int], clubs: dict[int,Club], expected_names:set[str]|None=None) -> int:
+00274:     # Team ids and club eids are different namespaces. Derive their constant offset from this save.
+00275:     candidates=collections.Counter()
+00276:     english={eid for eid,c in clubs.items() if c.nation_id==139}
+00277:     # Fast likely range; choose a shift that maps all 24 fixture-team ids to English clubs.
+00278:     for shift in range(-512,513):
+00279:         n=sum(1 for tid in team_ids if tid-shift in english)
+00280:         if n: candidates[shift]=n
+00281:     if not candidates: raise RuntimeError('Could not link fixture team ids to club entity ids')
+00282:     maxn=max(candidates.values())
+00283:     tied=[sh for sh,n in candidates.items() if n==maxn]
+00284:     if expected_names:
+00285:         def score(sh):
+00286:             mapped={normalize_club_name(clubs[tid-sh].short or clubs[tid-sh].name) for tid in team_ids if tid-sh in clubs}
+00287:             return len(mapped & expected_names)
+00288:         tied.sort(key=lambda sh:(score(sh),-abs(sh)),reverse=True)
+00289:     shift=tied[0]; n=candidates[shift]
+00290:     if n != len(team_ids):
+00291:         raise RuntimeError(f'Fixture→club identity mapping incomplete ({n}/{len(team_ids)})')
+00292:     return shift
+00293: 
+00294: 
 
 === def select_championship_fixtures lines 178-243 ===
 00178: def select_championship_fixtures(fix:bytes,clubs:dict[int,Club],expected_names:set[str]|None=None,
@@ -68,7 +134,42 @@
 00242:     return rows,info
 00243: 
 
-=== def scan_squads NOT FOUND ===
+=== def scan_clubs lines 244-272 ===
+00244: def scan_clubs(db: bytes) -> dict[int, Club]:
+00245:     # Scan only FFFFFFFF anchors, then validate the proven entity-head shape 22 bytes before name length.
+00246:     out: dict[int,Club] = {}
+00247:     for m in re.finditer(b'\xff\xff\xff\xff', db):
+00248:         ff=m.start(); len_at=ff+22
+00249:         if len_at < 39 or len_at+8 >= len(db): continue
+00250:         try:
+00251:             n1=u32(db,len_at)
+00252:             if not 3<=n1<=64: continue
+00253:             ns=len_at+4
+00254:             name=db[ns:ns+n1].decode('utf-8')
+00255:             sa=ns+n1; n2=u32(db,sa)
+00256:             if not 2<=n2<=32: continue
+00257:             short=db[sa+4:sa+4+n2].decode('utf-8')
+00258:             if not name or not short or any(ord(c)<32 for c in name+short): continue
+00259:             ff2=u32(db,len_at-22)
+00260:             if ff2 != 0xFFFFFFFF: continue
+00261:             eid=u32(db,len_at-39); uid=u32(db,len_at-35); uid2=u32(db,len_at-31)
+00262:             zero=db[len_at-27]
+00263:             nation1=u32(db,len_at-14); loc=u32(db,len_at-18); nation3=u32(db,len_at-26)
+00264:             if zero!=0 or eid in (0,0xFFFFFFFF) or uid in (0,0xFFFFFFFF) or uid!=uid2: continue
+00265:             if not (nation1==nation3 or nation1==loc or nation3==loc): continue
+00266:             if any(x==0 or x>10000 for x in (nation1,loc,nation3)): continue
+00267:             out[eid]=Club(eid,uid,name,short,nation1)
+00268:         except Exception:
+00269:             continue
+00270:     return out
+00271: 
+00272: 
+
+=== def find_squad_candidates NOT FOUND ===
+
+=== def extract_squads NOT FOUND ===
+
+=== def scan_squad NOT FOUND ===
 
 === def build_players lines 1502-1546 ===
 01502: def build_players(squads:dict[int,list[int]], selected_clubs:dict[int,Club], people:dict[int,Person], rich:list[dict[str,Any]]|None=None):
@@ -234,3 +335,11 @@
 02538:     clubs_payload=[{'eid':c.eid,'uid':c.uid,'name':c.name,'short_name':normalize_club_name(c.short)} for c in sorted(selected.values(),key=lambda c:c.name)]
 02539:     return json.dumps({'meta':meta,'clubs':clubs_payload,'players':players,'fixtures':fixtures,'matches':rich_matches,'table':table,'star_teams':star_teams},ensure_ascii=False)
 02540: 
+
+=== SQUAD FUNCTIONS ===
+00295: def read_squad_list(db: bytes, head: int, next_head: int|None=None) -> list[int]:
+00348: def scan_first_team_squads(db: bytes, selected_clubs: dict[int,Club], rich:list[dict[str,Any]]|None=None):
+01169: def _rich_pick_two_squads(stats:list[dict[str,Any]]):
+01502: def build_players(squads:dict[int,list[int]], selected_clubs:dict[int,Club], people:dict[int,Person], rich:list[dict[str,Any]]|None=None):
+01822: def _rich_candidate_squad_pairs(stats:list[dict[str,Any]], played_score_pairs:set[tuple[int,int]]|None=None):
+01892: def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[int,Club], squads:dict[int,list[int]],
