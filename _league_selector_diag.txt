@@ -1,0 +1,864 @@
+=== HTML League request: ===
+index=791067
+
+|{});
+ for(const k of Object.keys(META))delete META[k];Object.assign(META,{named_players:0,hidden_unresolved:0,completed_gameweek:0,current_gameweek:1,total_matches_extracted:0},payload.meta||{});META.named_players=PLAYERS.filter(p=>p.visible&&p.available!==false).length;META.total_matches_extracted=MATCHES.length;
+ if(mode==='load'&&stored&&stored.bank===undefined){const held=(state.squad||[]).map(pby).filter(Boolean).reduce((a,p)=>a+Number(p.price||0),0);state.bank=Math.round(Math.max(0,100-held)*10)/10;state.lockedBank=state.bank}
+ if(mode==='season'){
+   const leagues=state.leagues||[];
+   state=Object.assign({},DEFAULT,{leagues,completedGameweek:META.completed_gameweek,currentGameweek:META.current_gameweek,bank:100,lockedBank:100,news:null});
+   state.chips=JSON.parse(JSON.stringify(DEFAULT.chips));state.news=fmBuildInitialNews(payload);
+ }else if(!state.teamConfirmed){state.completedGameweek=META.completed_gameweek;state.currentGameweek=META.current_gameweek}
+ else syncManagerProgressFromHistory();
+ if(mode==='load'&&!state.news){state.news=fmBuildInitialNews(payload)}
+ fixtureViewGW=(state.teamConfirmed?state.currentGameweek:META.current_gameweek)||1;starViewGW=Math.max(1,META.completed_gameweek||1);teamViewGW=state.teamConfirmed?state.currentGameweek:(META.current_gameweek||1);
+ fmRecalculateBank();refreshCompetitionUI();refreshClubFilters();save();renderAll();
+}
+function syncMessage(text,kind=''){const el=$('syncStatus');el.textContent=text;el.className='syncStatus '+kind}
+function syncProgress(pct,label='',bad=false){const n=Math.max(0,Math.min(100,Math.round(Number(pct)||0))),wrap=$('syncProgress');wrap.classList.add('show');wrap.classList.toggle('bad',!!bad);$('syncProgressFill').style.width=n+'%';$('syncProgressPct').textContent=n+'%';if(label)$('syncProgressLabel').textContent=label}
+function syncBusy(on){$('seasonImportBtn').disabled=on;$('updateImportBtn').disabled=on;$('clearDatabaseBtn').disabled=on}
+async function clearFMDatabase(){
+ if(!confirm('Clear the imported FM database and reset this fantasy save, squad, points and leagues on this browser?'))return;
+ syncBusy(true);
+ try{await fmStoredClear();PLAYERS.splice(0);MATCHES.splice(0);SEASON_FIXTURES.splice(0);CHAMP_TABLE.splice(0);for(const k of Object.keys(STAR_TEAMS))delete STAR_TEAMS[k];for(const k of Object.keys(META))delete META[k];Object.assign(META,{named_players:0,hidden_unresolved:0,completed_gameweek:0,current_gameweek:1,total_matches_extracted:0,fully_completed_gameweeks:[]});state=fmDeepClone(DEFAULT);state.chips=fmDeepClone(DEFAULT.chips);localStorage.removeItem('fmfantasy_final_v5');localStorage.removeItem(FM_DEBUG_KEY);FM_DEBUG={version:'v27-postpayload-pricing',startedAt:null,mode:null,file:null,events:[],lastError:null,lastMeta:null};fixtureViewGW=1;starViewGW=1;teamViewGW=1;refreshCompetitionUI();refreshClubFilters();save();renderAll();$('syncProgress').classList.remove('show','bad');syncMessage('Database cleared — ready for a fresh Season / Database Import.','ok')}
+ catch(e){syncMessage('Could not clear database: '+String(e?.message||e),'bad')}
+ finally{syncBusy(false)}
+}
+let FM_PENDING_SEASON_LEAGUE=null;
+async function sendFMImport(file,mode,autoRetry=false,explicitPreference=undefined){
+ if(!file)return;
+ if(mode==='season'&&state.teamConfirmed&&!confirm('Season / Database Import rebuilds the FM world and resets your fantasy squad. Continue?'))return;
+ if(!autoRetry)fmDebugReset(file,mode);syncBusy(true);syncProgress(1,mode==='season'?'Starting season import…':'Starting Gameweek update…');syncMessage(mode==='season'?'Reading FM season/database…':'Checking FM gameweek update…');
+ try{
+  const old=await fmStoredGet();if(mode==='update'&&!old)throw new Error('Run Season / Database Import first.');
+  const preferredLeague=mode==='update'?(old?.meta?.competition||null):(explicitPreference!==undefined?explicitPreference:(FM_PENDING_SEASON_LEAGUE!==null?FM_PENDING_SEASON_LEAGUE:($('leagueImportPreference')?.value||null)));fmDebugAdd('info',`League request: ${preferredLeague||'AUTO'}${mode==='season'?' (captured before file selection)':''}`);const result=await FM_RUNTIME.importFile(file,(t,pct)=>{syncMessage(t);syncProgress(pct,t);fmDebugAdd('progress',t,{percent:pct})},mode==='update'?old?.meta?.fingerprint:null,preferredLeague);
+  if(result.duplicate&&String(old?.meta?.price_merge_policy||'').includes('v67')){fmDebugAdd('result','Duplicate save detected — no database changes applied.');applyImportedPayload(old,'update');const processed=fmProcessCompletedGameweeks(),live=liveManagerGameweek();syncProgress(100,'Already up to date');syncMessage(processed.length?`Same save · repaired ${processed.length} completed Gameweek${processed.length===1?'':'s'} into your team total.`:live?`Same save · GW ${live.gw} remains ongoing at ${live.gross} live team pts.`:'Same save already imported — 0 database changes, nothing double-counted.','ok');return}
+  if(result.duplicate){result.duplicate=false;fmDebugAdd('info','Same save accepted once to apply v6.7 pricing correction.');}
+  let payload=result.payload,changes=null;
+  fmApplyPostPayloadPricingCorrections(payload);
+  if(mode==='update'){
+   changes=fmDiff(old,payload);const newIds=new Set((payload.players||[]).map(p=>String(p.pid))),retained=(old.players||[]).filter(p=>!newIds.has(String(p.pid))).map(p=>Object.assign({},p,{available:false,departed:true,visible:true}));if(retained.length){payload.players.push(...retained);payload.meta.historical_players_retained=retained.length}
+   fmMergeHistoricalFixtures(old,payload);fmMergeHistoricalMatches(old,payload);fmRebuildPlayerAggregates(payload);const priceMoves=fmApplyDynamicPricing(old,payload,changes);state.news=fmBuildImportNews(changes,priceMoves,payload,old);
+  }else{fmInitialiseLaunchPrices(payload)}
+  fmDeduplicateRichMatches(payload);fmRebuildPlayerAggregates(payload);payload.star_teams=fmBuildStars(payload.players||[],Number(payload.meta?.completed_gameweek||0));FM_DEBUG.lastMeta=payload.meta||null;fmDebugAdd('result','Payload built successfully.',payload.meta||{});try{const lm=JSON.parse(localStorage.getItem('fmfantasy_league_by_fingerprint_v1')||'{}');if(payload.meta?.fingerprint&&payload.meta?.competition){lm[payload.meta.fingerprint]=payload.meta.competition;localStorage.setItem('fmfantasy_league_by_fingerprint_v1',JSON.stringify(lm))}}catch(_e){};syncProgress(99,'Applying imported database…');await fmStoredSet(payload);applyImportedPayload(payload,mode);const processed=mode==='update'?fmProcessCompletedGameweeks():[];const live=mode==='update'?liveManagerGameweek():null;
+  syncProgress(100,'Import complete');
+  if(mode==='season'){
+    const played=Number(payload.meta.played_results||0),rich=Number(payload.meta.rich_matches||0),missing=Math.max(0,played-rich);
+    if(played>0&&missing>0)syncMessage(`${payload.meta.players} players · ${payload.meta.fixtures} fixtures · ${played} results loaded · player detail ${rich}/${played} matches (${missing} missing). Database loaded with partial historical player coverage — no automatic re-scan was run.`,'warn');
+    else syncMessage(`${payload.meta.players} players · ${payload.meta.fixtures} fixtures · ${played} results loaded · player detail ${rich}/${played} matches. Historical coverage complete. Calendar Gameweeks ready.`,'ok');
+  }
+  else{const pts=processed.reduce((s,x)=>s+Number(x.net||0),0);syncMessage(`${changes.new_results.length} new results · ${changes.new_rich_matches} new rich matches · ${processed.length} Gameweek${processed.length===1?'':'s'} finalised${processed.length?` · ${pts} net pts`:''}${live?` · GW ${live.gw} ongoing: ${live.gross} live team pts`:''}.`,'ok')}
+ }catch(e){
+  const msg=String(e?.message||e||'');console.error(e);FM_DEBUG.lastError=fmDebugSafeError(e);fmDebugAdd('error',FM_DEBUG.lastError.message);fmDebugPersist();
+  if(mode==='season'&&!autoRetry&&!($('leagueImportPreference')?.value)&&msg.includes('Multiple supported English league seasons')){
+    const isPrem=confirm('Auto-detect found bot
+
+=== HTML captured before file selection ===
+index=791130
+
+ssign(META,{named_players:0,hidden_unresolved:0,completed_gameweek:0,current_gameweek:1,total_matches_extracted:0},payload.meta||{});META.named_players=PLAYERS.filter(p=>p.visible&&p.available!==false).length;META.total_matches_extracted=MATCHES.length;
+ if(mode==='load'&&stored&&stored.bank===undefined){const held=(state.squad||[]).map(pby).filter(Boolean).reduce((a,p)=>a+Number(p.price||0),0);state.bank=Math.round(Math.max(0,100-held)*10)/10;state.lockedBank=state.bank}
+ if(mode==='season'){
+   const leagues=state.leagues||[];
+   state=Object.assign({},DEFAULT,{leagues,completedGameweek:META.completed_gameweek,currentGameweek:META.current_gameweek,bank:100,lockedBank:100,news:null});
+   state.chips=JSON.parse(JSON.stringify(DEFAULT.chips));state.news=fmBuildInitialNews(payload);
+ }else if(!state.teamConfirmed){state.completedGameweek=META.completed_gameweek;state.currentGameweek=META.current_gameweek}
+ else syncManagerProgressFromHistory();
+ if(mode==='load'&&!state.news){state.news=fmBuildInitialNews(payload)}
+ fixtureViewGW=(state.teamConfirmed?state.currentGameweek:META.current_gameweek)||1;starViewGW=Math.max(1,META.completed_gameweek||1);teamViewGW=state.teamConfirmed?state.currentGameweek:(META.current_gameweek||1);
+ fmRecalculateBank();refreshCompetitionUI();refreshClubFilters();save();renderAll();
+}
+function syncMessage(text,kind=''){const el=$('syncStatus');el.textContent=text;el.className='syncStatus '+kind}
+function syncProgress(pct,label='',bad=false){const n=Math.max(0,Math.min(100,Math.round(Number(pct)||0))),wrap=$('syncProgress');wrap.classList.add('show');wrap.classList.toggle('bad',!!bad);$('syncProgressFill').style.width=n+'%';$('syncProgressPct').textContent=n+'%';if(label)$('syncProgressLabel').textContent=label}
+function syncBusy(on){$('seasonImportBtn').disabled=on;$('updateImportBtn').disabled=on;$('clearDatabaseBtn').disabled=on}
+async function clearFMDatabase(){
+ if(!confirm('Clear the imported FM database and reset this fantasy save, squad, points and leagues on this browser?'))return;
+ syncBusy(true);
+ try{await fmStoredClear();PLAYERS.splice(0);MATCHES.splice(0);SEASON_FIXTURES.splice(0);CHAMP_TABLE.splice(0);for(const k of Object.keys(STAR_TEAMS))delete STAR_TEAMS[k];for(const k of Object.keys(META))delete META[k];Object.assign(META,{named_players:0,hidden_unresolved:0,completed_gameweek:0,current_gameweek:1,total_matches_extracted:0,fully_completed_gameweeks:[]});state=fmDeepClone(DEFAULT);state.chips=fmDeepClone(DEFAULT.chips);localStorage.removeItem('fmfantasy_final_v5');localStorage.removeItem(FM_DEBUG_KEY);FM_DEBUG={version:'v27-postpayload-pricing',startedAt:null,mode:null,file:null,events:[],lastError:null,lastMeta:null};fixtureViewGW=1;starViewGW=1;teamViewGW=1;refreshCompetitionUI();refreshClubFilters();save();renderAll();$('syncProgress').classList.remove('show','bad');syncMessage('Database cleared — ready for a fresh Season / Database Import.','ok')}
+ catch(e){syncMessage('Could not clear database: '+String(e?.message||e),'bad')}
+ finally{syncBusy(false)}
+}
+let FM_PENDING_SEASON_LEAGUE=null;
+async function sendFMImport(file,mode,autoRetry=false,explicitPreference=undefined){
+ if(!file)return;
+ if(mode==='season'&&state.teamConfirmed&&!confirm('Season / Database Import rebuilds the FM world and resets your fantasy squad. Continue?'))return;
+ if(!autoRetry)fmDebugReset(file,mode);syncBusy(true);syncProgress(1,mode==='season'?'Starting season import…':'Starting Gameweek update…');syncMessage(mode==='season'?'Reading FM season/database…':'Checking FM gameweek update…');
+ try{
+  const old=await fmStoredGet();if(mode==='update'&&!old)throw new Error('Run Season / Database Import first.');
+  const preferredLeague=mode==='update'?(old?.meta?.competition||null):(explicitPreference!==undefined?explicitPreference:(FM_PENDING_SEASON_LEAGUE!==null?FM_PENDING_SEASON_LEAGUE:($('leagueImportPreference')?.value||null)));fmDebugAdd('info',`League request: ${preferredLeague||'AUTO'}${mode==='season'?' (captured before file selection)':''}`);const result=await FM_RUNTIME.importFile(file,(t,pct)=>{syncMessage(t);syncProgress(pct,t);fmDebugAdd('progress',t,{percent:pct})},mode==='update'?old?.meta?.fingerprint:null,preferredLeague);
+  if(result.duplicate&&String(old?.meta?.price_merge_policy||'').includes('v67')){fmDebugAdd('result','Duplicate save detected — no database changes applied.');applyImportedPayload(old,'update');const processed=fmProcessCompletedGameweeks(),live=liveManagerGameweek();syncProgress(100,'Already up to date');syncMessage(processed.length?`Same save · repaired ${processed.length} completed Gameweek${processed.length===1?'':'s'} into your team total.`:live?`Same save · GW ${live.gw} remains ongoing at ${live.gross} live team pts.`:'Same save already imported — 0 database changes, nothing double-counted.','ok');return}
+  if(result.duplicate){result.duplicate=false;fmDebugAdd('info','Same save accepted once to apply v6.7 pricing correction.');}
+  let payload=result.payload,changes=null;
+  fmApplyPostPayloadPricingCorrections(payload);
+  if(mode==='update'){
+   changes=fmDiff(old,payload);const newIds=new Set((payload.players||[]).map(p=>String(p.pid))),retained=(old.players||[]).filter(p=>!newIds.has(String(p.pid))).map(p=>Object.assign({},p,{available:false,departed:true,visible:true}));if(retained.length){payload.players.push(...retained);payload.meta.historical_players_retained=retained.length}
+   fmMergeHistoricalFixtures(old,payload);fmMergeHistoricalMatches(old,payload);fmRebuildPlayerAggregates(payload);const priceMoves=fmApplyDynamicPricing(old,payload,changes);state.news=fmBuildImportNews(changes,priceMoves,payload,old);
+  }else{fmInitialiseLaunchPrices(payload)}
+  fmDeduplicateRichMatches(payload);fmRebuildPlayerAggregates(payload);payload.star_teams=fmBuildStars(payload.players||[],Number(payload.meta?.completed_gameweek||0));FM_DEBUG.lastMeta=payload.meta||null;fmDebugAdd('result','Payload built successfully.',payload.meta||{});try{const lm=JSON.parse(localStorage.getItem('fmfantasy_league_by_fingerprint_v1')||'{}');if(payload.meta?.fingerprint&&payload.meta?.competition){lm[payload.meta.fingerprint]=payload.meta.competition;localStorage.setItem('fmfantasy_league_by_fingerprint_v1',JSON.stringify(lm))}}catch(_e){};syncProgress(99,'Applying imported database…');await fmStoredSet(payload);applyImportedPayload(payload,mode);const processed=mode==='update'?fmProcessCompletedGameweeks():[];const live=mode==='update'?liveManagerGameweek():null;
+  syncProgress(100,'Import complete');
+  if(mode==='season'){
+    const played=Number(payload.meta.played_results||0),rich=Number(payload.meta.rich_matches||0),missing=Math.max(0,played-rich);
+    if(played>0&&missing>0)syncMessage(`${payload.meta.players} players · ${payload.meta.fixtures} fixtures · ${played} results loaded · player detail ${rich}/${played} matches (${missing} missing). Database loaded with partial historical player coverage — no automatic re-scan was run.`,'warn');
+    else syncMessage(`${payload.meta.players} players · ${payload.meta.fixtures} fixtures · ${played} results loaded · player detail ${rich}/${played} matches. Historical coverage complete. Calendar Gameweeks ready.`,'ok');
+  }
+  else{const pts=processed.reduce((s,x)=>s+Number(x.net||0),0);syncMessage(`${changes.new_results.length} new results · ${changes.new_rich_matches} new rich matches · ${processed.length} Gameweek${processed.length===1?'':'s'} finalised${processed.length?` · ${pts} net pts`:''}${live?` · GW ${live.gw} ongoing: ${live.gross} live team pts`:''}.`,'ok')}
+ }catch(e){
+  const msg=String(e?.message||e||'');console.error(e);FM_DEBUG.lastError=fmDebugSafeError(e);fmDebugAdd('error',FM_DEBUG.lastError.message);fmDebugPersist();
+  if(mode==='season'&&!autoRetry&&!($('leagueImportPreference')?.value)&&msg.includes('Multiple supported English league seasons')){
+    const isPrem=confirm('Auto-detect found both Premier League and Championship data in this FM save and cann
+
+=== HTML AUTO ===
+index=791103
+
+TA))delete META[k];Object.assign(META,{named_players:0,hidden_unresolved:0,completed_gameweek:0,current_gameweek:1,total_matches_extracted:0},payload.meta||{});META.named_players=PLAYERS.filter(p=>p.visible&&p.available!==false).length;META.total_matches_extracted=MATCHES.length;
+ if(mode==='load'&&stored&&stored.bank===undefined){const held=(state.squad||[]).map(pby).filter(Boolean).reduce((a,p)=>a+Number(p.price||0),0);state.bank=Math.round(Math.max(0,100-held)*10)/10;state.lockedBank=state.bank}
+ if(mode==='season'){
+   const leagues=state.leagues||[];
+   state=Object.assign({},DEFAULT,{leagues,completedGameweek:META.completed_gameweek,currentGameweek:META.current_gameweek,bank:100,lockedBank:100,news:null});
+   state.chips=JSON.parse(JSON.stringify(DEFAULT.chips));state.news=fmBuildInitialNews(payload);
+ }else if(!state.teamConfirmed){state.completedGameweek=META.completed_gameweek;state.currentGameweek=META.current_gameweek}
+ else syncManagerProgressFromHistory();
+ if(mode==='load'&&!state.news){state.news=fmBuildInitialNews(payload)}
+ fixtureViewGW=(state.teamConfirmed?state.currentGameweek:META.current_gameweek)||1;starViewGW=Math.max(1,META.completed_gameweek||1);teamViewGW=state.teamConfirmed?state.currentGameweek:(META.current_gameweek||1);
+ fmRecalculateBank();refreshCompetitionUI();refreshClubFilters();save();renderAll();
+}
+function syncMessage(text,kind=''){const el=$('syncStatus');el.textContent=text;el.className='syncStatus '+kind}
+function syncProgress(pct,label='',bad=false){const n=Math.max(0,Math.min(100,Math.round(Number(pct)||0))),wrap=$('syncProgress');wrap.classList.add('show');wrap.classList.toggle('bad',!!bad);$('syncProgressFill').style.width=n+'%';$('syncProgressPct').textContent=n+'%';if(label)$('syncProgressLabel').textContent=label}
+function syncBusy(on){$('seasonImportBtn').disabled=on;$('updateImportBtn').disabled=on;$('clearDatabaseBtn').disabled=on}
+async function clearFMDatabase(){
+ if(!confirm('Clear the imported FM database and reset this fantasy save, squad, points and leagues on this browser?'))return;
+ syncBusy(true);
+ try{await fmStoredClear();PLAYERS.splice(0);MATCHES.splice(0);SEASON_FIXTURES.splice(0);CHAMP_TABLE.splice(0);for(const k of Object.keys(STAR_TEAMS))delete STAR_TEAMS[k];for(const k of Object.keys(META))delete META[k];Object.assign(META,{named_players:0,hidden_unresolved:0,completed_gameweek:0,current_gameweek:1,total_matches_extracted:0,fully_completed_gameweeks:[]});state=fmDeepClone(DEFAULT);state.chips=fmDeepClone(DEFAULT.chips);localStorage.removeItem('fmfantasy_final_v5');localStorage.removeItem(FM_DEBUG_KEY);FM_DEBUG={version:'v27-postpayload-pricing',startedAt:null,mode:null,file:null,events:[],lastError:null,lastMeta:null};fixtureViewGW=1;starViewGW=1;teamViewGW=1;refreshCompetitionUI();refreshClubFilters();save();renderAll();$('syncProgress').classList.remove('show','bad');syncMessage('Database cleared — ready for a fresh Season / Database Import.','ok')}
+ catch(e){syncMessage('Could not clear database: '+String(e?.message||e),'bad')}
+ finally{syncBusy(false)}
+}
+let FM_PENDING_SEASON_LEAGUE=null;
+async function sendFMImport(file,mode,autoRetry=false,explicitPreference=undefined){
+ if(!file)return;
+ if(mode==='season'&&state.teamConfirmed&&!confirm('Season / Database Import rebuilds the FM world and resets your fantasy squad. Continue?'))return;
+ if(!autoRetry)fmDebugReset(file,mode);syncBusy(true);syncProgress(1,mode==='season'?'Starting season import…':'Starting Gameweek update…');syncMessage(mode==='season'?'Reading FM season/database…':'Checking FM gameweek update…');
+ try{
+  const old=await fmStoredGet();if(mode==='update'&&!old)throw new Error('Run Season / Database Import first.');
+  const preferredLeague=mode==='update'?(old?.meta?.competition||null):(explicitPreference!==undefined?explicitPreference:(FM_PENDING_SEASON_LEAGUE!==null?FM_PENDING_SEASON_LEAGUE:($('leagueImportPreference')?.value||null)));fmDebugAdd('info',`League request: ${preferredLeague||'AUTO'}${mode==='season'?' (captured before file selection)':''}`);const result=await FM_RUNTIME.importFile(file,(t,pct)=>{syncMessage(t);syncProgress(pct,t);fmDebugAdd('progress',t,{percent:pct})},mode==='update'?old?.meta?.fingerprint:null,preferredLeague);
+  if(result.duplicate&&String(old?.meta?.price_merge_policy||'').includes('v67')){fmDebugAdd('result','Duplicate save detected — no database changes applied.');applyImportedPayload(old,'update');const processed=fmProcessCompletedGameweeks(),live=liveManagerGameweek();syncProgress(100,'Already up to date');syncMessage(processed.length?`Same save · repaired ${processed.length} completed Gameweek${processed.length===1?'':'s'} into your team total.`:live?`Same save · GW ${live.gw} remains ongoing at ${live.gross} live team pts.`:'Same save already imported — 0 database changes, nothing double-counted.','ok');return}
+  if(result.duplicate){result.duplicate=false;fmDebugAdd('info','Same save accepted once to apply v6.7 pricing correction.');}
+  let payload=result.payload,changes=null;
+  fmApplyPostPayloadPricingCorrections(payload);
+  if(mode==='update'){
+   changes=fmDiff(old,payload);const newIds=new Set((payload.players||[]).map(p=>String(p.pid))),retained=(old.players||[]).filter(p=>!newIds.has(String(p.pid))).map(p=>Object.assign({},p,{available:false,departed:true,visible:true}));if(retained.length){payload.players.push(...retained);payload.meta.historical_players_retained=retained.length}
+   fmMergeHistoricalFixtures(old,payload);fmMergeHistoricalMatches(old,payload);fmRebuildPlayerAggregates(payload);const priceMoves=fmApplyDynamicPricing(old,payload,changes);state.news=fmBuildImportNews(changes,priceMoves,payload,old);
+  }else{fmInitialiseLaunchPrices(payload)}
+  fmDeduplicateRichMatches(payload);fmRebuildPlayerAggregates(payload);payload.star_teams=fmBuildStars(payload.players||[],Number(payload.meta?.completed_gameweek||0));FM_DEBUG.lastMeta=payload.meta||null;fmDebugAdd('result','Payload built successfully.',payload.meta||{});try{const lm=JSON.parse(localStorage.getItem('fmfantasy_league_by_fingerprint_v1')||'{}');if(payload.meta?.fingerprint&&payload.meta?.competition){lm[payload.meta.fingerprint]=payload.meta.competition;localStorage.setItem('fmfantasy_league_by_fingerprint_v1',JSON.stringify(lm))}}catch(_e){};syncProgress(99,'Applying imported database…');await fmStoredSet(payload);applyImportedPayload(payload,mode);const processed=mode==='update'?fmProcessCompletedGameweeks():[];const live=mode==='update'?liveManagerGameweek():null;
+  syncProgress(100,'Import complete');
+  if(mode==='season'){
+    const played=Number(payload.meta.played_results||0),rich=Number(payload.meta.rich_matches||0),missing=Math.max(0,played-rich);
+    if(played>0&&missing>0)syncMessage(`${payload.meta.players} players · ${payload.meta.fixtures} fixtures · ${played} results loaded · player detail ${rich}/${played} matches (${missing} missing). Database loaded with partial historical player coverage — no automatic re-scan was run.`,'warn');
+    else syncMessage(`${payload.meta.players} players · ${payload.meta.fixtures} fixtures · ${played} results loaded · player detail ${rich}/${played} matches. Historical coverage complete. Calendar Gameweeks ready.`,'ok');
+  }
+  else{const pts=processed.reduce((s,x)=>s+Number(x.net||0),0);syncMessage(`${changes.new_results.length} new results · ${changes.new_rich_matches} new rich matches · ${processed.length} Gameweek${processed.length===1?'':'s'} finalised${processed.length?` · ${pts} net pts`:''}${live?` · GW ${live.gw} ongoing: ${live.gross} live team pts`:''}.`,'ok')}
+ }catch(e){
+  const msg=String(e?.message||e||'');console.error(e);FM_DEBUG.lastError=fmDebugSafeError(e);fmDebugAdd('error',FM_DEBUG.lastError.message);fmDebugPersist();
+  if(mode==='season'&&!autoRetry&&!($('leagueImportPreference')?.value)&&msg.includes('Multiple supported English league seasons')){
+    const isPrem=confirm('Auto-detect found both Premier League and Championship da
+
+=== HTML Current season 2025/26 contains both supported English leagues ===
+index=-1
+
+=== HTML select_championship_fixtures ===
+index=-1
+
+=== HTML leagueSelect ===
+index=-1
+
+=== HTML competitionSelect ===
+index=-1
+
+=== HTML importLeague ===
+index=-1
+
+=== HTML requestedLeague ===
+index=-1
+
+=== HTML requested_league ===
+index=-1
+
+=== PY def select_championship_fixtures ===
+index=7396
+
+eweeks(rows:list[dict[str,Any]])->dict[str,Any]:
+    """Convert FM nominal league rounds into FPL-style calendar Gameweeks.
+
+    The number of Gameweeks is inferred from the selected league (38 or 46). Rescheduled
+    league fixtures are assigned by their actual calendar date, creating genuine doubles
+    and blanks without changing the underlying league fixture set.
+    """
+    by_raw=collections.defaultdict(list)
+    for r in rows: by_raw[r['raw_gameweek']].append(r)
+
+    profiles=[]
+    for raw,rr in by_raw.items():
+        ords=sorted(dt.date.fromisoformat(x['date']).toordinal() for x in rr)
+        median=ords[len(ords)//2] if len(ords)%2 else (ords[len(ords)//2-1]+ords[len(ords)//2])/2
+        expected=max(1,len(rr))
+        core=[o for o in ords if abs(o-median)<=4]
+        if len(core)<max(4,expected//2): core=ords
+        profiles.append({'raw':raw,'median':median,'core_start':min(core),'core_end':max(core),'fixture_count':len(rr)})
+
+    profiles.sort(key=lambda x:(x['median'],x['raw']))
+    total_rounds=len(profiles)
+    raw_order={p['raw']:i+1 for i,p in enumerate(profiles)}
+
+    boundaries=[]
+    for i,p in enumerate(profiles):
+        start=int(p['core_start'])
+        if boundaries and start<=boundaries[-1]:
+            prev_med=profiles[i-1]['median']
+            midpoint=int(math.floor((prev_med+p['median'])/2))+1
+            start=max(boundaries[-1]+1,midpoint)
+        boundaries.append(start)
+
+    reassigned=[]
+    for r in rows:
+        day=dt.date.fromisoformat(r['date']).toordinal()
+        cal=bisect.bisect_right(boundaries,day)
+        gw=min(total_rounds,max(1,cal))
+        nominal=raw_order[r['raw_gameweek']]
+        r['round_gameweek']=nominal;r['gameweek']=gw;r['calendar_reassigned']=gw!=nominal
+        if gw!=nominal:
+            reassigned.append({'home_tid':r['home_tid'],'away_tid':r['away_tid'],'date':r['date'],
+                               'raw_gameweek':r['raw_gameweek'],'nominal_gameweek':nominal,'fantasy_gameweek':gw})
+
+    windows=[]
+    for i,start in enumerate(boundaries):
+        end=(boundaries[i+1]-1) if i+1<len(boundaries) else None
+        windows.append({'gameweek':i+1,'start':dt.date.fromordinal(start).isoformat(),
+                        'end':dt.date.fromordinal(end).isoformat() if end else None,'raw_round':profiles[i]['raw']})
+    return {'raw_round_order':raw_order,'raw_round_relabels':{raw:new for raw,new in raw_order.items() if raw!=new},
+            'calendar_windows':windows,'calendar_reassigned_count':len(reassigned),
+            'calendar_reassigned_examples':reassigned[:24],'total_gameweeks':total_rounds}
+
+def scan_fixture_groups(fix:bytes)->list[dict[str,Any]]:
+    """Scan plausible fixture records and split them by competition and season.
+
+    A candidate is considered a supported full league season when it matches either a
+    20-team/38-round/380-fixture Premier League shape or a 24-team/46-round/552-fixture
+    Championship shape. The competition id itself is not trusted because FM ids can move
+    between databases and future seasons.
+    """
+    raw=[]
+    for p in range(11,len(fix)-40):
+        if fix[p+4:p+7] != b'\xff\x00\x00' or fix[p+11:p+13] != b'\xff\x00':
+            continue
+        comp=u32(fix,p-11); home,away=u32(fix,p),u32(fix,p+7)
+        stamp,year=u16(fix,p+13),u16(fix,p+15); doy=stamp&0x1FF; gw0=fix[p+38]
+        if not (1<=doy<=366 and 2024<=year<=2045 and 0<=gw0<=60):continue
+        date=fm_date(stamp,year)
+        raw.append({'fixture_offset':p,'competition_id':comp,'home_tid':home,'away_tid':away,
+                    'date':date,'date_stamp':stamp,'year':year,'raw_gameweek':gw0+1,'gameweek':gw0+1,
+                    'season_start':_season_start_for_date(date),'status':'future','home_score':None,'away_score':None,
+                    'source':'fm_fix_man'})
+    grouped=collections.defaultdict(list)
+    for r in raw: grouped[(r['competition_id'],r['season_start'])].append(r)
+    groups=[]
+    shapes={(v['fixtures'],v['teams'],v['rounds'],v['per_round']):name for name,v in SUPPORTED_LEAGUES.items()}
+    for (comp,season),rows in grouped.items():
+        ded=[];seen=set()
+        for r in sorted(rows,key=lambda x:x['fixture_offset']):
+            k=(r['home_tid'],r['away_tid'],r['date'],r['raw_gameweek'])
+            if k in seen:continue
+            seen.add(k);ded.append(r)
+        teams={x for r in ded for x in (r['home_tid'],r['away_tid'])}
+        gws=collections.Counter(r['raw_gameweek'] for r in ded)
+        league_name=None
+        for (fixture_count,team_count,round_count,per_round),name in shapes.items():
+            if (len(ded)==fixture_count and len(teams)==team_count and
+                set(gws)==set(range(1,round_count+1)) and all(v==per_round for v in gws.values())):
+                league_name=name;break
+        groups.append({'competition_id':comp,'season_start':season,'rows':ded,'teams':teams,'gws':gws,
+                       'exact':league_name is not None,'league_shape':league_name})
+    return groups
+
+
+def select_championship_fixtures(fix:bytes,clubs:dict[int,Club],expected_names:set[str]|None=None,
+                                 expected_league:str|None=None)->tuple[list[dict[str,Any]],dict[str,Any]]:
+    """Select the current supported domestic league without trusting a fixed FM competition id.
+
+    Manual league selection is a HARD constraint.  Auto detection never allows old retained
+    match-detail from an earlier season/division to drag the save back into that old league.
+    It first restricts candidates to the newest season present in the fixture calendar.
+    """
+    groups=scan_fixture_groups(fix)
+    exact_all=[g for g in groups if g['exact']]
+    if not exact_all:
+        near=sorted(groups,key=lambda g:(abs(len(g['teams'])-24),-g['season_start']))[:10]
+        summary='; '.join(f"comp={g['competition_id']} season={g['season_start']} fixtures={len(g['rows'])} teams={len(g['teams'])} gws={len(g['gws'])} shape={g.get('league_shape')}" for g in near)
+        raise RuntimeError('No supported full league season could be identified. Candidates: '+summary)
+
+    requested=expected_league if expected_league in SUPPORTED_LEAGUES else None
+    if requested:
+        exact=[g for g in exact_all if g.get('league_shape')==requested]
+        if not exact:
+            raise RuntimeError(f'Manual league selection was {requested}, but no complete {requested} season exists in this save. The selection will not be overridden.')
+        newest=max(g['season_start'] for g in exact)
+        exact=[g for g in exact if g['season_start']==newest]
+        selection_mode='user_preference_locked'
+    else:
+        newest=max(g['season_start'] for g in exact_all)
+        exact=[g for g in exact_all if g['season_start']==newest]
+        shapes={g.get('league_shape') for g in exact}
+        if len(shapes)>1:
+            summary=', '.join(sorted(str(x) for x in shapes))
+            raise RuntimeError(f'Current season {newest}/{str(newest+1)[-2:]} contains both supported English leagues ({summary}). Historical retained-match identity is deliberately ignored because a promoted/relegated human club may have old division data. Choose the current league once; the choice will be locked for this import.')
+        selection_mode='auto_latest_season'
+
+    scored=[]
+    candidate_debug=[]
+    for g in exact:
+        try:
+            sh=derive_fixture_to_club_shift(g['teams'],clubs,expected_names if requested else None)
+            mapped={normalize_club_name(clubs[tid-sh].short or clubs[tid-sh].name) for tid in g['teams'] if tid-sh in clubs}
+            overlap=len(mapped & expected_names) if (requested and expected_names) else 0
+            legacy_hint=1 if (g.get('league_shape')=='EFL Championship' and g['competition_id']==CHAMPIONSHIP_FIXTURE_COMP_ID) else 0
+            # Within the already locked league/current season, identity overlap only breaks ties.
+            score=(overlap,legacy_hint,-abs(sh),-g['competition_id'])
+            scored.append((score,g,sh,mapped))
+            candidate_debug.append({'competition_id':g['competition_id'],'season_start':g['season_start'],
+                                    'league_shape':g.get('league_shape'),'shift':sh,'mapped_clubs':sorted(mapped),
+                                    'identity_overlap':overlap})
+        except Exception as e:
+            candidate_debug.append({'competition_id':g['competition_id'],'season_start':g['season_start'],
+                                    'league_shape':g.get('league_shape'),'error':str(e)})
+            continue
+    if not scored:
+        raise RuntimeError('Supported current-season fixture candidates were found, but none could be linked cleanly to English club identities in this save.')
+    scored.sort(key=lambda x:x[0],reverse=True)
+    score,g,shift,mapped=scored[0]
+    rows=g['rows'];gw_info=_normalize_gameweeks(rows);spec=SUPPORTED_LEAGUES[g['league_shape']]
+    info={'competition_id':g['competition_id'],'season_start':g['season_start'],'fixture_to_club_shift':shift,
+          'candidate_groups':len(groups),'exact_candidate_groups':len(exact_all),
+          'current_season_candidate_groups':len(exact),'current_season_candidates':candidate_debug[:24],
+          'requested_league':requested,'selection_mode':selection_mode,
+          'rich_name_overlap':score[0],'competition':g['league_shape'],'competition_code':spec['code'],
+          'team_count':spec['teams'],'total_gameweeks':spec['rounds'],'fixture_count':spec['fixtures'],
+          'gameweek_relabels':gw_info['raw_round_relabels'],'calendar_gameweek_windows':gw_info['calendar_windows'],
+          'calendar_reassigned_count':gw_info['calendar_reassigned_count'],
+          'calendar_reassigned_examples':gw_info['calendar_reassigned_examples']}
+    return rows,info
+
+def scan_clubs(db: bytes) -> dict[int, Club]:
+    # Scan only FFFFFFFF anchors, then validate the proven entity-head shape 22 bytes before name length.
+    out: dict[int,Club] = {}
+    for m in re.finditer(b'\xff\xff\xff\xff', db):
+
+
+=== PY contains both supported English leagues ===
+index=9359
+
+al,'fantasy_gameweek':gw})
+
+    windows=[]
+    for i,start in enumerate(boundaries):
+        end=(boundaries[i+1]-1) if i+1<len(boundaries) else None
+        windows.append({'gameweek':i+1,'start':dt.date.fromordinal(start).isoformat(),
+                        'end':dt.date.fromordinal(end).isoformat() if end else None,'raw_round':profiles[i]['raw']})
+    return {'raw_round_order':raw_order,'raw_round_relabels':{raw:new for raw,new in raw_order.items() if raw!=new},
+            'calendar_windows':windows,'calendar_reassigned_count':len(reassigned),
+            'calendar_reassigned_examples':reassigned[:24],'total_gameweeks':total_rounds}
+
+def scan_fixture_groups(fix:bytes)->list[dict[str,Any]]:
+    """Scan plausible fixture records and split them by competition and season.
+
+    A candidate is considered a supported full league season when it matches either a
+    20-team/38-round/380-fixture Premier League shape or a 24-team/46-round/552-fixture
+    Championship shape. The competition id itself is not trusted because FM ids can move
+    between databases and future seasons.
+    """
+    raw=[]
+    for p in range(11,len(fix)-40):
+        if fix[p+4:p+7] != b'\xff\x00\x00' or fix[p+11:p+13] != b'\xff\x00':
+            continue
+        comp=u32(fix,p-11); home,away=u32(fix,p),u32(fix,p+7)
+        stamp,year=u16(fix,p+13),u16(fix,p+15); doy=stamp&0x1FF; gw0=fix[p+38]
+        if not (1<=doy<=366 and 2024<=year<=2045 and 0<=gw0<=60):continue
+        date=fm_date(stamp,year)
+        raw.append({'fixture_offset':p,'competition_id':comp,'home_tid':home,'away_tid':away,
+                    'date':date,'date_stamp':stamp,'year':year,'raw_gameweek':gw0+1,'gameweek':gw0+1,
+                    'season_start':_season_start_for_date(date),'status':'future','home_score':None,'away_score':None,
+                    'source':'fm_fix_man'})
+    grouped=collections.defaultdict(list)
+    for r in raw: grouped[(r['competition_id'],r['season_start'])].append(r)
+    groups=[]
+    shapes={(v['fixtures'],v['teams'],v['rounds'],v['per_round']):name for name,v in SUPPORTED_LEAGUES.items()}
+    for (comp,season),rows in grouped.items():
+        ded=[];seen=set()
+        for r in sorted(rows,key=lambda x:x['fixture_offset']):
+            k=(r['home_tid'],r['away_tid'],r['date'],r['raw_gameweek'])
+            if k in seen:continue
+            seen.add(k);ded.append(r)
+        teams={x for r in ded for x in (r['home_tid'],r['away_tid'])}
+        gws=collections.Counter(r['raw_gameweek'] for r in ded)
+        league_name=None
+        for (fixture_count,team_count,round_count,per_round),name in shapes.items():
+            if (len(ded)==fixture_count and len(teams)==team_count and
+                set(gws)==set(range(1,round_count+1)) and all(v==per_round for v in gws.values())):
+                league_name=name;break
+        groups.append({'competition_id':comp,'season_start':season,'rows':ded,'teams':teams,'gws':gws,
+                       'exact':league_name is not None,'league_shape':league_name})
+    return groups
+
+
+def select_championship_fixtures(fix:bytes,clubs:dict[int,Club],expected_names:set[str]|None=None,
+                                 expected_league:str|None=None)->tuple[list[dict[str,Any]],dict[str,Any]]:
+    """Select the current supported domestic league without trusting a fixed FM competition id.
+
+    Manual league selection is a HARD constraint.  Auto detection never allows old retained
+    match-detail from an earlier season/division to drag the save back into that old league.
+    It first restricts candidates to the newest season present in the fixture calendar.
+    """
+    groups=scan_fixture_groups(fix)
+    exact_all=[g for g in groups if g['exact']]
+    if not exact_all:
+        near=sorted(groups,key=lambda g:(abs(len(g['teams'])-24),-g['season_start']))[:10]
+        summary='; '.join(f"comp={g['competition_id']} season={g['season_start']} fixtures={len(g['rows'])} teams={len(g['teams'])} gws={len(g['gws'])} shape={g.get('league_shape')}" for g in near)
+        raise RuntimeError('No supported full league season could be identified. Candidates: '+summary)
+
+    requested=expected_league if expected_league in SUPPORTED_LEAGUES else None
+    if requested:
+        exact=[g for g in exact_all if g.get('league_shape')==requested]
+        if not exact:
+            raise RuntimeError(f'Manual league selection was {requested}, but no complete {requested} season exists in this save. The selection will not be overridden.')
+        newest=max(g['season_start'] for g in exact)
+        exact=[g for g in exact if g['season_start']==newest]
+        selection_mode='user_preference_locked'
+    else:
+        newest=max(g['season_start'] for g in exact_all)
+        exact=[g for g in exact_all if g['season_start']==newest]
+        shapes={g.get('league_shape') for g in exact}
+        if len(shapes)>1:
+            summary=', '.join(sorted(str(x) for x in shapes))
+            raise RuntimeError(f'Current season {newest}/{str(newest+1)[-2:]} contains both supported English leagues ({summary}). Historical retained-match identity is deliberately ignored because a promoted/relegated human club may have old division data. Choose the current league once; the choice will be locked for this import.')
+        selection_mode='auto_latest_season'
+
+    scored=[]
+    candidate_debug=[]
+    for g in exact:
+        try:
+            sh=derive_fixture_to_club_shift(g['teams'],clubs,expected_names if requested else None)
+            mapped={normalize_club_name(clubs[tid-sh].short or clubs[tid-sh].name) for tid in g['teams'] if tid-sh in clubs}
+            overlap=len(mapped & expected_names) if (requested and expected_names) else 0
+            legacy_hint=1 if (g.get('league_shape')=='EFL Championship' and g['competition_id']==CHAMPIONSHIP_FIXTURE_COMP_ID) else 0
+            # Within the already locked league/current season, identity overlap only breaks ties.
+            score=(overlap,legacy_hint,-abs(sh),-g['competition_id'])
+            scored.append((score,g,sh,mapped))
+            candidate_debug.append({'competition_id':g['competition_id'],'season_start':g['season_start'],
+                                    'league_shape':g.get('league_shape'),'shift':sh,'mapped_clubs':sorted(mapped),
+                                    'identity_overlap':overlap})
+        except Exception as e:
+            candidate_debug.append({'competition_id':g['competition_id'],'season_start':g['season_start'],
+                                    'league_shape':g.get('league_shape'),'error':str(e)})
+            continue
+    if not scored:
+        raise RuntimeError('Supported current-season fixture candidates were found, but none could be linked cleanly to English club identities in this save.')
+    scored.sort(key=lambda x:x[0],reverse=True)
+    score,g,shift,mapped=scored[0]
+    rows=g['rows'];gw_info=_normalize_gameweeks(rows);spec=SUPPORTED_LEAGUES[g['league_shape']]
+    info={'competition_id':g['competition_id'],'season_start':g['season_start'],'fixture_to_club_shift':shift,
+          'candidate_groups':len(groups),'exact_candidate_groups':len(exact_all),
+          'current_season_candidate_groups':len(exact),'current_season_candidates':candidate_debug[:24],
+          'requested_league':requested,'selection_mode':selection_mode,
+          'rich_name_overlap':score[0],'competition':g['league_shape'],'competition_code':spec['code'],
+          'team_count':spec['teams'],'total_gameweeks':spec['rounds'],'fixture_count':spec['fixtures'],
+          'gameweek_relabels':gw_info['raw_round_relabels'],'calendar_gameweek_windows':gw_info['calendar_windows'],
+          'calendar_reassigned_count':gw_info['calendar_reassigned_count'],
+          'calendar_reassigned_examples':gw_info['calendar_reassigned_examples']}
+    return rows,info
+
+def scan_clubs(db: bytes) -> dict[int, Club]:
+    # Scan only FFFFFFFF anchors, then validate the proven entity-head shape 22 bytes before name length.
+    out: dict[int,Club] = {}
+    for m in re.finditer(b'\xff\xff\xff\xff', db):
+        ff=m.start(); len_at=ff+22
+        if len_at < 39 or len_at+8 >= len(db): continue
+        try:
+            n1=u32(db,len_at)
+            if not 3<=n1<=64: continue
+            ns=len_at+4
+            name=db[ns:ns+n1].decode('utf-8')
+            sa=ns+n1; n2=u32(db,sa)
+            if not 2<=n2<=32: continue
+            short=db[sa+4:sa+4+n2].decode('utf-8')
+            if not name or not short or any(ord(c)<32 for c in name+short): continue
+            ff2=u32(db,len_at-22)
+            if ff2 != 0xFFFFFFFF: continue
+            eid=u32(db,len_at-39); uid=u32(db,len_at-35); uid2=u32(db,len_at-31)
+            zero=db[len_at-27]
+            nation1=u32(db,len_at-14); loc=u32(db,len_at-18); nation3=u32(db,len_at-26)
+            if zero!=0 or eid in (0,0xFFFFFFFF) or uid in (0,0xFFFFFFFF) or uid!=uid2: continue
+            if not (nation1==nation3 or nation1==loc or nation3==loc): continue
+            if any(x==0 or x>10000 for x in (nation1,loc,nation3)): continue
+            out[eid]=Club(eid,uid,name,short,nation1)
+        except Exception:
+            continue
+    return out
+
+
+def derive_fixture_to_club_shift(team_ids: set[int], clubs: dict[int,Club], expected_names:set[str]|None=None) -> int:
+    # Team ids and club eids are different namespaces. Derive their constant offset from this save.
+    candidates=collections.Counter()
+    english={eid for eid,c in clubs.items() if c.nation_id==139}
+    # Fast likely range; choose a shift that maps all 24 fixture-team ids to English clubs.
+    for shift in range(-512,513):
+        n=sum(1 for tid in team_ids if tid-shift in english)
+        if n: candidates[shift]=n
+    if not candidates: raise RuntimeError('Could not link fixture team ids to club entity ids')
+    maxn=max(candidates.values())
+    tied=[sh for sh,n in candidates.items() if n==maxn]
+    if expected_names:
+        def score(sh):
+            mapped={normalize_club_name(clubs[tid-sh].short or clubs[tid-sh].name) for 
+
+=== PY requested_league ===
+index=11598
+
+     k=(r['home_tid'],r['away_tid'],r['date'],r['raw_gameweek'])
+            if k in seen:continue
+            seen.add(k);ded.append(r)
+        teams={x for r in ded for x in (r['home_tid'],r['away_tid'])}
+        gws=collections.Counter(r['raw_gameweek'] for r in ded)
+        league_name=None
+        for (fixture_count,team_count,round_count,per_round),name in shapes.items():
+            if (len(ded)==fixture_count and len(teams)==team_count and
+                set(gws)==set(range(1,round_count+1)) and all(v==per_round for v in gws.values())):
+                league_name=name;break
+        groups.append({'competition_id':comp,'season_start':season,'rows':ded,'teams':teams,'gws':gws,
+                       'exact':league_name is not None,'league_shape':league_name})
+    return groups
+
+
+def select_championship_fixtures(fix:bytes,clubs:dict[int,Club],expected_names:set[str]|None=None,
+                                 expected_league:str|None=None)->tuple[list[dict[str,Any]],dict[str,Any]]:
+    """Select the current supported domestic league without trusting a fixed FM competition id.
+
+    Manual league selection is a HARD constraint.  Auto detection never allows old retained
+    match-detail from an earlier season/division to drag the save back into that old league.
+    It first restricts candidates to the newest season present in the fixture calendar.
+    """
+    groups=scan_fixture_groups(fix)
+    exact_all=[g for g in groups if g['exact']]
+    if not exact_all:
+        near=sorted(groups,key=lambda g:(abs(len(g['teams'])-24),-g['season_start']))[:10]
+        summary='; '.join(f"comp={g['competition_id']} season={g['season_start']} fixtures={len(g['rows'])} teams={len(g['teams'])} gws={len(g['gws'])} shape={g.get('league_shape')}" for g in near)
+        raise RuntimeError('No supported full league season could be identified. Candidates: '+summary)
+
+    requested=expected_league if expected_league in SUPPORTED_LEAGUES else None
+    if requested:
+        exact=[g for g in exact_all if g.get('league_shape')==requested]
+        if not exact:
+            raise RuntimeError(f'Manual league selection was {requested}, but no complete {requested} season exists in this save. The selection will not be overridden.')
+        newest=max(g['season_start'] for g in exact)
+        exact=[g for g in exact if g['season_start']==newest]
+        selection_mode='user_preference_locked'
+    else:
+        newest=max(g['season_start'] for g in exact_all)
+        exact=[g for g in exact_all if g['season_start']==newest]
+        shapes={g.get('league_shape') for g in exact}
+        if len(shapes)>1:
+            summary=', '.join(sorted(str(x) for x in shapes))
+            raise RuntimeError(f'Current season {newest}/{str(newest+1)[-2:]} contains both supported English leagues ({summary}). Historical retained-match identity is deliberately ignored because a promoted/relegated human club may have old division data. Choose the current league once; the choice will be locked for this import.')
+        selection_mode='auto_latest_season'
+
+    scored=[]
+    candidate_debug=[]
+    for g in exact:
+        try:
+            sh=derive_fixture_to_club_shift(g['teams'],clubs,expected_names if requested else None)
+            mapped={normalize_club_name(clubs[tid-sh].short or clubs[tid-sh].name) for tid in g['teams'] if tid-sh in clubs}
+            overlap=len(mapped & expected_names) if (requested and expected_names) else 0
+            legacy_hint=1 if (g.get('league_shape')=='EFL Championship' and g['competition_id']==CHAMPIONSHIP_FIXTURE_COMP_ID) else 0
+            # Within the already locked league/current season, identity overlap only breaks ties.
+            score=(overlap,legacy_hint,-abs(sh),-g['competition_id'])
+            scored.append((score,g,sh,mapped))
+            candidate_debug.append({'competition_id':g['competition_id'],'season_start':g['season_start'],
+                                    'league_shape':g.get('league_shape'),'shift':sh,'mapped_clubs':sorted(mapped),
+                                    'identity_overlap':overlap})
+        except Exception as e:
+            candidate_debug.append({'competition_id':g['competition_id'],'season_start':g['season_start'],
+                                    'league_shape':g.get('league_shape'),'error':str(e)})
+            continue
+    if not scored:
+        raise RuntimeError('Supported current-season fixture candidates were found, but none could be linked cleanly to English club identities in this save.')
+    scored.sort(key=lambda x:x[0],reverse=True)
+    score,g,shift,mapped=scored[0]
+    rows=g['rows'];gw_info=_normalize_gameweeks(rows);spec=SUPPORTED_LEAGUES[g['league_shape']]
+    info={'competition_id':g['competition_id'],'season_start':g['season_start'],'fixture_to_club_shift':shift,
+          'candidate_groups':len(groups),'exact_candidate_groups':len(exact_all),
+          'current_season_candidate_groups':len(exact),'current_season_candidates':candidate_debug[:24],
+          'requested_league':requested,'selection_mode':selection_mode,
+          'rich_name_overlap':score[0],'competition':g['league_shape'],'competition_code':spec['code'],
+          'team_count':spec['teams'],'total_gameweeks':spec['rounds'],'fixture_count':spec['fixtures'],
+          'gameweek_relabels':gw_info['raw_round_relabels'],'calendar_gameweek_windows':gw_info['calendar_windows'],
+          'calendar_reassigned_count':gw_info['calendar_reassigned_count'],
+          'calendar_reassigned_examples':gw_info['calendar_reassigned_examples']}
+    return rows,info
+
+def scan_clubs(db: bytes) -> dict[int, Club]:
+    # Scan only FFFFFFFF anchors, then validate the proven entity-head shape 22 bytes before name length.
+    out: dict[int,Club] = {}
+    for m in re.finditer(b'\xff\xff\xff\xff', db):
+        ff=m.start(); len_at=ff+22
+        if len_at < 39 or len_at+8 >= len(db): continue
+        try:
+            n1=u32(db,len_at)
+            if not 3<=n1<=64: continue
+            ns=len_at+4
+            name=db[ns:ns+n1].decode('utf-8')
+            sa=ns+n1; n2=u32(db,sa)
+            if not 2<=n2<=32: continue
+            short=db[sa+4:sa+4+n2].decode('utf-8')
+            if not name or not short or any(ord(c)<32 for c in name+short): continue
+            ff2=u32(db,len_at-22)
+            if ff2 != 0xFFFFFFFF: continue
+            eid=u32(db,len_at-39); uid=u32(db,len_at-35); uid2=u32(db,len_at-31)
+            zero=db[len_at-27]
+            nation1=u32(db,len_at-14); loc=u32(db,len_at-18); nation3=u32(db,len_at-26)
+            if zero!=0 or eid in (0,0xFFFFFFFF) or uid in (0,0xFFFFFFFF) or uid!=uid2: continue
+            if not (nation1==nation3 or nation1==loc or nation3==loc): continue
+            if any(x==0 or x>10000 for x in (nation1,loc,nation3)): continue
+            out[eid]=Club(eid,uid,name,short,nation1)
+        except Exception:
+            continue
+    return out
+
+
+def derive_fixture_to_club_shift(team_ids: set[int], clubs: dict[int,Club], expected_names:set[str]|None=None) -> int:
+    # Team ids and club eids are different namespaces. Derive their constant offset from this save.
+    candidates=collections.Counter()
+    english={eid for eid,c in clubs.items() if c.nation_id==139}
+    # Fast likely range; choose a shift that maps all 24 fixture-team ids to English clubs.
+    for shift in range(-512,513):
+        n=sum(1 for tid in team_ids if tid-shift in english)
+        if n: candidates[shift]=n
+    if not candidates: raise RuntimeError('Could not link fixture team ids to club entity ids')
+    maxn=max(candidates.values())
+    tied=[sh for sh,n in candidates.items() if n==maxn]
+    if expected_names:
+        def score(sh):
+            mapped={normalize_club_name(clubs[tid-sh].short or clubs[tid-sh].name) for tid in team_ids if tid-sh in clubs}
+            return len(mapped & expected_names)
+        tied.sort(key=lambda sh:(score(sh),-abs(sh)),reverse=True)
+    shift=tied[0]; n=candidates[shift]
+    if n != len(team_ids):
+        raise RuntimeError(f'Fixture→club identity mapping incomplete ({n}/{len(team_ids)})')
+    return shift
+
+
+def read_squad_list(db: bytes, head: int, next_head: int|None=None) -> list[int]:
+    end=min(next_head or len(db), head+6000)
+    at=head+26
+    while at+6<end:
+        p=db.find(b'\xff\xff\xff\xff',at,end)
+        if p<0:return []
+        cnt=u16(db,p+4)
+        if 1<=cnt<=80:
+            list_at=p+6; list_end=list_at+cnt*4
+            if list_end+8<=end:
+                vals=[u32(db,list_at+i*4) for i in range(cnt)]
+                if all(0<v<3_000_000 for v in vals) and len(set(vals))==cnt:
+                    cap=u32(db,list_end); vice=u32(db,list_end+4)
+                    consistent=lambda v: v in (0,0xFFFFFFFF) or v in vals
+                    asc=sum(1 for a,b in zip(vals[:7],vals[1:8]) if a<b)
+                    if (asc>=min(6,max(0,len(vals)-1)) or cap in vals or vice in vals or (consistent(cap) and consistent(vice))):
+                        return vals
+        at=p+1
+    return []
+
+
+def _rich_members_by_club(rich:list[dict[str,Any]]|None, selected_clubs:dict[int,Club])->dict[int,set[int]]:
+    out=collections.defaultdict(set)
+    if not rich:return out
+    byname={}
+    for eid,c in selected_clubs.items():
+        byname[normalize_club_name(c.name)]=eid
+        byname[normalize_club_name(c.short)]=eid
+    for m in rich:
+        for side,key in (('home','home_players'),('away','away_players')):
+            ceid=byname.get(normalize_club_name(m.get(side,'')))
+            if ceid is None:continue
+            for r in m.get(key,[]):
+                try:out[ceid].add(int(r['player_id']))
+                except Exception:pass
+    return out
+
+
+def selected_rich_team_aliases(selected_clubs:dict[int,Club])->dict[int,str]:
+    """Build unambiguous match-header aliases only for clubs in the already-selected league.
+
+    This is deliberately post-selection: it cannot influence which league/season is selected.
+    It exists only to recover player history in saves whose retain
+
+=== PY preferred_league ===
+index=92912
+
+da h:(str(h.get('date') or ''),int(h.get('gameweek') or 0)))
+        _hist_rows=list(p.get('history') or [])
+        _hist_gws=sorted({int(h.get('gameweek') or 0) for h in _hist_rows if int(h.get('gameweek') or 0)>0})
+        _hist_dates=sorted({str(h.get('date')) for h in _hist_rows if h.get('date')})
+        p['retained_history_evidence']={
+            'decoded_rows':len(_hist_rows),
+            'decoded_gameweeks':_hist_gws,
+            'first_decoded_date':(_hist_dates[0] if _hist_dates else None),
+            'last_decoded_date':(_hist_dates[-1] if _hist_dates else None),
+            'history_is_partial_or_unknown':True,
+            'zero_stats_are_observed_only_within_decoded_rows':True,
+            'source':'decoded_rich_history'
+        }
+        p['discipline_evidence']={
+            'yellow_cards':int(p.get('yc',0) or 0),'red_cards':int(p.get('rc',0) or 0),
+            'history_rows':len(p.get('history') or []),
+            'last_card_date':(card_rows[-1].get('date') if card_rows else None),
+            'last_card_gameweek':(card_rows[-1].get('gameweek') if card_rows else None),
+            'source':'decoded_rich_history'
+        }
+    return history_identity_diag
+
+def gameweek_schedule_meta(fixtures:list[dict[str,Any]], total_gameweeks:int|None=None)->dict[str,Any]:
+    max_gw=int(total_gameweeks or max((int(f.get('round_gameweek') or f.get('gameweek') or 0) for f in fixtures),default=46))
+    total=collections.Counter(int(f['gameweek']) for f in fixtures)
+    played=collections.Counter(int(f['gameweek']) for f in fixtures if f['status']=='played')
+    fully=[gw for gw in range(1,max_gw+1) if total[gw]>0 and played[gw]==total[gw]]
+    contiguous=0;fullset=set(fully)
+    for gw in range(1,max_gw+1):
+        if gw in fullset:contiguous=gw
+        else:break
+    latest_result=max((int(f['gameweek']) for f in fixtures if f['status']=='played'),default=0)
+    club_names=sorted({x for f in fixtures for x in (f.get('home'),f.get('away')) if x})
+    doubles={};blanks={}
+    for gw in range(1,max_gw+1):
+        apps=collections.Counter()
+        for f in fixtures:
+            if int(f['gameweek'])!=gw:continue
+            if f.get('home'):apps[f['home']]+=1
+            if f.get('away'):apps[f['away']]+=1
+        dg=sorted(c for c,n in apps.items() if n>1);bg=sorted(c for c in club_names if apps[c]==0)
+        if dg:doubles[str(gw)]=dg
+        if bg:blanks[str(gw)]=bg
+    return {'fixture_counts':{str(gw):total[gw] for gw in range(1,max_gw+1)},
+            'played_counts':{str(gw):played[gw] for gw in range(1,max_gw+1)},
+            'fully_completed':fully,'completed_contiguous':contiguous,'latest_result':latest_result,
+            'double_gameweek_clubs':doubles,'blank_gameweek_clubs':blanks,'total_gameweeks':max_gw}
+
+def build_table(fixtures:list[dict[str,Any]]) -> list[dict[str,Any]]:
+    clubs=sorted({x for f in fixtures for x in (f['home'],f['away'])})
+    st={c:{'club':c,'P':0,'W':0,'D':0,'L':0,'GF':0,'GA':0,'adjustment':(-4 if c=='Southampton' else 0)} for c in clubs}
+    for f in fixtures:
+        if f['status']!='played':continue
+        h,a=f['home'],f['away'];hg,ag=int(f['home_score']),int(f['away_score'])
+        sh,sa=st[h],st[a]
+        for x in (sh,sa):x['P']+=1
+        sh['GF']+=hg;sh['GA']+=ag;sa['GF']+=ag;sa['GA']+=hg
+        if hg>ag:sh['W']+=1;sa['L']+=1
+        elif ag>hg:sa['W']+=1;sh['L']+=1
+        else:sh['D']+=1;sa['D']+=1
+    rows=[]
+    for x in st.values():
+        x['GD']=x['GF']-x['GA'];x['Pts']=x['W']*3+x['D']+x['adjustment'];rows.append(x)
+    rows.sort(key=lambda x:(x['Pts'],x['GD'],x['GF']),reverse=True)
+    for i,x in enumerate(rows,1):x['position']=i
+    return rows
+
+
+def build_star_teams(players:list[dict[str,Any]],latest_gw:int)->dict[str,dict[str,Any]]:
+    out={}
+    formations=[]
+    for d in range(3,6):
+        for m in range(2,6):
+            f=10-d-m
+            if 1<=f<=3:formations.append((d,m,f))
+    for gw in range(1,max(1,latest_gw)+1):
+        bypos={pos:sorted((p for p in players if p.get('pos')==pos),key=lambda p:(int(p.get('weekly_points',{}).get(str(gw),0)),p.get('fantasy_points',0)),reverse=True) for pos in ('GK','DEF','MID','FWD')}
+        best=None
+        for d,m,f in formations:
+            picks=bypos['GK'][:1]+bypos['DEF'][:d]+bypos['MID'][:m]+bypos['FWD'][:f]
+            if len(picks)!=11 or len({p['id'] for p in picks})!=11:continue
+            pts=sum(int(p.get('weekly_points',{}).get(str(gw),0)) for p in picks)
+            if best is None or pts>best[0]:best=(pts,[p['id'] for p in picks],{'GK':1,'DEF':d,'MID':m,'FWD':f})
+        if best:out[str(gw)]={'points':best[0],'ids':best[1],'formation':best[2]}
+    return out
+
+def _build_payload(save_path:Path,fingerprint:str,db,fix:bytes,include_rich:bool=True)->dict[str,Any]:
+    all_clubs=scan_clubs(db)
+    rich_raw=rich_extract_named(save_path,all_clubs) if include_rich else []
+    comp_counts=collections.Counter(m.get('competition') for m in rich_raw if m.get('competition'))
+    requested_league=preferred_league if preferred_league in SUPPORTED_LEAGUES else None
+    preselect_rich=[m for m in rich_raw if (not requested_league or m.get('competition')==requested_league)]
+    expected_names={normalize_club_name(m[k]) for m in preselect_rich for k in ('home','away')} if (requested_league and preselect_rich) else None
+    fixtures,fixture_info=select_championship_fixtures(fix,all_clubs,expected_names,requested_league)
+    expected_league=fixture_info['competition']
+    rich_raw=[m for m in rich_raw if m.get('competition')==expected_league]
+    team_ids={x for f in fixtures for x in (f['home_tid'],f['away_tid'])}
+    shift=fixture_info['fixture_to_club_shift']
+    selected={tid-shift:all_clubs[tid-shift] for tid in team_ids}
+    # Second retained-match pass, AFTER league selection. This cannot change the chosen
+    # competition or club set; it only attempts to recover richer player history for the
+    # selected clubs (notably some Premier League saves).
+    selected_aliases=selected_rich_team_aliases(selected)
+    selected_names={normalize_club_name(c.short or c.name) for c in selected.values()}
+    post_raw=[]
+    for i,name in enumerate(rich_names):
+        p=Path(f'/tmp/rich_{i}.bin')
+        if not p.exists(): continue
+        buf=p.read_bytes()
+        for m in _rich_extract_member(buf,selected_aliases,name):
+            if m.get('competition')!=fixture_info['competition']: continue
+            if normalize_club_name(m.get('home','')) not in selected_names or normalize_club_name(m.get('away','')) not in selected_names: continue
+            post_raw.append(m)
+        p.unlink(missing_ok=True)
+    post_recovered=0
+    if post_raw:
+        combined=[];seen_post=set()
+        for m in list(rich_raw)+post_raw:
+            key=(m.get('competition'),m.get('home'),m.get('away'),m.get('home_score'),m.get('away_score'),
+                 tuple(x.get('player_id') for x in m.get('home_players',[])),tuple(x.get('player_id') for x in m.get('away_players',[])))
+            if key in seen_post: continue
+            seen_post.add(key);combined.append(m)
+        post_recovered=max(0,len(combined)-len(rich_raw));rich_raw=combined
+    fixture_name={tid:normalize_club_name(selected[tid-shift].short or selected[tid-shift].name) for tid in team_ids}
+    for i,f in enumerate(sorted(fixtures,key=lambda x:(x['gameweek'],x['date'],x['home_tid'],x['away_tid'])),1):
+        f['fixture_id']=i;f['home']=fixture_name[f['home_tid']];f['away']=fixture_name[f['away_tid']]
+    results=scan_completed_results(db,fixtures)
+    # First recover senior squads independently. If separate retained match-detail files are
+    # missing, use grounded completed-result anchors inside game_db.dat to recover old player rows.
+    squads,squad_diag=scan_first_team_squads(db,selected,rich_raw)
+    bad_squads={eid:len(vals) for eid,vals in squads.items() if not (12<=len(vals)<=45)}
+    if squad_diag.get('missing_club_eids') or bad_squads:
+        raise RuntimeError(f"Current first-team squad decode failed safely; missing={squad_diag.get('missing_club_eids',[])} invalid_sizes={bad_squads}. Import blocked rather than guessing from match history.")
+    game_db_rich,game_db_rich_diag=recover_game_db_rich_matches(
+        db,fixtures,selected,squads,shift,fixture_info['competition'])
+    if game_db_rich:
+        existing={(normalize_club_name(m.get('home','')),normalize_club_name(m.get('away','')),
+                   int(m.get('home_score') or 0),int(m.get('away_score') or 0)) for m in rich_raw}
+        for m in game_db_rich:
+            k=(normalize_club_name(m.get('home','')),normalize_club_name(m.get('away','')),
+               int(m.get('home_score') or 0),int(m.get('away_score') or 0))
+            if k not in existing:
+                rich_raw.append(m);existing.add(k)
+        # v68: recovered match participation never changes current squad membership.
+    target_eids={p for vals in squads.values() for p in vals}
+    for m in rich_raw:
+        for key in ('home_players','away_players'):
+            for r in m.get(key,[]):target_eids.add(int(r['player_id']))
+    people=bind_target_people(db,target_eids)
+    players,unresolved,ambiguous=build_players(squads,selected,people,rich_raw)
+    if ambiguous:
+        raise RuntimeError(f"Current club membership is ambiguous for {len(ambiguous)} player(s); import blocked instead of resolving from match/opponent history.")
+    pbyeid={int(p['pid']):p for p in players}
+    rich_matches=join_rich_matches(rich_raw,fixtures,pbyeid) if rich_raw else []
+    _rich_fixture_ids={int(m.get('fixture_id') or 0) for m in rich_matches}
+    _coverage={}
+    for _gw in sorted({int(f.get('gameweek') or 0) for f in fixtures if int(f.get('gameweek') or 0)>0}):
+        _pf=[f for f in fixtures if int(f.get('gameweek') or 0)==_gw and f.get('status')=='played']
+        _coverage[str(_gw)]={'played_fixtures':len(_pf),'rich_fixtures':sum(1 for f in _pf if int(f.get('fixture_id') or 0) in _rich_fixture_ids),
+                            'mis
+
+=== PY league_request ===
+index=-1
