@@ -21,7 +21,7 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
         'identity_rounds':0,'ambiguous_seed_player_ids':0,'transfer_conflict_neutralized_players':0,
         'adaptive_cluster_edges':0,'adaptive_cluster_edges_rejected_conflict':0,
         'near_duplicate_candidate_pairs_collapsed':0,'near_duplicate_candidate_pairs_soft_collapsed':0,
-        'temporal_transfer_fixture_evidence':0,'variable_squad_size_candidate_pairs':0
+        'temporal_transfer_fixture_evidence':0,'variable_squad_size_candidate_pairs':0,'sub40_stat_members':0
     }
     club_sets={eid:set(int(x) for x in squads.get(eid,[])) for eid in selected_clubs}
     membership_owners=collections.defaultdict(set)
@@ -47,7 +47,8 @@ def recover_unlabelled_rich_members(rich_names:list[str], selected_clubs:dict[in
         buf=path.read_bytes()
         stats=_rich_scan_stats_fast(buf,0,len(buf))
         diagnostics['stat_records']+=len(stats)
-        if len(stats)<40:continue
+        if len(stats)<36:continue
+        if len(stats)<40:diagnostics['sub40_stat_members']+=1
         diagnostics['members_with_stats']+=1
         pairs=_rich_candidate_squad_pairs(stats,played_score_pairs)
         diagnostics['candidate_pairs']+=len(pairs)
