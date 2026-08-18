@@ -1,0 +1,2 @@
+v76: current squad reader now requires positive structural support; original sentinel-footer decoder retained as repeated-consensus-only fallback
+verify_ok=1 strong_reader=1 legacy_consensus_fallback=1
