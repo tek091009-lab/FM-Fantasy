@@ -51,7 +51,7 @@ jobs:
             if printf '%s' "$body" | grep -q 'authfix.js?v=12' \
               && printf '%s' "$body" | grep -q 'availabilitytruth.js?v=4' \
               && printf '%s' "$body" | grep -q 'updateguard.js?v=3' \
-              && printf '%s' "$body" | grep -q 'clearfix.js?v=2' \
+              && printf '%s' "$body" | grep -q 'clearfix.js?v=3' \
               && printf '%s' "$body" | grep -q 'identityguard.js?v=3' \
               && printf '%s' "$body" | grep -q 'worldscorefix.js?v=5'; then
               ok=1;break
@@ -61,13 +61,15 @@ jobs:
           [ "$ok" -eq 1 ] || { echo 'Live index did not expose clean-rebuild scripts' >&2; exit 1; }
 
           updateguard="$(curl -fsSL --max-time 20 "$base/updateguard.js?v=3&sha=${GITHUB_SHA}")"
-          clearfix="$(curl -fsSL --max-time 20 "$base/clearfix.js?v=2&sha=${GITHUB_SHA}")"
+          clearfix="$(curl -fsSL --max-time 20 "$base/clearfix.js?v=3&sha=${GITHUB_SHA}")"
           availability="$(curl -fsSL --max-time 20 "$base/availabilitytruth.js?v=4&sha=${GITHUB_SHA}")"
           identity="$(curl -fsSL --max-time 20 "$base/identityguard.js?v=3&sha=${GITHUB_SHA}")"
           printf '%s' "$updateguard" | grep -q 'world-update-guard-v3-identity-history-safe'
           printf '%s' "$updateguard" | grep -q 'retained matches do not reproduce the official score'
           printf '%s' "$clearfix" | grep -q 'fmfantasy_reset_world_season'
           printf '%s' "$clearfix" | grep -q 'fmFantasyLastSeasonResetBackup'
+          printf '%s' "$clearfix" | grep -q 'clearBrowserManagerSeason'
+          printf '%s' "$clearfix" | grep -q 'resetLeagueSnapshots'
           printf '%s' "$availability" | grep -q 'availability-truth-v4'
           printf '%s' "$availability" | grep -q 'discipline.dat/active-ban-v1'
           printf '%s' "$identity" | grep -q 'diagnostic-only'
@@ -82,23 +84,8 @@ jobs:
           html=Path('/tmp/live_app.html').read_text(encoding='utf-8')
           m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m,'live embedded importer missing'
           py=base64.b64decode(m.group(1)).decode('utf-8')
-          required=[
-            'strict_current_db_membership_only_v68',
-            'strict-db-membership-only-no-history-mutation-v68',
-            'v68_current-squad-authority_previous-gws-quarantined',
-            'def _rich_candidate_twenty_pairs',
-            'named_header_candidate_v69',
-            'official-score-plus-strict-current-cohort-v69',
-            'rich_fixture_coverage',
-            'same_match_both_clubs',
-          ]
-          forbidden=[
-            "cur.extend(add);diag['rich_augmented_players']+=len(add)",
-            'if played_club.get(eid) in clubs: ceid=played_club[eid]',
-            'infer_hybrid_positions_from_match_markers(rich,players_by_eid)',
-            "candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates",
-            'bounded 18-22 rows per side',
-          ]
+          required=['strict_current_db_membership_only_v68','strict-db-membership-only-no-history-mutation-v68','v68_current-squad-authority_previous-gws-quarantined','def _rich_candidate_twenty_pairs','named_header_candidate_v69','official-score-plus-strict-current-cohort-v69','rich_fixture_coverage','same_match_both_clubs']
+          forbidden=["cur.extend(add);diag['rich_augmented_players']+=len(add)",'if played_club.get(eid) in clubs: ceid=played_club[eid]','infer_hybrid_positions_from_match_markers(rich,players_by_eid)',"candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates",'bounded 18-22 rows per side']
           for t in required:assert t in py,'live importer missing '+t
           for t in forbidden:assert t not in py,'live importer contains forbidden '+t
           compile(py,'fm_importer_live.py','exec')
@@ -108,7 +95,7 @@ jobs:
           block=html[start:end]
           for t in ['discipline.dat/active-ban-v1','injury_manager.dat/current-window']:assert t in block,'live availability missing '+t
           for t in ['5 yellow cards','second-yellow red','fmClubPlayedAfter(payload,p.club,inc.date)']:assert t not in block,'live heuristic remains '+t
-          print('deep live V69 clean-rebuild verification passed')
+          print('deep live V70 reset-safe clean-rebuild verification passed')
           PY
       - name: Record verified live deployment
         shell: bash
@@ -117,11 +104,11 @@ jobs:
         run: |
           set -euo pipefail
           stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"verification\": \"v69-clean-rebuild-live-preflight-and-postdeploy\",\n  \"authfix\": \"v12-authoritative-cloud\",\n  \"availability_truth\": \"v4-direct-structural-evidence\",\n  \"current_squad_identity\": \"v68-strict-db-membership-only\",\n  \"retained_match_validation\": \"v69-official-score-plus-current-cohort\",\n  \"update_guard\": \"v3-identity-history-safe\",\n  \"clear_database\": \"v2-backed-up-season-reset\",\n  \"server_history_lock\": \"accepted-gameweeks-immutable\",\n  \"server_price_history_lock\": \"accepted-price-events-immutable\",\n  \"identity_guard\": \"v3-diagnostic-only\",\n  \"world_scorer\": \"v5-chip-persistence\"\n}\n' "$GITHUB_SHA" "$stamp")"
+          json="$(printf '{\n  \"verified_live_sha\": \"%s\",\n  \"verified_at\": \"%s\",\n  \"verification\": \"v70-reset-safe-clean-rebuild-live-preflight-and-postdeploy\",\n  \"authfix\": \"v12-authoritative-cloud\",\n  \"availability_truth\": \"v4-direct-structural-evidence\",\n  \"current_squad_identity\": \"v68-strict-db-membership-only\",\n  \"retained_match_validation\": \"v69-official-score-plus-current-cohort\",\n  \"update_guard\": \"v3-identity-history-safe\",\n  \"clear_database\": \"v3-backed-up-reset-plus-stale-manager-wipe\",\n  \"server_history_lock\": \"accepted-gameweeks-immutable\",\n  \"server_price_history_lock\": \"accepted-price-events-immutable\",\n  \"identity_guard\": \"v3-diagnostic-only\",\n  \"world_scorer\": \"v5-chip-persistence\"\n}\n' "$GITHUB_SHA" "$stamp")"
           content="$(printf '%s' "$json" | base64 -w0)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified v69 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified v70 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified v69 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified v70 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
