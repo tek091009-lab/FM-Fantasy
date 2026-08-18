@@ -1,0 +1,32 @@
+name: Verify V77 current squad completion
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'scripts/assert_v77_single_missing_current_squad.py'
+      - '.github/workflows/verify-v77-current-squad.yml'
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Run V77 regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/assert_v77_single_missing_current_squad.py | tee _v77_current_squad_test.txt
+      - name: Commit result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add _v77_current_squad_test.txt
+          git commit -m 'Record V77 current squad regression result' || exit 0
+          git pull --rebase origin main
+          git push
