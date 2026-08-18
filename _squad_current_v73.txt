@@ -1,0 +1,74 @@
+00348: def scan_first_team_squads(db: bytes, selected_clubs: dict[int,Club], rich:list[dict[str,Any]]|None=None):
+00349:     """Decode CURRENT senior squad membership from club/team records only.
+00350: 
+00351:     Retained match history is deliberately forbidden from adding, moving, selecting or
+00352:     resolving current club membership. If a current first-team list cannot be decoded
+00353:     conservatively, the import must fail upstream rather than inventing a squad.
+00354:     """
+00355:     heads=[]
+00356:     for eid,c in selected_clubs.items():
+00357:         needle=struct.pack('<I',eid)+b'\x00'*10
+00358:         p=0
+00359:         while True:
+00360:             p=db.find(needle,p)
+00361:             if p<0:break
+00362:             if p+26<=len(db) and u32(db,p+18)==c.uid and u32(db,p+22)==c.uid:
+00363:                 heads.append((p,eid,'strict'))
+00364:             p+=1
+00365:     heads.sort()
+00366:     byclub=collections.defaultdict(list)
+00367:     for p,eid,kind in heads:byclub[eid].append((p,kind))
+00368:     all_heads=sorted(p for ps in byclub.values() for p,_ in ps)
+00369:     out={};diag={'fallbacks':[],'missing_club_eids':[],'rich_augmented_players':0,
+00370:                  'policy':'strict_current_db_membership_only_v68','rejected_options':0}
+00371: 
+00372:     def choose_options(options):
+00373:         valid=[]
+00374:         for p,vals,kind in options:
+00375:             if not (12<=len(vals)<=45):
+00376:                 diag['rejected_options']+=1;continue
+00377:             priority=2 if kind=='strict' else 1
+00378:             valid.append(((priority,-abs(len(vals)-28),-p),p,vals,kind))
+00379:         if not valid:return None
+00380:         valid.sort(reverse=True)
+00381:         return valid[0][1:]
+00382: 
+00383:     # Exact team-eid + duplicated club-uid header is the authoritative path.
+00384:     for eid in selected_clubs:
+00385:         options=[]
+00386:         for p,kind in byclub.get(eid,[]):
+00387:             i=bisect.bisect_right(all_heads,p);nxt=all_heads[i] if i<len(all_heads) else None
+00388:             vals=read_squad_list(db,p,nxt)
+00389:             if vals:options.append((p,vals,kind))
+00390:         chosen=choose_options(options)
+00391:         if chosen:
+00392:             _p,vals,_kind=chosen;out[eid]=vals
+00393: 
+00394:     # Conservative fallback: same selected team eid, its club uid nearby, plausible senior size.
+00395:     # No retained-match overlap is used for selection.
+00396:     for eid,c in selected_clubs.items():
+00397:         if eid in out:continue
+00398:         options=[];needle=struct.pack('<I',eid);p=0;seen=set();uidb=struct.pack('<I',c.uid)
+00399:         while True:
+00400:             p=db.find(needle,p)
+00401:             if p<0:break
+00402:             if p in seen:p+=1;continue
+00403:             seen.add(p)
+00404:             window=db[p:min(len(db),p+72)]
+00405:             if uidb not in window:
+00406:                 p+=1;continue
+00407:             vals=read_squad_list(db,p,None)
+00408:             if vals:options.append((p,vals,'relaxed_uid'))
+00409:             p+=1
+00410:         chosen=choose_options(options)
+00411:         if chosen:
+00412:             _p,vals,kind=chosen;out[eid]=vals
+00413:             diag['fallbacks'].append({'club_eid':eid,'method':kind,'players':len(vals)})
+00414: 
+00415:     for eid in selected_clubs:
+00416:         if eid not in out:
+00417:             out[eid]=[];diag['missing_club_eids'].append(eid)
+00418:     return out,diag
+00419: 
+00420: HEADER_PAT=re.compile(rb'.{3}[\x00-\x4c][\x00-\xfa]\x00\x00\x00', re.S)
+00421: 
