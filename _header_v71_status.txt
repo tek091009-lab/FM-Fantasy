@@ -1,5 +1,7 @@
 v71: restored historical HEADER_PAT and passed real find_name_pool_index runtime dependency probe
-restore_rc=0
+restore_header_rc=0
+v72: auto ambiguity prompt restored and manual league choice is sticky through file selection
+league_selector_rc=0
 {
   "checks": {
     "availability_block": true,
@@ -29,12 +31,16 @@ restore_rc=0
       "if played_club.get(eid) in clubs: ceid=played_club[eid]": false,
       "infer_hybrid_positions_from_match_markers(rich,players_by_eid)": false
     },
+    "header_pat_runtime_object": true,
     "index_versions": {
       "availabilitytruth.js?v=4": true,
       "clearfix.js?v=3": true,
       "updateguard.js?v=3": true
     },
+    "name_pool_function": true,
+    "name_pool_runtime_probe": true,
     "required_tokens": {
+      "HEADER_PAT=re.compile": true,
       "def _rich_candidate_twenty_pairs": true,
       "named_header_candidate_v69": true,
       "official-score-plus-strict-current-cohort-v69": true,
