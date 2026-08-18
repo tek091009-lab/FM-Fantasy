@@ -1,0 +1,35 @@
+name: Apply HEADER_PAT v71
+on:
+  push:
+    paths:
+      - 'scripts/restore_header_pat_v71.py'
+      - '.github/workflows/apply-header-pat-v71.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore and runtime-test name pool scanner
+        run: python scripts/restore_header_pat_v71.py
+      - name: Verify packed importer runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/final_preflight_v70.py
+          python - <<'PY'
+          import json
+          r=json.load(open('_preflight_v70.json'))
+          assert r.get('ok') is True,r
+          print('existing V70 preflight still green')
+          PY
+      - name: Commit production importer
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20
+          git commit -m 'Restore HEADER_PAT runtime dependency in importer' || exit 0
+          git pull --rebase origin main
+          git push
