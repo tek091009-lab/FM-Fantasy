@@ -1,4 +1,4 @@
-# v66 production trigger
+# v66 production trigger via merge
 name: Upgrade retained lineup dedupe v66
 on:
   push:
