@@ -1,3 +1,4 @@
+# rerun after fixing embedded-module test harness
 name: Production preflight v70
 on:
   push:
