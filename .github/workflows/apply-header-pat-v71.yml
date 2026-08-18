@@ -1,8 +1,9 @@
-name: Apply HEADER_PAT v71
+name: Apply importer runtime fixes v71-v72
 on:
   push:
     paths:
       - 'scripts/restore_header_pat_v71.py'
+      - 'scripts/fix_league_selector_v72.py'
       - '.github/workflows/apply-header-pat-v71.yml'
 permissions:
   contents: write
@@ -11,15 +12,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply and diagnose V71 runtime fix
+      - name: Apply and diagnose importer runtime fixes
         shell: bash
         run: |
           set +e
           : > _header_v71_status.txt
           python scripts/restore_header_pat_v71.py >> _header_v71_status.txt 2>&1
-          rc=$?
-          echo "restore_rc=$rc" >> _header_v71_status.txt
-          if [ "$rc" -eq 0 ]; then
+          rc1=$?
+          echo "restore_header_rc=$rc1" >> _header_v71_status.txt
+          if [ "$rc1" -eq 0 ]; then
+            python scripts/fix_league_selector_v72.py >> _header_v71_status.txt 2>&1
+            rc2=$?
+          else
+            rc2=99
+          fi
+          echo "league_selector_rc=$rc2" >> _header_v71_status.txt
+          if [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ]; then
             python scripts/final_preflight_v70.py >> _header_v71_status.txt 2>&1
             prc=$?
           else
@@ -28,13 +36,13 @@ jobs:
           echo "preflight_rc=$prc" >> _header_v71_status.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if [ "$rc" -eq 0 ] && [ "$prc" -eq 0 ]; then
+          if [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$prc" -eq 0 ]; then
             git add app/part00 app/part01 app/part02 app/part03 app/part04 app/part05 app/part06 app/part07 app/part08 app/part09 app/part10 app/part11 app/part12 app/part13 app/part14 app/part15 app/part16 app/fix17 app/fix18 app/fix19 app/fix20 _header_v71_status.txt
-            git commit -m 'Restore HEADER_PAT runtime dependency in importer' || true
+            git commit -m 'Restore league ambiguity prompt and sticky manual selection' || true
           else
             git add _header_v71_status.txt
-            git commit -m 'Record HEADER_PAT V71 failure' || true
+            git commit -m 'Record importer V71-V72 failure' || true
           fi
           git pull --rebase origin main
           git push
-          exit $(( rc != 0 || prc != 0 ))
+          exit $(( rc1 != 0 || rc2 != 0 || prc != 0 ))
