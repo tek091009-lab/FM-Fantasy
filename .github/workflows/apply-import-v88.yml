@@ -1,0 +1,50 @@
+name: Apply FM importer and UI v88
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/upgrade_import_v88.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply v88 importer and UI upgrade
+        run: python scripts/upgrade_import_v88.py
+      - name: Verify packed production
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode(); compile(py,'importer.py','exec')
+          for t in ['stable_fixture_key','current-competition-cohort-v86','grounded_fixture_id','observed_midfield_usage_v64_lineup_slot']:
+              assert t in py,t
+          for t in ['compRosterCandidates','Upcoming fixtures only','const all=[...(m.home_players||[]).map','.drawerMatch>strong{color:#78f5c1;font-size:24px']:
+              assert t in html,t
+          assert 'importmodelv86.js?v=1' in Path('index.html').read_text()
+          print('v88 packed production verified')
+          PY
+          node --check importmodelv86.js
+      - name: Commit production upgrade
+        run: |
+          if git diff --quiet -- app index.html importmodelv86.js; then echo 'No changes'; exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app index.html importmodelv86.js
+          git commit -m 'Apply FM importer and UI v88'
+          git pull --rebase origin main
+          git push origin HEAD:main
