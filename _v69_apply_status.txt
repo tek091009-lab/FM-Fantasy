@@ -1,0 +1,4 @@
+v69 rich match validation installed
+apply_rc=0
+verify_ok=1
+verify_rc=0
