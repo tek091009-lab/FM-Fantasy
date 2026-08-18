@@ -1,0 +1,6 @@
+v68 identity/history safety installed
+apply_rc=0
+Traceback (most recent call last):
+  File "<stdin>", line 9, in <module>
+AssertionError: ['import blocked rather than guessing from match history']
+verify_rc=1
