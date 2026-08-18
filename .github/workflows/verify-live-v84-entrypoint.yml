@@ -1,0 +1,43 @@
+name: Verify live V84 importer
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'v84.html'
+      - 'index.html'
+      - 'updateguard.js'
+      - 'importcompat.js'
+      - 'canonicalpublish.js'
+      - 'scripts/test_partial_catchup_guard_v81.js'
+      - '.github/workflows/verify-live-v84-entrypoint.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Verify season partial guard regression locally
+        run: node scripts/test_partial_catchup_guard_v81.js
+      - name: Verify fresh entrypoint and V7/V83 assets are live
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://tek091009-lab.github.io/FM-Fantasy'
+          ok=0
+          for attempt in $(seq 1 48); do
+            entry="$(curl -fsSL --max-time 20 "$base/v84.html?verify=${GITHUB_SHA}-${attempt}" || true)"
+            idx="$(curl -fsSL --max-time 20 "$base/index.html?verify=${GITHUB_SHA}-${attempt}" || true)"
+            guard="$(curl -fsSL --max-time 20 "$base/updateguard.js?verify=${GITHUB_SHA}-${attempt}" || true)"
+            compat="$(curl -fsSL --max-time 20 "$base/importcompat.js?verify=${GITHUB_SHA}-${attempt}" || true)"
+            if printf '%s' "$entry" | grep -q 'bootstrap=v84-20260818' \
+              && printf '%s' "$idx" | grep -q 'updateguard.js?v=7' \
+              && printf '%s' "$guard" | grep -q 'world-update-guard-v7-explicit-season-partial' \
+              && printf '%s' "$compat" | grep -q 'import-mode-v83-season-publish'; then
+              ok=1; break
+            fi
+            sleep 5
+          done
+          [ "$ok" -eq 1 ] || { echo 'V84 importer entrypoint did not reach live Pages' >&2; exit 1; }
