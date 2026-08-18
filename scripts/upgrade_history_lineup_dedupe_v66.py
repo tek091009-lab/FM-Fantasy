@@ -43,9 +43,8 @@ def update_fragment()->str:
     marker="        cached=compact\n    diagnostics['cached_candidate_pairs']=len(cached)\n"
     if "same_lineup_distinct_regions_preserved']=" not in s:
         extra=("        cached=compact\n"
-               "        # At this point exact/adjacent scanner duplicates have already been removed by\n"
-               "        # byte locality. Repeated lineup signatures which still survive are distinct\n"
-               "        # retained regions and must remain available to fixture identity matching.\n"
+               "        # Exact/adjacent scanner duplicates are already removed by byte locality.\n"
+               "        # Repeated lineup signatures which survive are distinct retained regions.\n"
                "        _lineup_counts=collections.Counter()\n"
                "        for _c in cached:\n"
                "            _l=tuple(sorted(ids_of_row for ids_of_row in (int(x.get('player_id') or 0) for x in _c['left']) if ids_of_row>0))\n"
@@ -72,9 +71,21 @@ def main():
     py=py[:rs]+frag+py[re_:]
 
     if 'unlabelled_rich_same_lineup_distinct_regions_preserved' not in py:
-        needle="'unlabelled_rich_sub40_stat_members':member_rich_diag.get('sub40_stat_members',0),"
-        if needle not in py:raise RuntimeError('debug export marker missing')
-        py=py.replace(needle,needle+"'unlabelled_rich_same_lineup_distinct_regions_preserved':member_rich_diag.get('same_lineup_distinct_regions_preserved',0),",1)
+        export="'unlabelled_rich_same_lineup_distinct_regions_preserved':member_rich_diag.get('same_lineup_distinct_regions_preserved',0),"
+        candidates=[
+            "'unlabelled_rich_sub40_stat_members':member_rich_diag.get('sub40_stat_members',0),",
+            "'unlabelled_rich_variable_squad_size_candidate_pairs':member_rich_diag.get('variable_squad_size_candidate_pairs',0),",
+            "'unlabelled_rich_temporal_transfer_fixture_evidence':member_rich_diag.get('temporal_transfer_fixture_evidence',0),",
+            "'unlabelled_rich_near_duplicate_candidate_pairs_soft_collapsed':member_rich_diag.get('near_duplicate_candidate_pairs_soft_collapsed',0),"
+        ]
+        inserted=False
+        for needle in candidates:
+            if needle in py:
+                py=py.replace(needle,needle+export,1)
+                inserted=True
+                break
+        if not inserted:
+            print('v66 warning: legacy payload has no compatible rich-history debug export marker; core decoder patch will still apply')
 
     assert 'seen_side_pair_signatures' not in py
     assert 'same_lineup_distinct_regions_preserved' in py
