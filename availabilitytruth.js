@@ -1,6 +1,6 @@
 (()=>{
  'use strict';
- const VERSION='availability-truth-v4';
+ const VERSION='availability-truth-v5';
  // Only presentation/current-state aliases are cleared. Decoder evidence is preserved so
  // later universal fallbacks and Export Debug can still inspect rejected/stale schemas.
  const keysInjuryDisplay=['injured','injury_status','injury','injury_name','injury_type','injury_return_date','expected_return_date','injury_expected_back','injury_end_date','return_date','injured_until','injury_days_remaining'];
@@ -27,8 +27,10 @@
    const remaining=Math.max(num(p?.suspension_remaining),num(p?.suspension_games_remaining),num(p?.ban_games_remaining),num(ev?.games_remaining));
    if(src!=='discipline.dat/active-ban-v1')return src?'untrusted_suspension_source':'no_trusted_suspension_source';
    if(remaining<=0)return 'no_positive_games_remaining';
-   if(!until)return 'no_ban_expiry';
-   if(rd&&until<=rd)return 'ban_expired';
+   // FM schemas do not all store a calendar expiry for match-count bans. A trusted
+   // active-ban record with positive games remaining is sufficient current-state evidence.
+   // If an expiry exists, it is an additional stale-data guard rather than a required field.
+   if(until&&rd&&until<=rd)return 'ban_expired';
    return null;
  }
  const injuryValid=(p,payload)=>injuryReason(p,payload)===null;
@@ -41,7 +43,7 @@
  }
  function sanitizePayload(payload){
    if(!payload||!Array.isArray(payload.players))return payload;
-   let injuries=0,suspensions=0,suppressedInjuries=0,suppressedSuspensions=0,preservedRejectedInjuries=0,preservedRejectedSuspensions=0;
+   let injuries=0,suspensions=0,suspensionsWithoutExpiry=0,suppressedInjuries=0,suppressedSuspensions=0,preservedRejectedInjuries=0,preservedRejectedSuspensions=0;
    for(const p of payload.players){
      const ir=injuryReason(p,payload);
      if(ir===null){injuries++;p.injured=true;p.injury_status='Injured'}
@@ -51,7 +53,7 @@
        clearKeys(p,keysInjuryDisplay);
      }
      const sr=suspensionReason(p,payload);
-     if(sr===null){suspensions++;p.suspended=true;p.suspension_status='Suspended'}
+     if(sr===null){suspensions++;if(!suspensionUntil(p))suspensionsWithoutExpiry++;p.suspended=true;p.suspension_status='Suspended'}
      else {
        const raw=snapshotPresent(p,keysSuspDisplay),hasEvidence=!!(p?.suspension_evidence||p?.suspension_evidence_structural||Object.keys(raw).length);
        if(hasEvidence){suppressedSuspensions++;preserveRejected(p,'suspension',sr,{...raw,suspension_evidence:p.suspension_evidence??null,suspension_evidence_structural:p.suspension_evidence_structural??null});preservedRejectedSuspensions++}
@@ -60,8 +62,8 @@
    }
    payload.meta=payload.meta||{};
    payload.meta.injured_players=injuries;payload.meta.suspended_players=suspensions;
-   payload.meta.availability_truth_policy='current UI state requires trusted current-save injury evidence or discipline.dat active-ban evidence; rejected/stale decoder evidence is preserved separately for universal reverse-engineering';
-   payload.meta.availability_truth_runtime={version:VERSION,reference_date:refDate(payload)||null,data_stale:stale(payload),injuries,suspensions,suppressed_injuries:suppressedInjuries,suppressed_suspensions:suppressedSuspensions,preserved_rejected_injury_evidence:preservedRejectedInjuries,preserved_rejected_suspension_evidence:preservedRejectedSuspensions};
+   payload.meta.availability_truth_policy='current UI state requires trusted current-save injury evidence or discipline.dat active-ban evidence; trusted positive match-count bans do not require an absolute expiry; rejected/stale decoder evidence is preserved separately for universal reverse-engineering';
+   payload.meta.availability_truth_runtime={version:VERSION,reference_date:refDate(payload)||null,data_stale:stale(payload),injuries,suspensions,suspensions_without_expiry:suspensionsWithoutExpiry,suppressed_injuries:suppressedInjuries,suppressed_suspensions:suppressedSuspensions,preserved_rejected_injury_evidence:preservedRejectedInjuries,preserved_rejected_suspension_evidence:preservedRejectedSuspensions};
    return payload;
  }
  function fmt(v){if(!v)return'';try{const d=new Date(String(v).length<=10?String(v)+'T12:00:00':v);return Number.isNaN(d.getTime())?String(v):d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}catch(_){return String(v)}}
