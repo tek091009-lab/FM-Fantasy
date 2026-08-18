@@ -1,0 +1,35 @@
+name: Diagnose V79 Pages verifier
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diag-pages-v79.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run upgrade and tests
+        shell: bash
+        run: |
+          set +e
+          : > _pages_v79_status.txt
+          python scripts/upgrade_pages_v79.py >> _pages_v79_status.txt 2>&1; echo "upgrade_rc=$?" >> _pages_v79_status.txt
+          python scripts/final_preflight_v70.py >> _pages_v79_status.txt 2>&1; echo "preflight_rc=$?" >> _pages_v79_status.txt
+          python scripts/assert_v79_strict_extended_roster.py >> _pages_v79_status.txt 2>&1; echo "v79_test_rc=$?" >> _pages_v79_status.txt
+          git diff -- .github/workflows/pages.yml >> _pages_v79_status.txt 2>&1
+          exit 0
+      - name: Commit status and Pages change if produced
+        run: |
+          set -e
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add _pages_v79_status.txt .github/workflows/pages.yml _preflight_v70.json
+          git commit -m 'Record V79 Pages verifier diagnostics' || exit 0
+          git push
