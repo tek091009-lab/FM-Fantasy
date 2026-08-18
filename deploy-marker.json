@@ -1,11 +1,10 @@
 {
-  "verified_live_sha": "ffacda43d11e7e07f4af91d64217f81d45b42b5c",
-  "verified_at": "2026-08-18T15:01:20Z",
-  "verification": "v76-dated-append-only-snapshot-live",
-  "current_squad_decoder": "v75-current-db-structural-senior-resolution-no-history",
-  "snapshot_boundary": "append-only-by-snapshot-date-v1",
-  "snapshot_badge": "snapshot-date-v1",
-  "fixture_db_handoff": "v74-loaded-game-db-bytes",
-  "server_history_authority": "supabase-dated-canonical-merge",
-  "history_identity": "stable-date-fixture-context-v2"
+  "verified_live_sha": "8cedfe7f9b2f5649ebbbc066ec10ec87e88cebba",
+  "verified_at": "2026-08-18T16:54:50Z",
+  "verification": "v84-season-import-live",
+  "update_guard": "v7-explicit-season-partial",
+  "import_mode": "v83-season-publish",
+  "current_squad_decoder": "v82-consensus-only",
+  "retained_history": "v81-36-row-plus-variable-squad",
+  "snapshot_boundary": "append-only-by-snapshot-date-v1"
 }
