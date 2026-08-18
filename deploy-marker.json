@@ -1,9 +1,9 @@
 {
-  "verified_live_sha": "933d5a95e866d42e333f17b1ff9fc5bd80c74f33",
-  "verified_at": "2026-08-18T17:00:44Z",
+  "verified_live_sha": "511ffb1b16df182f1e5e63c64436a1133fb65d4f",
+  "verified_at": "2026-08-18T17:02:18Z",
   "verification": "v84-season-import-live",
   "update_guard": "v7-explicit-season-partial",
-  "import_mode": "v83-season-publish",
+  "import_compat": "v84-season-plus-36-row",
   "current_squad_decoder": "v82-consensus-only",
   "retained_history": "v81-36-row-plus-variable-squad",
   "snapshot_boundary": "append-only-by-snapshot-date-v1"
