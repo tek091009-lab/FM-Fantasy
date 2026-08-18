@@ -1,0 +1,29 @@
+name: Package V84 local test snapshot
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/package-v84-for-local-test.yml']
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package runtime files
+        run: zip -qr v84-site.zip index.html v84.html app updateguard.js importcompat.js canonicalpublish.js authfix.js availabilitytruth.js updateguardpreflight.js dbcontrols.js clearfix.js identityguard.js accountfeatures.js worldscorefix.js managerprogressfix.js draftrecovery.js readability.js leagueenhancements.js leagueviewstar.js refinements.js availabilityevidence.js statusdateevidence.js formevidence.js nameevidencelearning.js namepoolroleevidence.js importcapabilities.js scoreevidence.js competitionevidence.js currentsquadidentity.js currentsquadidentitycompat.js currentsquadentityshift.js capabilityconsistency.js availabilityschemalearning.js newsview.js managerauthoritative.js snapshotdate.js 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v84-site
+          path: v84-site.zip
+          retention-days: 1
+      - name: Record run id
+        run: |
+          mkdir -p .deploy
+          printf 'run_id=%s\nsha=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" > .deploy/v84-package-run.txt
+          git config user.name github-actions[bot]
+          git config user.email 4189824+github-actions[bot]@users.noreply.github.com
+          git add .deploy/v84-package-run.txt
+          git commit -m "Record V84 package run ${GITHUB_RUN_ID}"
+          git pull --rebase origin main
+          git push
