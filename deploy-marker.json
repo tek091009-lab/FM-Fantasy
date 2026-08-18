@@ -1,10 +1,12 @@
 {
-  "verified_live_sha": "273b316248e4d9f371d2b2acce32e3b2dec30fdb",
-  "verified_at": "2026-08-18T14:05:06Z",
-  "verification": "v76-dated-append-only-snapshot-live",
+  "verified_live_sha": "bb047745909cc8901a9b97f77af5c80a06f110d6",
+  "verified_at": "2026-08-18T14:48:59Z",
+  "verification": "v79-real-save-strict-roster-live",
   "authfix": "v12-authoritative-cloud",
   "availability_truth": "v4-direct-structural-evidence",
-  "current_squad_decoder": "v75-current-db-structural-senior-resolution-no-history",
+  "current_squad_identity": "v68-current-db-only",
+  "current_squad_size_policy": "strict-current-db-extended-12-60-v79",
+  "real_save_roster_probe": "shift132=24/24; strict Portsmouth roster=46; shift131=22/24",
   "retained_match_validation": "v69-official-score-plus-current-cohort",
   "name_pool_runtime": "v71-historical-header-pat-restored-and-executed",
   "league_selector": "v72-auto-prompt-plus-sticky-manual-choice",
@@ -13,7 +15,6 @@
   "snapshot_boundary": "append-only-by-snapshot-date-v1",
   "snapshot_badge": "snapshot-date-v1",
   "server_history_authority": "supabase-dated-canonical-merge",
-  "history_identity": "stable-date-fixture-context-v2",
-  "update_guard": "v4-fixture-club-proof",
+  "update_guard": "v5-strict-current-roster",
   "clear_database": "v3-backed-up-reset-plus-stale-manager-wipe"
 }
