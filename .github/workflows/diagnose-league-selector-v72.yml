@@ -3,6 +3,7 @@ on:
   push:
     paths:
       - 'scripts/diagnose_league_selector_v72.py'
+      - 'scripts/extract_fixture_selector_v73.py'
       - '.github/workflows/diagnose-league-selector-v72.yml'
 permissions:
   contents: write
@@ -12,10 +13,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python scripts/diagnose_league_selector_v72.py
+      - run: python scripts/extract_fixture_selector_v73.py
       - run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add _league_selector_diag.txt
-          git commit -m 'Record V72 league selector diagnostic' || exit 0
+          git add _league_selector_diag.txt _fixture_selector_v73.txt
+          git commit -m 'Record V73 fixture selector diagnostic' || exit 0
           git pull --rebase origin main
           git push
