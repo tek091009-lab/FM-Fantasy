@@ -1,0 +1,31 @@
+name: Load name pool role evidence v1
+on:
+  push:
+    paths:
+      - 'namepoolroleevidence.js'
+      - '.github/workflows/load-namepool-role-evidence-v1.yml'
+permissions:
+  contents: write
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add evidence loader
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('index.html');s=p.read_text()
+          needle='<script src="./nameevidencelearning.js?v=4"><\\/script>'
+          add=needle+'<script src="./namepoolroleevidence.js?v=1"><\\/script>'
+          if 'namepoolroleevidence.js?v=1' not in s:
+              if needle not in s: raise SystemExit('name evidence loader anchor missing')
+              s=s.replace(needle,add,1);p.write_text(s)
+          PY
+          grep -q 'namepoolroleevidence.js?v=1' index.html
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html
+          git commit -m 'Load name pool role evidence v1' || true
+          git pull --rebase origin main
+          git push
