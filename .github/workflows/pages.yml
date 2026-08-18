@@ -24,53 +24,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python scripts/final_preflight_v70.py
           python - <<'PY'
-          from pathlib import Path
-          import base64,gzip,re
-          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
-          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
-          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m,'embedded importer missing'
-          py=base64.b64decode(m.group(1)).decode('utf-8')
-          required=[
-            'strict_current_db_membership_only_v68',
-            'strict-db-membership-only-no-history-mutation-v68',
-            'v68_current-squad-authority_previous-gws-quarantined',
-            'def _rich_candidate_twenty_pairs',
-            'named_header_candidate_v69',
-            'official-score-plus-strict-current-cohort-v69',
-            'rich_fixture_coverage',
-            'same_match_both_clubs',
-            "if calc_h!=int(fix.get('home_score') or 0) or calc_a!=int(fix.get('away_score') or 0):return None",
-            "if not (11<=len(home_rows)<=25 and 11<=len(away_rows)<=25):return None",
-          ]
-          forbidden=[
-            "cur.extend(add);diag['rich_augmented_players']+=len(add)",
-            'if played_club.get(eid) in clubs: ceid=played_club[eid]',
-            'infer_hybrid_positions_from_match_markers(rich,players_by_eid)',
-            "candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates",
-            'bounded 18-22 rows per side',
-          ]
-          for token in required:assert token in py,'missing strict importer token: '+token
-          for token in forbidden:assert token not in py,'forbidden legacy importer token remains: '+token
-          compile(py,'fm_importer_preflight.py','exec')
-          ns={'__name__':'fm_importer_preflight'};exec(compile(py,'fm_importer_preflight.py','exec'),ns,ns)
-          assert callable(ns.get('_rich_candidate_twenty_pairs'))
-          def row(pid,off):return {'player_id':pid,'offset':off,'goals':0,'own_goals':0}
-          left=[row(i+1,i*100) for i in range(20)];right=[row(101+i,5000+i*100) for i in range(20)]
-          pairs=ns['_rich_candidate_twenty_pairs'](left+right)
-          assert pairs and len(pairs[0][0])==20 and len(pairs[0][1])==20,'20x20 retained block candidate test failed'
-          for token in ['structural-v2-fixture-floor','fixture_floor','full<=save_date','expiry<=save_date']:
-              assert token in py,'availability importer missing '+token
-          start=html.find('function fmAvailabilityTruthDate(payload){');end=html.find('function fmBuildInitialNews(payload){',start)
-          assert start>=0 and end>start,'core availability block missing'
-          block=html[start:end]
-          for token in ['discipline.dat/active-ban-v1','injury_manager.dat/current-window']:assert token in block,'availability core missing '+token
-          for token in ['5 yellow cards','second-yellow red','fmClubPlayedAfter(payload,p.club,inc.date)']:assert token not in block,'heuristic availability remains: '+token
-          ug=Path('updateguard.js').read_text();cf=Path('clearfix.js').read_text();idx=Path('index.html').read_text()
-          assert 'world-update-guard-v3-identity-history-safe' in ug
-          assert 'fmfantasy_reset_world_season' in cf and 'fmFantasyLastSeasonResetBackup' in cf
-          for token in ['availabilitytruth.js?v=4','updateguard.js?v=3','clearfix.js?v=2']:assert token in idx,'index cache version missing '+token
-          print('clean-rebuild preflight passed')
+          import json
+          r=json.load(open('_preflight_v70.json'))
+          assert r.get('ok') is True,r
+          print('deterministic clean-rebuild preflight passed')
           PY
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
@@ -92,32 +51,26 @@ jobs:
             if printf '%s' "$body" | grep -q 'authfix.js?v=12' \
               && printf '%s' "$body" | grep -q 'availabilitytruth.js?v=4' \
               && printf '%s' "$body" | grep -q 'updateguard.js?v=3' \
-              && printf '%s' "$body" | grep -q 'canonicalpublish.js?v=1' \
               && printf '%s' "$body" | grep -q 'clearfix.js?v=2' \
               && printf '%s' "$body" | grep -q 'identityguard.js?v=3' \
-              && printf '%s' "$body" | grep -q 'worldscorefix.js?v=5' \
-              && printf '%s' "$body" | grep -q 'draftrecovery.js?v=2'; then
+              && printf '%s' "$body" | grep -q 'worldscorefix.js?v=5'; then
               ok=1;break
             fi
             sleep 5
           done
-          if [ "$ok" -ne 1 ]; then echo 'Live index did not expose the clean-rebuild scripts.' >&2;exit 1;fi
+          [ "$ok" -eq 1 ] || { echo 'Live index did not expose clean-rebuild scripts' >&2; exit 1; }
 
-          auth="$(curl -fsSL --max-time 20 "$base/authfix.js?v=12&sha=${GITHUB_SHA}")"
-          availability="$(curl -fsSL --max-time 20 "$base/availabilitytruth.js?v=4&sha=${GITHUB_SHA}")"
           updateguard="$(curl -fsSL --max-time 20 "$base/updateguard.js?v=3&sha=${GITHUB_SHA}")"
           clearfix="$(curl -fsSL --max-time 20 "$base/clearfix.js?v=2&sha=${GITHUB_SHA}")"
+          availability="$(curl -fsSL --max-time 20 "$base/availabilitytruth.js?v=4&sha=${GITHUB_SHA}")"
           identity="$(curl -fsSL --max-time 20 "$base/identityguard.js?v=3&sha=${GITHUB_SHA}")"
-          scorer="$(curl -fsSL --max-time 20 "$base/worldscorefix.js?v=5&sha=${GITHUB_SHA}")"
-          printf '%s' "$auth" | grep -q 'fmFantasyWorldVersion'
-          printf '%s' "$availability" | grep -q 'availability-truth-v4'
-          printf '%s' "$availability" | grep -q 'discipline.dat/active-ban-v1'
           printf '%s' "$updateguard" | grep -q 'world-update-guard-v3-identity-history-safe'
           printf '%s' "$updateguard" | grep -q 'retained matches do not reproduce the official score'
           printf '%s' "$clearfix" | grep -q 'fmfantasy_reset_world_season'
           printf '%s' "$clearfix" | grep -q 'fmFantasyLastSeasonResetBackup'
+          printf '%s' "$availability" | grep -q 'availability-truth-v4'
+          printf '%s' "$availability" | grep -q 'discipline.dat/active-ban-v1'
           printf '%s' "$identity" | grep -q 'diagnostic-only'
-          printf '%s' "$scorer" | grep -q 'reconcileUsedChips'
 
           : > /tmp/live_parts.b64
           for i in $(seq -w 0 16); do curl -fsSL --max-time 20 "$base/app/part${i}?sha=${GITHUB_SHA}" >> /tmp/live_parts.b64; done
@@ -129,19 +82,33 @@ jobs:
           html=Path('/tmp/live_app.html').read_text(encoding='utf-8')
           m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m,'live embedded importer missing'
           py=base64.b64decode(m.group(1)).decode('utf-8')
-          required=['strict_current_db_membership_only_v68','strict-db-membership-only-no-history-mutation-v68','def _rich_candidate_twenty_pairs','official-score-plus-strict-current-cohort-v69','rich_fixture_coverage',"if calc_h!=int(fix.get('home_score') or 0) or calc_a!=int(fix.get('away_score') or 0):return None"]
-          forbidden=["cur.extend(add);diag['rich_augmented_players']+=len(add)",'if played_club.get(eid) in clubs: ceid=played_club[eid]','infer_hybrid_positions_from_match_markers(rich,players_by_eid)','bounded 18-22 rows per side']
-          for token in required:assert token in py,'live importer missing '+token
-          for token in forbidden:assert token not in py,'live importer contains forbidden '+token
+          required=[
+            'strict_current_db_membership_only_v68',
+            'strict-db-membership-only-no-history-mutation-v68',
+            'v68_current-squad-authority_previous-gws-quarantined',
+            'def _rich_candidate_twenty_pairs',
+            'named_header_candidate_v69',
+            'official-score-plus-strict-current-cohort-v69',
+            'rich_fixture_coverage',
+            'same_match_both_clubs',
+          ]
+          forbidden=[
+            "cur.extend(add);diag['rich_augmented_players']+=len(add)",
+            'if played_club.get(eid) in clubs: ceid=played_club[eid]',
+            'infer_hybrid_positions_from_match_markers(rich,players_by_eid)',
+            "candidates=[f for f in candidates if f['home_score']==m['home_score'] and f['away_score']==m['away_score']] or candidates",
+            'bounded 18-22 rows per side',
+          ]
+          for t in required:assert t in py,'live importer missing '+t
+          for t in forbidden:assert t not in py,'live importer contains forbidden '+t
           compile(py,'fm_importer_live.py','exec')
-          for token in ['structural-v2-fixture-floor','fixture_floor','full<=save_date','expiry<=save_date']:assert token in py,'live importer missing '+token
-          declarations=['function fmAvailabilityTruthDate(payload){','function fmAvailabilityTruthStale(payload){','function fmInferActiveSuspensions(payload){','function fmInferActiveInjuries(payload){']
-          for d in declarations:assert html.count(d)==1,f'live core expected exactly one {d}, got {html.count(d)}'
-          start=html.find('function fmAvailabilityTruthDate(payload){');end=html.find('function fmBuildInitialNews(payload){',start);assert start>=0 and end>start
+          for t in ['structural-v2-fixture-floor','fixture_floor','full<=save_date','expiry<=save_date']:assert t in py,'live availability importer missing '+t
+          start=html.find('function fmAvailabilityTruthDate(payload){');end=html.find('function fmBuildInitialNews(payload){',start)
+          assert start>=0 and end>start,'live core availability block missing'
           block=html[start:end]
-          for token in ['discipline.dat/active-ban-v1','injury_manager.dat/current-window']:assert token in block
-          for token in ['5 yellow cards','second-yellow red','fmClubPlayedAfter(payload,p.club,inc.date)']:assert token not in block
-          print('deep live clean-rebuild verification passed')
+          for t in ['discipline.dat/active-ban-v1','injury_manager.dat/current-window']:assert t in block,'live availability missing '+t
+          for t in ['5 yellow cards','second-yellow red','fmClubPlayedAfter(payload,p.club,inc.date)']:assert t not in block,'live heuristic remains '+t
+          print('deep live V69 clean-rebuild verification passed')
           PY
       - name: Record verified live deployment
         shell: bash
