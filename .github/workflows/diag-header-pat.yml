@@ -1,0 +1,42 @@
+name: Diagnose HEADER_PAT
+on:
+  push:
+    paths:
+      - '.github/workflows/diag-header-pat.yml'
+permissions:
+  contents: write
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract embedded importer naming context
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode('utf-8')
+          lines=py.splitlines()
+          out=[]
+          for needle in ['def find_name_pool_index','def bind_target_people','HEADER_PAT','POOL','NAME']:
+            out.append('\n=== '+needle+' ===\n')
+            hits=[i for i,l in enumerate(lines) if needle in l]
+            for i in hits[:20]:
+              a=max(0,i-20);b=min(len(lines),i+35)
+              out.extend(f'{j+1:05d}: {lines[j]}' for j in range(a,b))
+              out.append('---')
+          Path('_header_pat_diag.txt').write_text('\n'.join(out))
+          PY
+      - name: Commit diagnostic
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add _header_pat_diag.txt
+          git commit -m 'Record HEADER_PAT importer diagnostic' || exit 0
+          git pull --rebase origin main
+          git push
