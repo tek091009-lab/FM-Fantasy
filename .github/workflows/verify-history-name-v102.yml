@@ -1,0 +1,60 @@
+name: Verify retained-name history recovery v102
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_confirmed_name_anchor_v99.py'
+      - 'scripts/upgrade_history_name_transfer_support_v100.py'
+      - 'scripts/upgrade_history_confirmed_name_one_side_v101.py'
+      - 'scripts/upgrade_history_confirmed_name_global_constraint_v102.py'
+      - '.github/workflows/verify-history-name-v102.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained-name decoder stack to packed importer
+        run: |
+          python scripts/upgrade_history_confirmed_name_anchor_v99.py
+          python scripts/upgrade_history_name_transfer_support_v100.py
+          python scripts/upgrade_history_confirmed_name_one_side_v101.py
+          python scripts/upgrade_history_confirmed_name_global_constraint_v102.py
+      - name: Verify compiled embedded Python and safety invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode(); compile(py,'fm_importer.py','exec')
+          required=[
+            'def confirmed_name_club(rows,ids):',
+            'confirmed_name_transfer_support_uses',
+            'def confirmed_name_one_side_pass():',
+            'def confirmed_name_global_constraint_pass():',
+            '2<=len(uniq)<=8',
+            'if len(cs)!=len(fs):',
+            'perfect_matching(cs,(ci,fk))',
+            "'unlabelled_retained_confirmed_exact_name_global_unique'",
+            'j=confirmed_name_global_constraint_pass()',
+            'def confirmed_roster_global_constraint_pass():',
+            'def confirmed_roster_one_side_pass():',
+            'def confirmed_roster_fixture_pass():',
+            'def confirmed_cohort_fixture_pass():',
+          ]
+          for s in required: assert s in py,s
+          assert "raw.lower().startswith('player id ')" in py
+          assert 'top_n<7' in py
+          print('v99-v102 retained-name stack compiles and preserves prior recovery paths')
+          PY
