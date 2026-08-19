@@ -1,9 +1,11 @@
 {
-  "verified_live_sha": "c126c901c8f037d4c2217dba08a4697f75b82e83",
-  "verified_at": "2026-08-19T14:17:37Z",
-  "verification": "v84-season-import-live",
-  "update_guard": "v7-explicit-season-partial",
+  "verified_live_sha": "afddef7667a4865ce289f9f18f3596735f57c261",
+  "verified_at": "2026-08-19T16:10:28Z",
+  "verification": "v14-pricing-undo-live-v2",
+  "update_guard": "v9-history-aware-season-catchup",
   "import_compat": "v84-season-plus-36-row",
+  "dynamic_pricing": "v14-sustained-successful-updates",
+  "undo_import": "server-backup-restore-v1",
   "current_squad_decoder": "v82-consensus-only",
   "retained_history": "v81-36-row-plus-variable-squad",
   "snapshot_boundary": "append-only-by-snapshot-date-v1"
