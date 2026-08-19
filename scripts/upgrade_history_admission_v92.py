@@ -21,9 +21,9 @@ def repack(html:str)->None:
 html=reconstruct()
 
 # The Python retained-match decoder supports bounded 18..22 player rows per side, so a valid
-# compact match can contain only 36..39 stat rows.  The browser archive admission pass was
+# compact match can contain only 36..39 stat rows. The browser archive admission pass was
 # still requiring >=40 before writing the member to /tmp/rich_*.bin, making those Python
-# decoder paths unreachable for unlabelled members.  Keep the same single archive scan and
+# decoder paths unreachable for unlabelled members. Keep the same single archive scan and
 # same candidate-name filter; only align the admission threshold with the decoder minimum.
 old="const statCount=this.richStatCount(out,40);if(labelHit||statCount>=40){const idx=richNames.length;richNames.push(m.name);richProbe.push({name:m.name,plain:m.plain,labelHit,statSignature:statCount>=40,statCount});py.FS.writeFile('/tmp/rich_'+idx+'.bin',out)}"
 new="const statCount=this.richStatCount(out,40);if(labelHit||statCount>=36){const idx=richNames.length;richNames.push(m.name);richProbe.push({name:m.name,plain:m.plain,labelHit,statSignature:statCount>=36,legacy40StatSignature:statCount>=40,sub40StatBlock:statCount>=36&&statCount<40,statCount,historyAdmissionMinStats:36});py.FS.writeFile('/tmp/rich_'+idx+'.bin',out)}"
