@@ -1,0 +1,75 @@
+name: Verify retained-name history recovery v109
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_confirmed_name_anchor_v99.py'
+      - 'scripts/upgrade_history_name_transfer_support_v100.py'
+      - 'scripts/upgrade_history_confirmed_name_one_side_v101.py'
+      - 'scripts/upgrade_history_confirmed_name_global_constraint_v102.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_pair_v103.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_global_v104.py'
+      - 'scripts/upgrade_history_canonical_name_alias_v105.py'
+      - 'scripts/upgrade_history_confirmed_name_cohort_v106.py'
+      - 'scripts/upgrade_history_accumulated_name_roster_v107.py'
+      - 'scripts/upgrade_history_accumulated_name_roster_global_v108.py'
+      - 'scripts/upgrade_history_transitive_name_cohort_graph_v109.py'
+      - '.github/workflows/verify-history-name-v109.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained-name decoder stack to packed importer
+        run: |
+          python scripts/upgrade_history_confirmed_name_anchor_v99.py
+          python scripts/upgrade_history_name_transfer_support_v100.py
+          python scripts/upgrade_history_confirmed_name_one_side_v101.py
+          python scripts/upgrade_history_confirmed_name_global_constraint_v102.py
+          python scripts/upgrade_history_fixture_conditioned_name_pair_v103.py
+          python scripts/upgrade_history_fixture_conditioned_name_global_v104.py
+          python scripts/upgrade_history_canonical_name_alias_v105.py
+          python scripts/upgrade_history_confirmed_name_cohort_v106.py
+          python scripts/upgrade_history_accumulated_name_roster_v107.py
+          python scripts/upgrade_history_accumulated_name_roster_global_v108.py
+          python scripts/upgrade_history_transitive_name_cohort_graph_v109.py
+      - name: Verify compiled importer and v109 safeguards
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode(); compile(py,'fm_importer.py','exec')
+          required=[
+            'def confirmed_name_transitive_graph_pass():',
+            'if shared<10:continue',
+            'if shared/denom<0.55:continue',
+            'if len(anchors)!=1:',
+            'if n_anchor<2:continue',
+            "register_match(ci,f,rev,leid,reid,'unlabelled_retained_confirmed_name_transitive_graph_v109')",
+            "register_match(ci,f,rev,leid,reid,'unlabelled_retained_confirmed_name_transitive_graph_one_side_v109')",
+            'z=confirmed_name_transitive_graph_pass()',
+            'unlabelled_rich_confirmed_name_transitive_fixture_matches',
+            'def confirmed_name_roster_global_constraint_pass():',
+            'perfect_matching(cs,(ci,fk))',
+            'def confirmed_name_roster_fixture_pass():',
+            'def confirmed_name_cohort_fixture_pass():',
+          ]
+          for s in required: assert s in py,s
+          assert "if len(anchors)!=1:" in py
+          assert "if n_anchor<2:continue" in py
+          assert "if direct is not None and direct!=eid:" in py
+          assert "if len(local)==1:" in py
+          print('v99-v109 stack compiles; transitive side identity requires high-overlap graph plus >=2 unanimous authoritative anchors')
+          PY
