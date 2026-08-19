@@ -1,6 +1,6 @@
 (()=>{
   'use strict';
-  const VERSION='creator-clear-v3-visible-undo-mount';
+  const VERSION='creator-clear-v4-visible-undo-relocation';
   const RX_BTN=/^clear\s+(?:saved\s+)?database$/i;
   const CLEAR_KEY='fmFantasyCloudDatabaseCleared';
   const RX_AUTH=/(supabase|auth|session|token|login|user)/i;
@@ -18,23 +18,34 @@
     const all=[...document.querySelectorAll('button,[role="button"]')].filter(b=>RX_BTN.test(buttonText(b)));
     return all.find(b=>b.offsetParent!==null)||all[0]||null;
   }
-  function mountUndoBesideClear(){
-    if(document.getElementById(UNDO_ID))return true;
-    const clear=findClearButton();
-    if(!clear)return false;
-    const undo=document.createElement('button');
+  function wireUndo(undo,clear){
     undo.id=UNDO_ID;
     undo.type='button';
     undo.textContent='Undo Last Import';
-    undo.className=clear.className||'';
+    undo.className=clear.className||undo.className||'';
     undo.title='Restore the exact canonical world from immediately before the most recent successful FM import.';
     undo.style.cssText=(clear.getAttribute('style')||'')+';border-color:#ff8aaa!important;color:#ffd7e3!important;';
-    undo.addEventListener('click',e=>{
-      e.preventDefault();e.stopPropagation();
-      if(window.FMUndoLastImport?.run){window.FMUndoLastImport.run();return;}
-      alert('Undo service is still loading. Wait a moment and try again.');
-    });
-    clear.insertAdjacentElement('afterend',undo);
+    if(undo.dataset.fmUndoVisibleWired!=='1'){
+      undo.dataset.fmUndoVisibleWired='1';
+      undo.addEventListener('click',e=>{
+        e.preventDefault();e.stopPropagation();
+        if(window.FMUndoLastImport?.run){window.FMUndoLastImport.run();return;}
+        alert('Undo service is still loading. Wait a moment and try again.');
+      });
+    }
+    return undo;
+  }
+  function mountUndoBesideClear(){
+    const clear=findClearButton();
+    if(!clear)return false;
+    let undo=document.getElementById(UNDO_ID);
+    if(!undo){undo=document.createElement('button');wireUndo(undo,clear);}
+    else wireUndo(undo,clear);
+    if(undo.previousElementSibling!==clear || undo.parentElement!==clear.parentElement){clear.insertAdjacentElement('afterend',undo);}
+    undo.hidden=false;
+    undo.style.display='';
+    undo.style.visibility='visible';
+    undo.style.opacity='1';
     return true;
   }
   function keepUndoMounted(){
@@ -43,14 +54,14 @@
       const root=document.body||document.documentElement;
       if(root){new MutationObserver(()=>mountUndoBesideClear()).observe(root,{childList:true,subtree:true});}
     }catch(_e){}
-    let tries=0;const timer=setInterval(()=>{tries++;if(mountUndoBesideClear()||tries>120)clearInterval(timer)},250);
+    let tries=0;const timer=setInterval(()=>{tries++;mountUndoBesideClear();if(tries>120)clearInterval(timer)},250);
   }
   function isImportedKey(k){
     if(!k||k===CLEAR_KEY||RX_AUTH.test(k))return false;
     return /(fm|fantasy)/i.test(k)&&/(db|database|world|save|import|payload|fixture|player|history|injur|suspend|ban|availability|status|news|discipline|match|club|competition|gameweek|price)/i.test(k);
   }
   async function clearLocalImport(){
-    try{if(typeof window.fmStoredClear==='function')await window.fmStoredClear()}catch(e){console.warn('[FM clear v3] local store clear failed',e)}
+    try{if(typeof window.fmStoredClear==='function')await window.fmStoredClear()}catch(e){console.warn('[FM clear v4] local store clear failed',e)}
     try{
       if(indexedDB?.databases){
         const dbs=await indexedDB.databases();
@@ -60,13 +71,13 @@
           try{const req=indexedDB.deleteDatabase(name);req.onsuccess=req.onerror=req.onblocked=()=>resolve()}catch(_){resolve()}
         })));
       }
-    }catch(e){console.warn('[FM clear v3] IndexedDB cleanup failed',e)}
+    }catch(e){console.warn('[FM clear v4] IndexedDB cleanup failed',e)}
     for(const store of [localStorage,sessionStorage]){
       try{
         const doomed=[];
         for(let i=0;i<store.length;i++){const k=String(store.key(i)||'');if(isImportedKey(k))doomed.push(k)}
         doomed.forEach(k=>store.removeItem(k));
-      }catch(e){console.warn('[FM clear v3] storage cleanup failed',e)}
+      }catch(e){console.warn('[FM clear v4] storage cleanup failed',e)}
     }
     for(const name of ['PLAYERS','MATCHES','SEASON_FIXTURES','NEWS','INJURIES','SUSPENSIONS']){
       try{const v=window[name];if(Array.isArray(v))v.length=0}catch(_){ }
@@ -94,7 +105,7 @@
     if(!ok)return;
     b.dataset.fmClearingV2='1';b.disabled=true;const old=b.textContent;b.textContent='Backing up & clearing…';
     clearCreator(b).catch(err=>{
-      console.error('[FM clear v3] failed',err);
+      console.error('[FM clear v4] failed',err);
       window.__fmSeasonResetInProgress=false;
       b.disabled=false;b.dataset.fmClearingV2='0';b.textContent=old;
       alert(`Could not safely reset the shared season. Nothing has been cleared. ${err?.message||''}`.trim());
