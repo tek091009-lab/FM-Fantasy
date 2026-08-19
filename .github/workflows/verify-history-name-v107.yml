@@ -1,0 +1,69 @@
+name: Verify retained-name history recovery v107
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_confirmed_name_anchor_v99.py'
+      - 'scripts/upgrade_history_name_transfer_support_v100.py'
+      - 'scripts/upgrade_history_confirmed_name_one_side_v101.py'
+      - 'scripts/upgrade_history_confirmed_name_global_constraint_v102.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_pair_v103.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_global_v104.py'
+      - 'scripts/upgrade_history_canonical_name_alias_v105.py'
+      - 'scripts/upgrade_history_confirmed_name_cohort_v106.py'
+      - 'scripts/upgrade_history_accumulated_name_roster_v107.py'
+      - '.github/workflows/verify-history-name-v107.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained-name decoder stack to packed importer
+        run: |
+          python scripts/upgrade_history_confirmed_name_anchor_v99.py
+          python scripts/upgrade_history_name_transfer_support_v100.py
+          python scripts/upgrade_history_confirmed_name_one_side_v101.py
+          python scripts/upgrade_history_confirmed_name_global_constraint_v102.py
+          python scripts/upgrade_history_fixture_conditioned_name_pair_v103.py
+          python scripts/upgrade_history_fixture_conditioned_name_global_v104.py
+          python scripts/upgrade_history_canonical_name_alias_v105.py
+          python scripts/upgrade_history_confirmed_name_cohort_v106.py
+          python scripts/upgrade_history_accumulated_name_roster_v107.py
+      - name: Verify compiled importer and v107 safeguards
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode(); compile(py,'fm_importer.py','exec')
+          required=[
+            'def _confirmed_name_roster_profiles():',
+            'def confirmed_name_roster_club(rows,ids):',
+            'len(shared)>=8 and repeated>=4 and coverage>=0.44',
+            'def confirmed_name_roster_fixture_pass():',
+            'def confirmed_name_roster_one_side_pass():',
+            "register_match(ci,f,rev,leid,reid,'unlabelled_retained_confirmed_name_roster_fixture_v107')",
+            "register_match(ci,f,rev,leid,reid,'unlabelled_retained_confirmed_name_roster_one_side_v107')",
+            'w=confirmed_name_roster_fixture_pass()',
+            'x=confirmed_name_roster_one_side_pass()',
+            'def confirmed_name_cohort_fixture_pass():',
+            'def confirmed_name_fixture_conditioned_global_pass():',
+            'def confirmed_roster_global_constraint_pass():',
+          ]
+          for s in required: assert s in py,s
+          assert 'for ci,c in enumerate(cached):' in py
+          assert 'if fk in used_fixtures:continue' in py
+          print('v99-v107 stack compiles; accumulated-name roster uses confirmed cohorts and authoritative register_match only')
+          PY
