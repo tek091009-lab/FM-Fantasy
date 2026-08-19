@@ -1,0 +1,51 @@
+name: Apply retained history admission v92
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/upgrade_history_admission_v92.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply v92 retained-history admission upgrade
+        run: python scripts/upgrade_history_admission_v92.py
+      - name: Verify packed production
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          assert 'statCount>=36' in html
+          assert 'sub40StatBlock:statCount>=36&&statCount<40' in html
+          assert 'historyAdmissionMinStats:36' in html
+          assert "if(labelHit||statCount>=40)" not in html
+          assert 'retained_member_stat_admission_min=36' in html
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode(); compile(py,'importer.py','exec')
+          # Ensure the variable retained-squad decoder that motivated 36-row admission is still present.
+          assert ('range(18,23)' in py or '18<=left_n<=22' in py or 'variable_squad_size' in py or 'variable_squad_size_candidate_pairs' in py)
+          print('v92 packed production verified')
+          PY
+      - name: Commit production upgrade
+        run: |
+          if git diff --quiet -- app; then echo 'No changes'; exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app
+          git commit -m 'Apply v92 retained history 36-row admission'
+          git pull --rebase origin main
+          git push origin HEAD:main
