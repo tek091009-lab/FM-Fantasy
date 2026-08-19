@@ -1,0 +1,78 @@
+name: Verify retained-name history recovery v110
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_confirmed_name_anchor_v99.py'
+      - 'scripts/upgrade_history_name_transfer_support_v100.py'
+      - 'scripts/upgrade_history_confirmed_name_one_side_v101.py'
+      - 'scripts/upgrade_history_confirmed_name_global_constraint_v102.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_pair_v103.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_global_v104.py'
+      - 'scripts/upgrade_history_canonical_name_alias_v105.py'
+      - 'scripts/upgrade_history_confirmed_name_cohort_v106.py'
+      - 'scripts/upgrade_history_accumulated_name_roster_v107.py'
+      - 'scripts/upgrade_history_accumulated_name_roster_global_v108.py'
+      - 'scripts/upgrade_history_transitive_name_cohort_graph_v109.py'
+      - 'scripts/upgrade_history_transitive_name_pair_counter_v110.py'
+      - '.github/workflows/verify-history-name-v110.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained-name decoder stack to packed importer
+        run: |
+          python scripts/upgrade_history_confirmed_name_anchor_v99.py
+          python scripts/upgrade_history_name_transfer_support_v100.py
+          python scripts/upgrade_history_confirmed_name_one_side_v101.py
+          python scripts/upgrade_history_confirmed_name_global_constraint_v102.py
+          python scripts/upgrade_history_fixture_conditioned_name_pair_v103.py
+          python scripts/upgrade_history_fixture_conditioned_name_global_v104.py
+          python scripts/upgrade_history_canonical_name_alias_v105.py
+          python scripts/upgrade_history_confirmed_name_cohort_v106.py
+          python scripts/upgrade_history_accumulated_name_roster_v107.py
+          python scripts/upgrade_history_accumulated_name_roster_global_v108.py
+          python scripts/upgrade_history_transitive_name_cohort_graph_v109.py
+          python scripts/upgrade_history_transitive_name_pair_counter_v110.py
+      - name: Verify compiled importer and non-mutating graph pair keys
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from collections import Counter
+          from pathlib import Path
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode(); compile(py,'fm_importer.py','exec')
+          assert 'aa,bb=(a,b) if a<b else (b,a)' in py
+          assert 'if a>b:a,b=b,a' not in py
+          assert "confirmed_name_transitive_pair_counter_policy']='non_mutating_sorted_pair_v110'" in py
+          for s in ['def confirmed_name_transitive_graph_pass():','if shared<10:continue','if shared/denom<0.55:continue','if len(anchors)!=1:','if n_anchor<2:continue','z=confirmed_name_transitive_graph_pass()']:
+              assert s in py,s
+
+          # Regression proof for the actual v109 failure mode. A shared-name posting list can
+          # arrive in non-sorted node order. Mutating `a` after the first swap corrupts later pairs.
+          idxs=[5,2,7,1]
+          expected=Counter()
+          for i,a in enumerate(idxs):
+              for b in idxs[i+1:]:
+                  expected[tuple(sorted((a,b)))]+=1
+          fixed=Counter()
+          for i,a in enumerate(idxs):
+              for b in idxs[i+1:]:
+                  aa,bb=(a,b) if a<b else (b,a)
+                  fixed[(aa,bb)]+=1
+          assert fixed==expected
+          assert len(fixed)==6 and sum(fixed.values())==6
+          print('v99-v110 stack compiles; transitive graph counts every unordered node pair without mutating the outer-loop node')
+          PY
