@@ -1,0 +1,86 @@
+name: Verify retained-ID history recovery v113
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_confirmed_name_anchor_v99.py'
+      - 'scripts/upgrade_history_name_transfer_support_v100.py'
+      - 'scripts/upgrade_history_confirmed_name_one_side_v101.py'
+      - 'scripts/upgrade_history_confirmed_name_global_constraint_v102.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_pair_v103.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_global_v104.py'
+      - 'scripts/upgrade_history_canonical_name_alias_v105.py'
+      - 'scripts/upgrade_history_confirmed_name_cohort_v106.py'
+      - 'scripts/upgrade_history_accumulated_name_roster_v107.py'
+      - 'scripts/upgrade_history_accumulated_name_roster_global_v108.py'
+      - 'scripts/upgrade_history_transitive_name_cohort_graph_v109.py'
+      - 'scripts/upgrade_history_transitive_name_pair_counter_v110.py'
+      - 'scripts/upgrade_history_transitive_id_cohort_graph_v111.py'
+      - 'scripts/upgrade_history_local_id_anchor_v112.py'
+      - 'scripts/upgrade_history_fixture_conditioned_id_pair_v113.py'
+      - '.github/workflows/verify-history-id-v113.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained history decoder stack
+        run: |
+          python scripts/upgrade_history_confirmed_name_anchor_v99.py
+          python scripts/upgrade_history_name_transfer_support_v100.py
+          python scripts/upgrade_history_confirmed_name_one_side_v101.py
+          python scripts/upgrade_history_confirmed_name_global_constraint_v102.py
+          python scripts/upgrade_history_fixture_conditioned_name_pair_v103.py
+          python scripts/upgrade_history_fixture_conditioned_name_global_v104.py
+          python scripts/upgrade_history_canonical_name_alias_v105.py
+          python scripts/upgrade_history_confirmed_name_cohort_v106.py
+          python scripts/upgrade_history_accumulated_name_roster_v107.py
+          python scripts/upgrade_history_accumulated_name_roster_global_v108.py
+          python scripts/upgrade_history_transitive_name_cohort_graph_v109.py
+          python scripts/upgrade_history_transitive_name_pair_counter_v110.py
+          python scripts/upgrade_history_transitive_id_cohort_graph_v111.py
+          python scripts/upgrade_history_local_id_anchor_v112.py
+          python scripts/upgrade_history_fixture_conditioned_id_pair_v113.py
+      - name: Verify compiled importer and v113 safety invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode(); compile(py,'fm_importer.py','exec')
+          required=[
+            'def confirmed_id_fixture_conditioned_pair_pass():',
+            'pid_clubs=collections.defaultdict(set)',
+            'if len(owners)!=1:continue',
+            'if target<4 or usable<4:return None',
+            'if target/max(1,usable)<0.80:return None',
+            'if target-other_n<3:return None',
+            'if len(valid)==1:',
+            "register_match(ci,f,rev,leid,reid,'unlabelled_retained_fixture_conditioned_confirmed_id_pair_v113')",
+            'p=confirmed_id_fixture_conditioned_pair_pass()',
+            'unlabelled_rich_confirmed_id_fixture_conditioned_pair_matches',
+            'def confirmed_id_local_anchor_pass():',
+            'def confirmed_id_transitive_graph_pass():',
+            'def confirmed_roster_fixture_pass():',
+            'def confirmed_cohort_fixture_pass():',
+          ]
+          for s in required: assert s in py,s
+          # Transfer/multi-club IDs cannot create positive support.
+          assert 'if len(owners)!=1:continue' in py
+          # Current squad identity is a veto only; final attachment still goes through register_match.
+          assert "direct_anchor_club(lids)" in py and "direct_anchor_club(rids)" in py
+          assert "unlabelled_retained_fixture_conditioned_confirmed_id_pair_v113" in py
+          print('v99-v113 stack compiles; v113 requires two-sided historical PID support plus unique exact-score fixture')
+          PY
