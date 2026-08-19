@@ -1,0 +1,45 @@
+name: Apply history recovery v98
+on:
+  push:
+    branches: [automation/history-v98]
+    paths:
+      - 'scripts/upgrade_history_own_goal_score_v98.py'
+      - '.github/workflows/apply-history-v98.yml'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply v98
+        run: python scripts/upgrade_history_own_goal_score_v98.py
+      - name: Verify packed importer
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          for s in ['def historical_score_of(c):','return base_l+right_og,base_r+left_og','unlabelled_rich_own_goal_score_fixture_matches','def confirmed_roster_global_constraint_pass():','def confirmed_roster_one_side_pass():','def confirmed_roster_fixture_pass():','def confirmed_cohort_fixture_pass():','def single_side_bridge_pass():']:
+              assert s in py,s
+          recovery=py[py.find('def recover_unlabelled_rich_members('):]
+          assert 'lscore,rscore=score_of(c)' not in recovery
+          # The correction must be isolated to candidate match score reconstruction;
+          # decoded own_goals remain separate player-stat evidence.
+          assert "'own_goals':c[24]" in py
+          print('v98 packed importer verification passed')
+          PY
+      - name: Commit packed importer
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/part* app/fix*
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Apply v98 own-goal-aware retained score recovery'
+          git push
