@@ -1,8 +1,9 @@
 (()=>{
  'use strict';
- const VERSION='canonical-publish-v2-timeout-reconcile';
+ const VERSION='canonical-publish-v3-launch-price-seal';
  const clone=v=>JSON.parse(JSON.stringify(v));
  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+ const norm=v=>String(v??'').trim().toLowerCase();
  function replaceInPlace(target,source){
    if(!target||typeof target!=='object'||!source||typeof source!=='object')return source;
    for(const k of Object.keys(target))delete target[k];
@@ -30,6 +31,23 @@
      expected.players===a.players&&expected.fixtures===a.fixtures;
  }
  function timeoutLike(err){const s=String(err?.message||err||'').toLowerCase();return /timeout|504|gateway|upstream|network|fetch/.test(s)}
+ function sealSeasonLaunchPrices(payload){
+   let mode='';try{mode=norm(window.__FM_IMPORT_MODE_ACTIVE||'')}catch(_e){}
+   if(mode!=='season'||!payload||!Array.isArray(payload.players))return payload;
+   const chain=[
+     window.FMImportModelV86?.transform,
+     window.FMImpactRotationPricingV1?.transform,
+     window.FMPremiumDefenderPricingV1?.transform,
+     window.FMPremiumDMPricingV1?.transform,
+     window.FMAttackingOutputPricingV1?.transform
+   ];
+   for(const fn of chain){if(typeof fn==='function')fn(payload)}
+   payload.meta=payload.meta||{};
+   payload.meta.launch_pricing_seal='season-final-corrections-v1';
+   payload.meta.launch_pricing_seal_policy='season-only corrected launch prices sealed immediately before canonical publish; weekly price history untouched';
+   try{if(typeof FM_DEBUG!=='undefined')FM_DEBUG.lastMeta=payload.meta;if(typeof fmDebugAdd==='function')fmDebugAdd('info','Final season launch prices sealed before publish.',{gk:payload.meta.gk_current_shirt_price_changes||0,rotation:payload.meta.impact_rotation_price_changes||0,def:payload.meta.premium_defender_price_changes||0,dm:payload.meta.premium_dm_price_changes||0,attack:payload.meta.proven_attacking_output_price_changes||0})}catch(_e){}
+   return payload;
+ }
  async function reconcilePublishedWorld(payload,err){
    if(!timeoutLike(err)||typeof window.FMCloud?.loadWorld!=='function')return null;
    const expected=signature(payload);
@@ -52,6 +70,7 @@
    const wrapped=async function(payload){
      if(!payload)return original(payload);
      if(window.FMCloud?.ready?.()&&window.FMCloud?.isCreator?.()){
+       sealSeasonLaunchPrices(payload);
        let canonical=null;
        try{canonical=await window.FMCloud.publishWorld(payload)}
        catch(err){canonical=await reconcilePublishedWorld(payload,err);if(!canonical)throw err}
@@ -72,7 +91,7 @@
    wrapped.__fmCanonicalPublishWrapped=true;
    wrapped.__fmCanonicalPublishOriginal=original;
    try{fmStoredSet=wrapped}catch(e){console.warn('Could not install canonical import publish wrapper',e);return false}
-   window.FMCanonicalPublish={version:VERSION,replaceInPlace,signature,samePublish,reconcilePublishedWorld};
+   window.FMCanonicalPublish={version:VERSION,replaceInPlace,signature,samePublish,reconcilePublishedWorld,sealSeasonLaunchPrices};
    return true;
  }
  let tries=0;const timer=setInterval(async()=>{tries++;if(await install()||tries>40)clearInterval(timer)},200);
