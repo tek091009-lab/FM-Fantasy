@@ -51,7 +51,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify deployed V84 importer shell
+      - name: Verify deployed current importer and rollback shell
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -64,16 +64,28 @@ jobs:
             entry="$(curl -fsSL --max-time 20 "$base/v84.html?sha=${GITHUB_SHA}-${attempt}" || true)"
             guard="$(curl -fsSL --max-time 20 "$base/updateguard.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             compat="$(curl -fsSL --max-time 20 "$base/importcompat.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            if printf '%s' "$idx" | grep -q 'updateguard.js?v=7' \
+            pricing="$(curl -fsSL --max-time 20 "$base/dynamicpricingv13.js?sha=${GITHUB_SHA}-${attempt}" || true)"
+            dbcontrols="$(curl -fsSL --max-time 20 "$base/dbcontrols.js?sha=${GITHUB_SHA}-${attempt}" || true)"
+            undo="$(curl -fsSL --max-time 20 "$base/undoimport.js?sha=${GITHUB_SHA}-${attempt}" || true)"
+            clearflow="$(curl -fsSL --max-time 20 "$base/clearflowv2.js?sha=${GITHUB_SHA}-${attempt}" || true)"
+            if printf '%s' "$idx" | grep -q 'updateguard.js?v=8' \
               && printf '%s' "$idx" | grep -q 'importcompat.js?v=4' \
+              && printf '%s' "$idx" | grep -q 'dynamicpricingv13.js?v=14' \
+              && printf '%s' "$idx" | grep -q 'dbcontrols.js?v=4' \
+              && printf '%s' "$idx" | grep -q 'undoimport.js?v=2' \
+              && printf '%s' "$idx" | grep -q 'clearflowv2.js?v=4' \
               && printf '%s' "$entry" | grep -q 'bootstrap=v84-20260818' \
-              && printf '%s' "$guard" | grep -q 'world-update-guard-v7-explicit-season-partial' \
-              && printf '%s' "$compat" | grep -q 'import-compat-v84-season-plus-36-row'; then
+              && printf '%s' "$guard" | grep -q 'world-update-guard-v8-history-aware' \
+              && printf '%s' "$compat" | grep -q 'import-compat-v84-season-plus-36-row' \
+              && printf '%s' "$pricing" | grep -q 'dynamic-market-pricing-v14-sustained-successful-updates' \
+              && printf '%s' "$dbcontrols" | grep -q 'Undo Last Import' \
+              && printf '%s' "$undo" | grep -q 'undo-last-import-v1' \
+              && printf '%s' "$clearflow" | grep -q 'creator-clear-v4-visible-undo-relocation'; then
               ok=1; break
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose current V84 importer shell' >&2; exit 1; }
+          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose the current import/pricing/undo shell' >&2; exit 1; }
       - name: Record current Pages deployment
         shell: bash
         env:
@@ -85,9 +97,11 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v84-season-import-live",
-            "update_guard": "v7-explicit-season-partial",
+            "verification": "v14-pricing-undo-live",
+            "update_guard": "v8-history-aware",
             "import_compat": "v84-season-plus-36-row",
+            "dynamic_pricing": "v14-sustained-successful-updates",
+            "undo_import": "server-backup-restore-v1",
             "current_squad_decoder": "v82-consensus-only",
             "retained_history": "v81-36-row-plus-variable-squad",
             "snapshot_boundary": "append-only-by-snapshot-date-v1"
@@ -96,7 +110,7 @@ jobs:
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V84 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified current Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V84 Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified current Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
