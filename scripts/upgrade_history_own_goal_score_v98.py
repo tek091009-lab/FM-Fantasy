@@ -32,8 +32,6 @@ helper="""    def historical_score_of(c):
         left_og=sum(max(0,int(r.get('own_goals') or 0)) for r in left)
         right_og=sum(max(0,int(r.get('own_goals') or 0)) for r in right)
         if not left_og and not right_og:return base_l,base_r
-        # score_of() is the credited-goal total for each retained side. Own goals are
-        # credited to the opposing team, never to the player/team carrying own_goals.
         diagnostics['own_goal_score_candidates_seen']+=1
         return base_l+right_og,base_r+left_og
 
@@ -43,24 +41,17 @@ if 'def historical_score_of(c):' not in py:
     if anchor not in py:raise RuntimeError('v98 score helper anchor missing')
     py=py.replace(anchor,helper,1)
 
-# All retained-history fixture paths should share the corrected factual score. Do not
-# change the underlying player stats or any non-history scoring logic.
-# Replace direct candidate score reads, excluding the helper's call to legacy score_of().
 needle='lscore,rscore=score_of(c)'
 replacements=py.count(needle)
 if replacements<3:
     raise RuntimeError(f'v98 expected multiple retained score reads, found {replacements}')
 py=py.replace(needle,'lscore,rscore=historical_score_of(c)')
 
-# Some registration code may unpack score_of(c) under different variable names. Patch
-# only inside recover_unlabelled_rich_members(), leaving every other importer consumer alone.
 start=py.find('def recover_unlabelled_rich_members(')
 if start<0:raise RuntimeError('v98 recovery function missing')
 end=py.find('\ndef ',start+4)
 if end<0:end=len(py)
 seg=py[start:end]
-# Preserve helper self-call if it happens to lie in this range; swap remaining score_of(c)
-# calls to the history-specific helper.
 seg_lines=[]
 in_helper=False
 for line in seg.splitlines(True):
@@ -72,15 +63,12 @@ for line in seg.splitlines(True):
 newseg=''.join(seg_lines)
 py=py[:start]+newseg+py[end:]
 
-# Diagnostic counters + payload handoff.
 diag_anchor="    diagnostics.setdefault('global_constraint_nonunique_components_rejected',0)\n"
 diag_add=diag_anchor+"    diagnostics.setdefault('own_goal_score_candidates_seen',0)\n    diagnostics.setdefault('own_goal_score_fixture_matches',0)\n"
 if "diagnostics.setdefault('own_goal_score_candidates_seen',0)" not in py:
     if diag_anchor not in py:raise RuntimeError('v98 diagnostic anchor missing')
     py=py.replace(diag_anchor,diag_add,1)
 
-# Count accepted own-goal matches centrally: register_match sees the candidate after every
-# decoder path has passed its normal identity/uniqueness safeguards.
 reg_anchor="        used_fixtures.add(fid);used_candidates.add(ci)\n"
 reg_add="        if any(int(r.get('own_goals') or 0)>0 for r in (left+right)):\n            diagnostics['own_goal_score_fixture_matches']+=1\n        used_fixtures.add(fid);used_candidates.add(ci)\n"
 if "diagnostics['own_goal_score_fixture_matches']+=1" not in py:
@@ -112,7 +100,6 @@ for s in [
     'def confirmed_cohort_fixture_pass():',
     'def single_side_bridge_pass():'
 ]:assert s in cpy,s
-# No history candidate path should still use the uncorrected direct score assignment.
 recovery=cpy[cpy.find('def recover_unlabelled_rich_members('):]
 assert 'lscore,rscore=score_of(c)' not in recovery
 print('v98 own-goal-aware retained score recovery applied')
