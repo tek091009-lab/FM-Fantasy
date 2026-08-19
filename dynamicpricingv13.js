@@ -1,0 +1,69 @@
+(()=>{
+'use strict';
+const VERSION='dynamic-market-pricing-v13-sustained-demand';
+const num=v=>Number(v||0)||0;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,num(v)));
+const round1=v=>Math.round(num(v)*10)/10;
+const norm=v=>String(v??'').trim().toLowerCase();
+const histKey=h=>`${h?.date||''}|${h?.home||''}|${h?.away||''}|${h?.opponent||''}|${h?.venue||''}`;
+const deep=x=>JSON.parse(JSON.stringify(x));
+function unavailable(p){return !!(p?.injured||p?.injury_status||p?.return_date||p?.injury_return_date||p?.expected_return_date||p?.current_unavailable||p?.price_context?.current_unavailable)}
+function baselineBackup(p){const c=p?.price_context||{},role=norm(c.availability_signal||c.usage_role||c.role||'');return num(c.nailedness)<.38||/backup|rotation|fringe|impact/.test(role)}
+function seed(p,gw){return{version:VERSION,processedHistoryKeys:[...new Set((p?.history||[]).map(histKey))].slice(-120),baselineGameweek:num(gw),baselineBackup:baselineBackup(p),positiveStreak:0,negativeStreak:0,latentFormDemand:0,latentRoleDemand:0,consecutiveStarts:0,consecutiveFitBench:0,rolePremium:0,recentSignals:[],importsObserved:0}}
+function perfSignal(h){const m=num(h?.minutes),pts=num(h?.fpl_points),g=num(h?.goals),a=num(h?.assists),ga=g+a,rt=num(h?.rating);if(m<=0)return 0;if(ga>=2||pts>=12||rt>=8.35||(g>=1&&pts>=9))return 2;if(ga>=1||pts>=7||rt>=7.55)return 1;if(m>=60&&ga===0&&pts<=2&&(rt===0||rt<=6.5))return -1;return 0}
+function addFormEvidence(t,s){
+  t.recentSignals=[...(t.recentSignals||[]),s].slice(-5);
+  if(s>0){t.positiveStreak++;t.negativeStreak=0;t.latentFormDemand+=s>=2?.9:.55;}
+  else if(s<0){t.negativeStreak++;t.positiveStreak=0;t.latentFormDemand-=.5;}
+  else {t.positiveStreak=0;t.negativeStreak=0;t.latentFormDemand*=.82;}
+  t.latentFormDemand=clamp(t.latentFormDemand,-4,4);
+}
+function formMarketMove(t){
+  let move=0;
+  const last3=(t.recentSignals||[]).slice(-3),strongHits=last3.filter(x=>x>=2).length;
+  const extreme=t.positiveStreak>=3&&strongHits>=2&&t.latentFormDemand>=2;
+  const normalUp=t.positiveStreak>=4;
+  const normalDown=t.negativeStreak>=4;
+  if(extreme||normalUp){const cap=extreme?2:1;const steps=Math.min(cap,Math.floor(Math.max(0,t.latentFormDemand)+1e-9));if(steps){move=.1*steps;t.latentFormDemand-=steps;}}
+  else if(normalDown){const steps=Math.min(1,Math.floor(Math.max(0,-t.latentFormDemand)+1e-9));if(steps){move=-.1*steps;t.latentFormDemand+=steps;}}
+  return round1(move);
+}
+function roleEvidence(t,minutes,isUnavailable){
+  if(isUnavailable)return;
+  if(minutes>=60){t.consecutiveStarts++;t.consecutiveFitBench=0;if(t.baselineBackup){const n=t.consecutiveStarts;t.latentRoleDemand+=n===1?.15:n===2?.25:n===3?.8:n===4?1.8:n===5?2:n<=8?1:0;}}
+  else if(minutes>0){t.consecutiveStarts=0;t.consecutiveFitBench++;if(t.consecutiveFitBench>=3)t.latentRoleDemand-=t.consecutiveFitBench===3?.8:.65;}
+  else {t.consecutiveStarts=0;t.consecutiveFitBench++;if(t.consecutiveFitBench>=3)t.latentRoleDemand-=t.consecutiveFitBench===3?.8:.65;}
+  t.latentRoleDemand=clamp(t.latentRoleDemand,-4,4);
+}
+function roleMarketMove(t){
+  const provenGain=t.baselineBackup&&t.consecutiveStarts>=3;
+  const provenLoss=t.consecutiveFitBench>=3;
+  if(!provenGain&&!provenLoss)return 0;
+  const maxSteps=2,steps=Math.min(maxSteps,Math.floor(Math.abs(t.latentRoleDemand)+1e-9));
+  if(!steps)return 0;
+  const dir=Math.sign(t.latentRoleDemand);t.latentRoleDemand-=dir*steps;t.rolePremium=round1(t.rolePremium+dir*.1*steps);return round1(dir*.1*steps);
+}
+function applyStep(state,h,p){const t=state.t,isUnavail=unavailable(p),mins=h?num(h.minutes):null;if(isUnavail)return{price:state.price,t,delta:0};if(h&&mins>0)addFormEvidence(t,perfSignal(h));if(h)roleEvidence(t,mins,false);let delta=round1(formMarketMove(t)+roleMarketMove(t));delta=clamp(delta,-.3,.3);const price=round1(clamp(state.price+delta,3.5,15));return{price,t,delta:round1(price-state.price)}}
+function applyDynamicPricing(oldPayload,payload,changes){
+  const oldMap=new Map((oldPayload?.players||[]).map(p=>[String(p.pid),p])),inc=[],dec=[];
+  for(const p of payload?.players||[]){
+    const o=oldMap.get(String(p.pid));p.model_price=num(p.price);
+    if(!o){p.launch_price=num(p.price);p.dynamic_price=num(p.price);p.price_baseline_gw=num(payload?.meta?.latest_gameweek_with_result);p.price_change_history=[];p.price_tracker_v13=seed(p,p.price_baseline_gw);p.price_tracker=p.price_tracker_v13;continue;}
+    const oldPrice=num(o.price??o.dynamic_price??o.launch_price??p.price),legacy=o.price_tracker_v13||o.price_tracker;
+    let t=legacy?.version===VERSION?deep(legacy):seed(o,o.price_baseline_gw??oldPayload?.meta?.price_baseline_gw??0);
+    const seen=new Set(t.processedHistoryKeys||[]),rows=(p.history||[]).filter(h=>!seen.has(histKey(h))).sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
+    let state={price:oldPrice,t},stepChanges=[];
+    for(const h of rows){seen.add(histKey(h));const before=state.price;state=applyStep(state,h,p);if(state.price!==before)stepChanges.push({old_price:before,new_price:state.price,delta:round1(state.price-before),date:h.date||null});}
+    t=state.t;t.processedHistoryKeys=[...seen].slice(-120);t.importsObserved=num(t.importsObserved)+1;
+    p.launch_price=num(o.launch_price??oldPrice);p.dynamic_price=state.price;p.price=state.price;p.price_baseline_gw=num(o.price_baseline_gw??oldPayload?.meta?.price_baseline_gw);p.price_tracker_v13=t;p.price_tracker=t;p.price_change_history=[...(o.price_change_history||[])];
+    for(const sc of stepChanges)p.price_change_history.push({pid:String(p.pid),name:(p.name||p.display_name||''),club:p.club,pos:p.pos,...sc,at:new Date().toISOString(),gw:num(payload?.meta?.latest_gameweek_with_result),model:VERSION});
+    p.price_change_history=p.price_change_history.slice(-40);
+    if(state.price>oldPrice)inc.push({pid:String(p.pid),name:p.name||p.display_name||'',club:p.club,pos:p.pos,old_price:oldPrice,new_price:state.price,delta:round1(state.price-oldPrice)});
+    if(state.price<oldPrice)dec.push({pid:String(p.pid),name:p.name||p.display_name||'',club:p.club,pos:p.pos,old_price:oldPrice,new_price:state.price,delta:round1(state.price-oldPrice)});
+  }
+  payload.meta=payload.meta||{};payload.meta.price_policy='V13: sustained evidence creates simulated transfer demand; one match never changes price; injuries never affect price';payload.meta.dynamic_pricing_model=VERSION;
+  return{increases:inc.sort((a,b)=>b.delta-a.delta),decreases:dec.sort((a,b)=>a.delta-b.delta)};
+}
+function install(){if(typeof globalThis.fmApplyDynamicPricing!=='function'||globalThis.fmApplyDynamicPricing.__fmV13)return false;const fn=function(oldPayload,payload,changes){return applyDynamicPricing(oldPayload,payload,changes)};fn.__fmV13=true;fn.__fmPrevious=globalThis.fmApplyDynamicPricing;globalThis.fmApplyDynamicPricing=fn;return true}
+const api={VERSION,seed,perfSignal,applyStep,applyDynamicPricing,install};if(typeof module!=='undefined'&&module.exports)module.exports=api;if(typeof window!=='undefined'){window.FMDynamicPricingV13=api;let tries=0;const timer=setInterval(()=>{tries++;if(install()||tries>240)clearInterval(timer)},50);install();}
+})();
