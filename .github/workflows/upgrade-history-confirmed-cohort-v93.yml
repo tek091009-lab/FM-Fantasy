@@ -1,0 +1,55 @@
+name: Upgrade retained history confirmed cohorts v93
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/upgrade_history_confirmed_cohort_v93.py
+      - .github/workflows/upgrade-history-confirmed-cohort-v93.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Apply pending 36-row admission compatibility
+        run: |
+          if [ -f scripts/upgrade_history_admission_v92.py ]; then python scripts/upgrade_history_admission_v92.py; fi
+      - name: Apply confirmed cohort recovery
+        run: python scripts/upgrade_history_confirmed_cohort_v93.py
+      - name: Verify packed importer
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode()
+          compile(py,'fm_importer.py','exec')
+          assert 'confirmed_side_cohorts=collections.defaultdict(list)' in py
+          assert 'def confirmed_cohort_club(ids):' in py
+          assert 'unlabelled_rich_confirmed_cohort_side_labels' in py
+          assert 'retained_member_stat_admission_min=36' in html
+          print('verified v92 admission + v93 confirmed cohort recovery')
+          PY
+          git diff --check
+      - name: Commit generated packed importer
+        run: |
+          if git diff --quiet -- app/; then
+            echo 'Packed importer already contains v93'
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/part* app/fix*
+          git commit -m "Apply v93 confirmed-match cohort history recovery"
+          git pull --rebase origin main
+          git push origin HEAD:main
