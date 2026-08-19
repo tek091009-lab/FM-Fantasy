@@ -25,7 +25,7 @@ jobs:
         with: {node-version: '22'}
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - name: Verify current season-import guard behavior
+      - name: Verify current season/update guard behavior
         run: node scripts/test_season_publish_v84.js
       - name: Verify packed importer compiles
         shell: bash
@@ -68,14 +68,15 @@ jobs:
             dbcontrols="$(curl -fsSL --max-time 20 "$base/dbcontrols.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             undo="$(curl -fsSL --max-time 20 "$base/undoimport.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             clearflow="$(curl -fsSL --max-time 20 "$base/clearflowv2.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            if printf '%s' "$idx" | grep -q 'updateguard.js?v=8' \
+            if printf '%s' "$idx" | grep -q 'fm-deploy-undo-v2' \
+              && printf '%s' "$idx" | grep -q 'updateguard.js?v=9' \
               && printf '%s' "$idx" | grep -q 'importcompat.js?v=4' \
               && printf '%s' "$idx" | grep -q 'dynamicpricingv13.js?v=14' \
-              && printf '%s' "$idx" | grep -q 'dbcontrols.js?v=4' \
-              && printf '%s' "$idx" | grep -q 'undoimport.js?v=2' \
-              && printf '%s' "$idx" | grep -q 'clearflowv2.js?v=4' \
+              && printf '%s' "$idx" | grep -q 'dbcontrols.js?v=5' \
+              && printf '%s' "$idx" | grep -q 'undoimport.js?v=3' \
+              && printf '%s' "$idx" | grep -q 'clearflowv2.js?v=5' \
               && printf '%s' "$entry" | grep -q 'bootstrap=v84-20260818' \
-              && printf '%s' "$guard" | grep -q 'world-update-guard-v8-history-aware' \
+              && printf '%s' "$guard" | grep -q 'world-update-guard-v9-history-aware-season-catchup' \
               && printf '%s' "$compat" | grep -q 'import-compat-v84-season-plus-36-row' \
               && printf '%s' "$pricing" | grep -q 'dynamic-market-pricing-v14-sustained-successful-updates' \
               && printf '%s' "$dbcontrols" | grep -q 'Undo Last Import' \
@@ -97,8 +98,8 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v14-pricing-undo-live",
-            "update_guard": "v8-history-aware",
+            "verification": "v14-pricing-undo-live-v2",
+            "update_guard": "v9-history-aware-season-catchup",
             "import_compat": "v84-season-plus-36-row",
             "dynamic_pricing": "v14-sustained-successful-updates",
             "undo_import": "server-backup-restore-v1",
