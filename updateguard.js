@@ -1,6 +1,6 @@
 (()=>{
 'use strict';
-const VERSION='world-update-guard-v8-history-aware';
+const VERSION='world-update-guard-v9-history-aware-season-catchup';
 const norm=v=>String(v??'').trim().toLowerCase().replace(/\s+/g,' ');
 const num=v=>Number(v||0)||0;
 const arr=v=>Array.isArray(v)?v:[];
@@ -16,8 +16,10 @@ function matchIdentityValid(m){const h=arr(m?.home_players),a=arr(m?.away_player
 function contentKey(m){const side=s=>arr(s).map(r=>String(r?.player_id??'')).sort().join(',');return `${fixtureId(m)}|${stableFixtureKey(m)}|${side(m?.home_players)}|${side(m?.away_players)}`}
 function resolveCompleted(payload){const meta=payload?.meta||{};let done=num(meta.completed_gameweek),latest=Math.max(done,num(meta.latest_gameweek_with_result));for(let gw=done+1;gw<=latest;gw++){const rows=arr(payload?.fixtures).filter(f=>fixtureGw(f)===gw);if(!rows.length||rows.every(fixturePlayed)){done=gw;continue}break}return done}
 function normaliseProgress(payload){if(!payload?.meta)return;const done=resolveCompleted(payload);if(!done)return;payload.meta.completed_gameweek=done;payload.meta.current_gameweek=done+1;payload.meta.next_gameweek=done+1;payload.meta.progress_source='fixture_completion_with_blank_gameweeks'}
+function activeImportMode(meta){const explicit=norm(meta?.import_mode||meta?.importMode||'');if(explicit)return explicit;try{return norm(window.__FM_IMPORT_MODE_ACTIVE||'')}catch(_e){return ''}}
 function validate(payload,oldPayload){
  const errors=[],warnings=[],matches=arr(payload?.matches),fixtures=arr(payload?.fixtures),meta=payload?.meta||{};
+ const importMode=activeImportMode(meta);
  const old=oldPayload&&Array.isArray(oldPayload.players)?oldPayload:null;
  const sameWorld=!!old&&competitionKey(old)!==''&&competitionKey(old)===competitionKey(payload);
  const oldDone=sameWorld?num(old?.meta?.completed_gameweek):0,newDone=num(meta.completed_gameweek);
@@ -36,12 +38,20 @@ function validate(payload,oldPayload){
  const hasDetail=f=>{const id=fixtureId(f),sk=stableFixtureKey(f);return !!((id&&ids.has(id))||(sk&&stable.has(sk)))};
  const newlyCompleted=fixtures.filter(f=>fixturePlayed(f)&&fixtureGw(f)>oldDone&&fixtureGw(f)<=newDone);
  const missing=newlyCompleted.filter(f=>!hasDetail(f));
- if(missing.length)errors.push(`${missing.length} newly completed fixtures have no validated player-level match detail`);
+ if(missing.length){
+   const cleanCatchup=!sameWorld||oldDone===0;
+   const declaredPartial=norm(meta.history_coverage_status)==='partial'||num(meta.rich_matches_missing)>0||(num(meta.played_results)>matches.length&&matches.length>0);
+   if(cleanCatchup&&importMode==='season'&&declaredPartial&&matches.length){
+     warnings.push(`${missing.length} historical fixtures still lack player-level detail; clean season import may publish partial history while recovered matches remain usable`);
+   }else{
+     errors.push(`${missing.length} newly completed fixtures have no validated player-level match detail`);
+   }
+ }
  if(sameWorld){const oldLatest=num(old?.meta?.latest_gameweek_with_result),newLatest=num(meta.latest_gameweek_with_result);if(newDone<oldDone)errors.push(`completed Gameweek regressed ${oldDone} → ${newDone}`);if(newLatest<oldLatest&&newDone<=oldDone)errors.push(`latest result Gameweek regressed ${oldLatest} → ${newLatest}`)}
  if(trusted)warnings.push(`${trusted} unchanged previously-published match-detail rows trusted without revalidation`);
- return {ok:!errors.length,version:VERSION,errors,warnings,summary:{matches:matches.length,trusted_historical_matches:trusted,new_or_changed_matches:newOrChanged,newly_completed_fixtures:newlyCompleted.length,missing_new_detail:missing.length,completed_gameweek:newDone,current_gameweek:num(meta.current_gameweek),latest_result_gameweek:num(meta.latest_gameweek_with_result),history_status:meta.history_coverage_status||null,rich_matches_missing:num(meta.rich_matches_missing)}};
+ return {ok:!errors.length,version:VERSION,errors,warnings,summary:{matches:matches.length,trusted_historical_matches:trusted,new_or_changed_matches:newOrChanged,newly_completed_fixtures:newlyCompleted.length,missing_new_detail:missing.length,completed_gameweek:newDone,current_gameweek:num(meta.current_gameweek),latest_result_gameweek:num(meta.latest_gameweek_with_result),history_status:meta.history_coverage_status||null,rich_matches_missing:num(meta.rich_matches_missing),import_mode:importMode||null}};
 }
 async function restoreCanonical(){try{if(window.FMAtomicImportRollback?.restoreCanonical)return await window.FMAtomicImportRollback.restoreCanonical();if(typeof window.FMCloud?.loadWorld==='function'){const p=await window.FMCloud.loadWorld(true);if(p&&typeof fmStoredSetLocalOnly==='function')await fmStoredSetLocalOnly(p);if(p&&typeof applyImportedPayload==='function')applyImportedPayload(p,'load');return p}}catch(e){console.warn('Could not restore canonical world after blocked update',e)}return null}
-function install(){const cloud=window.FMCloud;if(!cloud||cloud.__worldUpdateGuardV8||typeof cloud.publishWorld!=='function')return false;cloud.__worldUpdateGuardV8=true;const original=cloud.publishWorld.bind(cloud);cloud.publishWorld=async(payload,...args)=>{if(payload==null)return original(payload,...args);const old=JSON.parse(JSON.stringify(cloud.getWorld?.()?.payload||null));normaliseProgress(payload);const result=validate(payload,old);payload.meta=payload.meta||{};payload.meta.update_validation=result;if(!result.ok){await restoreCanonical();throw new Error(`FM update blocked before publish: ${result.errors.join(' · ')}`)}if(result.warnings.length)console.warn('FM update validation warnings:',result.warnings);try{return await original(payload,...args)}catch(e){await restoreCanonical();throw e}};window.FMWorldUpdateGuard={validate,normaliseProgress,version:VERSION};return true}
+function install(){const cloud=window.FMCloud;if(!cloud||cloud.__worldUpdateGuardV9||typeof cloud.publishWorld!=='function')return false;cloud.__worldUpdateGuardV9=true;const original=cloud.publishWorld.bind(cloud);cloud.publishWorld=async(payload,...args)=>{if(payload==null)return original(payload,...args);const old=JSON.parse(JSON.stringify(cloud.getWorld?.()?.payload||null));normaliseProgress(payload);const result=validate(payload,old);payload.meta=payload.meta||{};payload.meta.update_validation=result;if(!result.ok){await restoreCanonical();throw new Error(`FM update blocked before publish: ${result.errors.join(' · ')}`)}if(result.warnings.length)console.warn('FM update validation warnings:',result.warnings);try{return await original(payload,...args)}catch(e){await restoreCanonical();throw e}};window.FMWorldUpdateGuard={validate,normaliseProgress,version:VERSION};return true}
 window.FMWorldUpdateGuard={validate,normaliseProgress,version:VERSION};window.addEventListener('fmcloudready',install);let tries=0;const timer=setInterval(()=>{tries++;if(install()||tries>40)clearInterval(timer)},200);
 })();
