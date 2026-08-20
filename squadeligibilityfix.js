@@ -1,6 +1,6 @@
 (()=>{
 'use strict';
-const VERSION='squad-eligibility-v2-registered-or-senior-matchday';
+const VERSION='squad-eligibility-v3-registered-or-senior-matchday';
 const arr=v=>Array.isArray(v)?v:[];
 const norm=v=>String(v??'').trim().toLowerCase().replace(/\s+/g,' ');
 const sid=p=>String(p?.eid??p?.pid??p?.player_id??p?.id??'');
@@ -11,14 +11,18 @@ function blockedIds(meta){
 }
 function currentLeagueClubs(payload){const s=new Set();for(const f of arr(payload?.fixtures))for(const c of [f?.home,f?.away])if(c)s.add(norm(c));return s}
 function hasSeniorMatchdayEvidence(p){return arr(p?.history).some(h=>h&&h.gameweek!==undefined&&h.gameweek!==null&&String(h?.date||'').length>=8)}
+function originalCohortEligibility(p){
+ const e=p?.registration_evidence||{};
+ if(typeof e.cohort_eligible==='boolean')return e.cohort_eligible;
+ return p?.competition_eligible===true||String(p?.registration_status||'')==='competition_eligible'||e.eligible===true;
+}
 function fix(payload){
  if(!payload||!Array.isArray(payload.players))return payload;
  const meta=payload.meta||(payload.meta={}),clubs=currentLeagueClubs(payload),blocked=blockedIds(meta);
  let registered=0,matchdayAdded=0,hiddenReserve=0,blockedCount=0,outside=0;const addedExamples=[],clubCounts={};
  for(const p of payload.players){
    const id=sid(p),clubRaw=p?.club||p?.club_full||p?.team||'',club=norm(clubRaw);
-   const cohortEligible=p?.competition_eligible===true||String(p?.registration_status||'')==='competition_eligible'||p?.registration_evidence?.eligible===true;
-   const matchday=hasSeniorMatchdayEvidence(p);
+   const cohortEligible=originalCohortEligibility(p),matchday=hasSeniorMatchdayEvidence(p);
    p.registration_evidence={...(p.registration_evidence||{}),cohort_eligible:cohortEligible,senior_championship_matchday_evidence:matchday};
    if(!club||!clubs.has(club)){outside++;continue}
    if(p?.unresolved===true||blocked.has(id)){
@@ -38,7 +42,7 @@ function fix(payload){
  }
  meta.competition_eligibility_policy=VERSION;
  meta.fantasy_player_pool_policy='registered Championship squad OR selected-league senior matchday evidence; U21/reserve-only players remain hidden until senior matchday evidence; unresolved/multi-club identities quarantined';
- meta.squad_eligibility_v2={version:VERSION,registered_players:registered,senior_matchday_additions:matchdayAdded,reserve_or_u21_hidden:hiddenReserve,identity_quarantined:blockedCount,outside_selected_league:outside,visible_club_counts:clubCounts,added_examples:addedExamples};
+ meta.squad_eligibility_v3={version:VERSION,registered_players:registered,senior_matchday_additions:matchdayAdded,reserve_or_u21_hidden:hiddenReserve,identity_quarantined:blockedCount,outside_selected_league:outside,visible_club_counts:clubCounts,added_examples:addedExamples};
  if(meta.competition_eligibility_diagnostics&&typeof meta.competition_eligibility_diagnostics==='object'){
    meta.competition_eligibility_diagnostics.previous_policy=meta.competition_eligibility_diagnostics.version||'current-competition-cohort-v86';
    meta.competition_eligibility_diagnostics.cohort_role='registered_senior_base_not_hard_exclusion';
@@ -48,9 +52,9 @@ function fix(payload){
 }
 function install(){
  let original;try{original=globalThis.fmApplyPostPayloadPricingCorrections}catch(_e){return false}
- if(typeof original!=='function'||original.__fmSquadEligibilityV2)return false;
- const wrapped=function(payload,...args){const out=original(payload,...args);fix(payload);try{if(typeof fmDebugAdd==='function')fmDebugAdd('info','Registered-or-senior-matchday eligibility applied.',{version:VERSION,registered:payload?.meta?.squad_eligibility_v2?.registered_players||0,matchday_additions:payload?.meta?.squad_eligibility_v2?.senior_matchday_additions||0,hidden_reserve_u21:payload?.meta?.squad_eligibility_v2?.reserve_or_u21_hidden||0})}catch(_e){}return out};
- wrapped.__fmSquadEligibilityV2=true;wrapped.__fmSquadEligibilityOriginal=original;globalThis.fmApplyPostPayloadPricingCorrections=wrapped;return true;
+ if(typeof original!=='function'||original.__fmSquadEligibilityV3)return false;
+ const wrapped=function(payload,...args){const out=original(payload,...args);fix(payload);try{if(typeof fmDebugAdd==='function')fmDebugAdd('info','Registered-or-senior-matchday eligibility applied.',{version:VERSION,registered:payload?.meta?.squad_eligibility_v3?.registered_players||0,matchday_additions:payload?.meta?.squad_eligibility_v3?.senior_matchday_additions||0,hidden_reserve_u21:payload?.meta?.squad_eligibility_v3?.reserve_or_u21_hidden||0})}catch(_e){}return out};
+ wrapped.__fmSquadEligibilityV3=true;wrapped.__fmSquadEligibilityOriginal=original;globalThis.fmApplyPostPayloadPricingCorrections=wrapped;return true;
 }
 window.FMSquadEligibilityFix={version:VERSION,fix,install};let tries=0;const timer=setInterval(()=>{tries++;if(install()||tries>60)clearInterval(timer)},100);window.addEventListener('fmcloudready',install);
 })();
