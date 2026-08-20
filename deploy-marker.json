@@ -1,6 +1,6 @@
 {
-  "verified_live_sha": "ffe070db8a4b34e693688480967a2627e8e9559b",
-  "verified_at": "2026-08-20T13:23:46Z",
+  "verified_live_sha": "003c787c23ee6bee47cef781b67def62c001370c",
+  "verified_at": "2026-08-20T13:42:37Z",
   "verification": "v14-fast-cache-auth-safe-v4",
   "update_guard": "v9-history-aware-season-catchup",
   "import_compat": "v84-season-plus-36-row",
