@@ -1,6 +1,6 @@
 {
-  "verified_live_sha": "64e840f17ff73029bfd13b20c9dbf56e39c57195",
-  "verified_at": "2026-08-20T17:48:47Z",
+  "verified_live_sha": "2d88c4c151d20ed8cb45b68bd7ef8078169fc734",
+  "verified_at": "2026-08-20T17:49:17Z",
   "verification": "v20-preserve-failed-import-debug",
   "update_guard": "v11-club-matched-history-repair",
   "first_week_repair": "club-matched-decoded-player-history-plus-safe-side-repartition",
