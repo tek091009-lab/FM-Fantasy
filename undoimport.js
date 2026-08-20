@@ -1,8 +1,7 @@
 (()=>{
 'use strict';
-const VERSION='undo-last-import-v1';
+const VERSION='undo-last-import-v1-login-safe';
 const ID='fmUndoLastImportBtn';
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let busy=false;
 function note(text,bad=false){const el=document.getElementById('fmCloudDbStatus');if(el){el.textContent=text;el.style.color=bad?'#ff7b9e':'#b8ffd9';}}
 async function client(){
@@ -29,14 +28,15 @@ async function undoLastImport(){
   finally{busy=false;}
 }
 function mount(){
-  if(document.getElementById(ID))return;
+  if(document.getElementById(ID))return true;
+  if(!window.FMCloud?.isCreator?.())return false;
   const db=document.getElementById('fmCloudDbControls');
-  if(!db){setTimeout(mount,250);return;}
-  if(!window.FMCloud?.isCreator?.())return;
+  if(!db)return false;
   const b=document.createElement('button');b.id=ID;b.type='button';b.className='syncBtn';b.textContent='Undo Last Import';b.style.cssText='border-color:#ff8aaa;color:#ffd7e3';b.onclick=undoLastImport;
   const status=document.getElementById('fmCloudDbStatus');db.insertBefore(b,status||null);
+  return true;
 }
 window.FMUndoLastImport={version:VERSION,run:undoLastImport};
-window.addEventListener('fmcloudready',()=>setTimeout(mount,100));
-let tries=0;const timer=setInterval(()=>{tries++;mount();if(document.getElementById(ID)||tries>50)clearInterval(timer)},200);
+window.addEventListener('fmcloudready',()=>{mount();});
+let tries=0;const timer=setInterval(()=>{tries++;if(mount()||tries>=40)clearInterval(timer)},250);
 })();
