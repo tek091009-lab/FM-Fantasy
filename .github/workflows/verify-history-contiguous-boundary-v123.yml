@@ -1,0 +1,70 @@
+name: Verify retained history contiguous boundary v123
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - '.github/workflows/verify-history-contiguous-boundary-v123.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural decoder stack
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+      - name: Verify importer and contiguous-lineup invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+            'def compact_window(j,left_n,right_n):',
+            'def lineup_order_coherent(rows):',
+            'def contiguous_lineup_window(j,left_n,right_n):',
+            'if gap>=outlier_threshold:return None',
+            'if sum(1 for r in starters if activity(r))<6:return False',
+            "if int(r.get('sub_on',0) or 0)<=0 and activity(r):return False",
+            'contiguous_strict=contiguous_lineup_window(j,20,20)',
+            'pair=contiguous_lineup_window(j,left_n,right_n)',
+            'contiguous_lineup_boundary_candidate_pairs',
+          ]
+          for s in required:assert s in py,s
+          # Legacy large-gap and v122 compact-outlier representations remain in place.
+          assert 'if gap<=500 or max_l>=1500 or max_r>=1500:return None' in py
+          assert 'gap<max(230,int(med*1.35),q75+16)' in py
+
+          # Independent synthetic regression for the structural idea: a real 20-player side has
+          # 11 starters followed by bench; a shifted split starts with substituted bench players.
+          def coherent(rows):
+              starters=rows[:11];bench=rows[11:]
+              if any(r['sub_on']>0 for r in starters):return False
+              def active(r):return r['sub_off']>0 or r['passes_attempted']>0 or r['goals']>0
+              if sum(active(r) for r in starters)<6:return False
+              for r in bench:
+                  if r['sub_on']<=0 and active(r):return False
+              ons=sum(r['sub_on']>0 for r in bench);offs=sum(r['sub_off']>0 for r in starters)
+              return abs(ons-offs)<=2
+          starters=[{'sub_on':0,'sub_off':60 if i<3 else 0,'passes_attempted':20,'goals':0} for i in range(11)]
+          bench=[{'sub_on':60 if i<3 else 0,'sub_off':0,'passes_attempted':5 if i<3 else 0,'goals':0} for i in range(9)]
+          assert coherent(starters+bench)
+          shifted=(bench[:5]+starters+bench[5:])[:20]
+          assert not coherent(shifted)
+          print('v123 compiles; contiguous 11-starter/bench representation accepted; shifted arbitrary split rejected')
+          PY
