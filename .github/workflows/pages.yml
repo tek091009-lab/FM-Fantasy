@@ -53,7 +53,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify deployed V11 first-week identity repair, V5 squad evidence and hard rollback
+      - name: Verify V11 repair, V5 squad evidence and failed-debug preservation
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -75,13 +75,13 @@ jobs:
             dbcontrols="$(curl -fsSL --max-time 20 "$base/dbcontrols.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             undo="$(curl -fsSL --max-time 20 "$base/undoimport.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             clearflow="$(curl -fsSL --max-time 20 "$base/clearflowv2.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-auto-restore-v11-club-matched-repair-v11' \
+            if printf '%s' "$idx" | grep -q 'fm-deploy-auto-restore-v12-preserve-failed-debug' \
               && printf '%s' "$idx" | grep -q 'authfix.js?v=14' \
-              && printf '%s' "$idx" | grep -q 'atomicrollbackfix.js?v=3' \
+              && printf '%s' "$idx" | grep -q 'atomicrollbackfix.js?v=4' \
               && printf '%s' "$idx" | grep -q 'squadeligibilityfix.js?v=5' \
               && printf '%s' "$idx" | grep -q 'registrationnewsguard.js?v=2' \
               && printf '%s' "$idx" | grep -q 'newsview.js?v=5' \
-              && printf '%s' "$idx" | grep -q 'dbcontrols.js?v=8' \
+              && printf '%s' "$idx" | grep -q 'dbcontrols.js?v=9' \
               && printf '%s' "$idx" | grep -q 'updateguard.js?v=11' \
               && printf '%s' "$idx" | grep -q 'importcompat.js?v=4' \
               && printf '%s' "$idx" | grep -q 'dynamicpricingv13.js?v=14' \
@@ -97,7 +97,11 @@ jobs:
               && printf '%s' "$pricing" | grep -q 'dynamic-market-pricing-v14-sustained-successful-updates' \
               && printf '%s' "$auth" | grep -q 'const authoritative=await loadWorld(false)' \
               && printf '%s' "$auth" | grep -q 'await applyWorldToApp(authoritative)' \
-              && printf '%s' "$rollback" | grep -q 'atomic-import-rollback-v3-hard-runtime-reset' \
+              && printf '%s' "$rollback" | grep -q 'atomic-import-rollback-v4-preserve-failed-debug' \
+              && printf '%s' "$rollback" | grep -q 'saveFailureDebug' \
+              && printf '%s' "$rollback" | grep -q 'readFailureDebug' \
+              && printf '%s' "$rollback" | grep -q 'rejected_payload' \
+              && printf '%s' "$rollback" | grep -q 'FMFantasyDiagnostics' \
               && printf '%s' "$rollback" | grep -q 'scheduleHardReload' \
               && printf '%s' "$rollback" | grep -q 'location.reload()' \
               && printf '%s' "$squad" | grep -q 'squad-eligibility-v5-club-matched-senior-evidence' \
@@ -108,6 +112,8 @@ jobs:
               && printf '%s' "$newsview" | grep -q 'news-view-v5-idempotent-clear' \
               && ! printf '%s' "$dbcontrols" | grep -q "setTimeout(()=>forceLoad().catch" \
               && printf '%s' "$dbcontrols" | grep -q 'Undo Last Import' \
+              && printf '%s' "$dbcontrols" | grep -q 'Download Last Failed Import Debug' \
+              && printf '%s' "$dbcontrols" | grep -q 'downloadLastFailedImportDebug' \
               && printf '%s' "$undo" | grep -q 'undo-last-import-v2-dbcontrols-owned' \
               && printf '%s' "$clearflow" | grep -q 'creator-clear-v5-auth-safe-no-undo-observer' \
               && ! printf '%s' "$clearflow" | grep -q 'MutationObserver'; then
@@ -115,7 +121,7 @@ jobs:
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose V11 club-matched weekly repair build' >&2; exit 1; }
+          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose failed-import debug preservation build' >&2; exit 1; }
       - name: Record current Pages deployment
         shell: bash
         env:
@@ -127,7 +133,7 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v19-club-matched-weekly-repair-v11",
+            "verification": "v20-preserve-failed-import-debug",
             "update_guard": "v11-club-matched-history-repair",
             "first_week_repair": "club-matched-decoded-player-history-plus-safe-side-repartition",
             "first_week_policy": "history venue alone is insufficient; player club identity must agree with the fixture side and repaired rows must pass exact identity-and-score validation",
@@ -135,7 +141,8 @@ jobs:
             "dynamic_pricing": "v14-sustained-successful-updates",
             "world_load": "automatic-versioned-local-cache-refresh-v2",
             "world_apply": "same-pipeline-as-manual-load-v1",
-            "rollback": "v3-hard-runtime-reset-after-failed-import",
+            "rollback": "v4-hard-runtime-reset-with-failed-debug-preservation",
+            "failed_import_debug": "rejected-payload-plus-validation-saved-to-indexeddb-before-reload-and-downloadable-after-reload",
             "undo_import": "server-backup-restore-v2-auth-safe",
             "player_pool": "registered-or-club-matched-senior-evidence-v5",
             "history_identity_gate": "current-or-previous-canonical-club-must-match-history-fixture-side",
@@ -149,7 +156,7 @@ jobs:
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V11 weekly repair deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified failed-debug preservation deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V11 weekly repair deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified failed-debug preservation deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
