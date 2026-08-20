@@ -38,6 +38,23 @@
       location.reload();
     }catch(e){console.error('Undo Last Import failed',e);note(e?.message||'Could not undo the last import.',true);alert(e?.message||'Could not undo the last import.');throw e}
   }
+  async function getLastFailedDebug(){try{return await window.FMAtomicImportRollback?.readFailureDebug?.()||null}catch(_e){return null}}
+  async function syncFailedDebugButton(){
+    const b=document.getElementById('fmDownloadFailedImportDebugBtn');if(!b)return false;
+    const report=await getLastFailedDebug();b.style.display=report?'':'none';
+    if(report){const when=report.captured_at?new Date(report.captured_at):null;b.title=when&&!Number.isNaN(+when)?`Failed import captured ${when.toLocaleString()}`:'Last failed import debug is preserved locally.'}
+    return !!report;
+  }
+  async function downloadLastFailedImportDebug(){
+    try{
+      if(!window.FMCloud?.isCreator?.())throw new Error('Only the FPL Creator can download failed-import diagnostics.');
+      const report=await getLastFailedDebug();if(!report)throw new Error('No preserved failed-import debug is available.');
+      const stamp=String(report.captured_at||new Date().toISOString()).replace(/[:.]/g,'-');
+      const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+      a.href=url;a.download=`fm-fantasy-failed-import-debug-${stamp}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);
+      note('Last failed import debug downloaded.');return report;
+    }catch(e){console.error('Download failed-import debug failed',e);note(e?.message||'Could not download failed-import debug.',true);alert(e?.message||'Could not download failed-import debug.');throw e}
+  }
   function mount(){
     if(document.getElementById(ID))return true;
     if(!window.FMCloud?.ready?.())return false;
@@ -49,19 +66,20 @@
     if(window.FMCloud?.isCreator?.()){
       const save=mk('Save Database');save.onclick=()=>forceSave().catch(()=>{});wrap.appendChild(save);
       const undo=mk('Undo Last Import');undo.id='fmUndoLastImportBtn';undo.style.cssText='border-color:#ff8aaa;color:#ffd7e3';undo.onclick=()=>undoLastImport().catch(()=>{});wrap.appendChild(undo);
+      const failedDebug=mk('Download Last Failed Import Debug');failedDebug.id='fmDownloadFailedImportDebugBtn';failedDebug.style.cssText='display:none;border-color:#f2bb66;color:#ffe5b7';failedDebug.onclick=()=>downloadLastFailedImportDebug().catch(()=>{});wrap.appendChild(failedDebug);
     }
     const load=mk('Load Saved Database');load.onclick=()=>forceLoad().catch(()=>{});wrap.appendChild(load);
     const status=document.createElement('div');status.id='fmCloudDbStatus';status.className='syncStatus';status.style.marginTop='1px';status.textContent=wasCleared()?'No shared database saved':(window.FMCloud?.isCreator?.()?'Shared creator database':'Shared database');wrap.appendChild(status);
     syncBtns.insertAdjacentElement('afterend',wrap);
-    syncLoadedStatus();
+    syncLoadedStatus();syncFailedDebugButton();
     return true;
   }
   function activate(){
     if(!window.FMCloud?.ready?.())return;
     if(!mount()){let tries=0;const timer=setInterval(()=>{tries++;if(mount()||tries>=20)clearInterval(timer)},250)}
-    syncLoadedStatus();
+    syncLoadedStatus();syncFailedDebugButton();
   }
-  window.FMCloudDatabase={save:forceSave,load:forceLoad,undoLastImport,markActive,syncLoadedStatus};
+  window.FMCloudDatabase={save:forceSave,load:forceLoad,undoLastImport,downloadLastFailedImportDebug,markActive,syncLoadedStatus,syncFailedDebugButton};
   window.addEventListener('fmcloudready',activate);
   if(window.FMCloud?.ready?.())activate();
 })();
