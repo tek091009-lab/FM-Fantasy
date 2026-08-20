@@ -61,11 +61,18 @@ if new_loop not in py:
     if old_loop not in py:raise RuntimeError('rich member loop anchor missing')
     py=py.replace(old_loop,new_loop,1)
 
-needle="'unlabelled_rich_members_scanned':member_rich_diag.get('members_scanned',0),"
-extra=needle+"'unlabelled_rich_non_retained_members_skipped':member_rich_diag.get('non_retained_members_skipped',0),'unlabelled_rich_non_retained_member_names':member_rich_diag.get('non_retained_member_names',[]),"
+# Export the source-scope decision regardless of whether this importer generation used [] or .get() for members_scanned.
 if 'unlabelled_rich_non_retained_members_skipped' not in py:
-    if needle not in py:raise RuntimeError('rich diagnostics export anchor missing')
-    py=py.replace(needle,extra,1)
+    anchors=[
+        "'unlabelled_rich_members_scanned':member_rich_diag['members_scanned'],",
+        "'unlabelled_rich_members_scanned':member_rich_diag.get('members_scanned',0),"
+    ]
+    hit=next((a for a in anchors if a in py),None)
+    if hit:
+        extra=hit+"'unlabelled_rich_non_retained_members_skipped':member_rich_diag.get('non_retained_members_skipped',0),'unlabelled_rich_non_retained_member_names':member_rich_diag.get('non_retained_member_names',[]),"
+        py=py.replace(hit,extra,1)
+    else:
+        raise RuntimeError('rich diagnostics export anchor missing')
 
 compile(py,'fm_importer_v98.py','exec')
 assert "('.scm','.apm','.pkm')" in py
@@ -86,4 +93,4 @@ for old in [
 repack(html)
 assert reconstruct()==html
 print('v98: unlabelled rich recovery scoped to isolated .scm/.apm/.pkm retained match members')
-# explicit apply-workflow trigger 2026-08-20
+# apply-workflow trigger 2
