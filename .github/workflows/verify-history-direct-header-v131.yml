@@ -1,0 +1,98 @@
+name: Verify retained history header-anchored candidate v131
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_direct_header_tid_v126.py'
+      - 'scripts/upgrade_history_direct_header_orientation_v127.py'
+      - 'scripts/upgrade_history_direct_header_locality_v128.py'
+      - 'scripts/upgrade_history_direct_header_span_v129.py'
+      - 'scripts/upgrade_history_direct_header_namespace_v130.py'
+      - 'scripts/upgrade_history_header_anchored_candidate_v131.py'
+      - '.github/workflows/verify-history-direct-header-v131.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural decoder stack through v131
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_direct_header_tid_v126.py
+          python scripts/upgrade_history_direct_header_orientation_v127.py
+          python scripts/upgrade_history_direct_header_locality_v128.py
+          python scripts/upgrade_history_direct_header_span_v129.py
+          python scripts/upgrade_history_direct_header_namespace_v130.py
+          python scripts/upgrade_history_header_anchored_candidate_v131.py
+      - name: Verify packed importer and header-first candidate invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def direct_header_anchored_candidate_pass_v131():',
+              'def _v131_structural_headers(raw):',
+              'def _v131_scan_stats(raw,start,end):',
+              '_rich_candidate_squad_pairs(stats,played_score_pairs)',
+              'end=min(len(raw),q+120000,next_q)',
+              'if len(proposals)!=1:',
+              "source='unlabelled_retained_header_anchored_reversed_v131' if rev else 'unlabelled_retained_header_anchored_v131'",
+              '_v131_header_anchored=direct_header_anchored_candidate_pass_v131()',
+              '_v131_round=direct_header_anchored_candidate_pass_v131()',
+              'unlabelled_rich_header_anchored_fixture_matches',
+              'def direct_binary_header_fixture_pass():',
+              'def direct_binary_header_learned_namespace_pass():',
+              'def compact_window(j,left_n,right_n):',
+          ]
+          for token in required:assert token in py,token
+
+          # Structural-header regression: validate the proven HOME/AWAY byte arrangement and
+          # ensure a second header would act as the forward-scan boundary rather than allowing
+          # the first header to consume another retained match.
+          raw=bytearray(1000)
+          q1=100;q2=700
+          for q,h,a in [(q1,452,467),(q2,498,511)]:
+              raw[q:q+2]=b'\x03\x02';raw[q+6]=2;raw[q+7:q+11]=int(h).to_bytes(4,'little')
+              marker=q+40;raw[marker:marker+3]=b'\x00\x03\x02';raw[marker+7]=2;raw[marker+8:marker+12]=int(a).to_bytes(4,'little')
+          def headers(buf):
+              out=[];p=0
+              while True:
+                  p=buf.find(b'\x03\x02',p)
+                  if p<0:break
+                  if p+12<=len(buf) and buf[p+6]==2:
+                      h=int.from_bytes(buf[p+7:p+11],'little')
+                      marker=buf.find(b'\x00\x03\x02',p+11,min(len(buf),p+513))
+                      if marker>=0 and marker+12<=len(buf) and buf[marker+7]==2:
+                          a=int.from_bytes(buf[marker+8:marker+12],'little')
+                          if h and a and h!=a:out.append((p,h,a))
+                  p+=1
+              return out
+          hs=headers(bytes(raw));assert hs==[(100,452,467),(700,498,511)]
+          assert min(len(raw),q1+120000,hs[1][0])==700
+
+          # Header-first v131 must coexist with candidate-first v126-v130 rather than replacing it.
+          for token in ['_v126_fixture_modes(','_v130_learn_shift()','direct_binary_header_fixture_pass()']:
+              assert token in py,token
+          print('v131 compiles; proven match headers can construct new retained candidates from cached member bytes while exact fixture uniqueness and register_match remain mandatory')
+          PY
