@@ -1,0 +1,102 @@
+name: Verify retained-ID history recovery v120
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_confirmed_name_anchor_v99.py'
+      - 'scripts/upgrade_history_name_transfer_support_v100.py'
+      - 'scripts/upgrade_history_confirmed_name_one_side_v101.py'
+      - 'scripts/upgrade_history_confirmed_name_global_constraint_v102.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_pair_v103.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_global_v104.py'
+      - 'scripts/upgrade_history_canonical_name_alias_v105.py'
+      - 'scripts/upgrade_history_confirmed_name_cohort_v106.py'
+      - 'scripts/upgrade_history_accumulated_name_roster_v107.py'
+      - 'scripts/upgrade_history_accumulated_name_roster_global_v108.py'
+      - 'scripts/upgrade_history_transitive_name_cohort_graph_v109.py'
+      - 'scripts/upgrade_history_transitive_name_pair_counter_v110.py'
+      - 'scripts/upgrade_history_transitive_id_cohort_graph_v111.py'
+      - 'scripts/upgrade_history_local_id_anchor_v112.py'
+      - 'scripts/upgrade_history_fixture_conditioned_id_pair_v113.py'
+      - 'scripts/upgrade_history_fixture_conditioned_id_global_v114.py'
+      - 'scripts/upgrade_history_edge_trim_id_pair_v115.py'
+      - 'scripts/upgrade_history_edge_trim_sort_v116.py'
+      - 'scripts/upgrade_history_edge_trim_score_v117.py'
+      - 'scripts/upgrade_history_edge_duplicate_v118.py'
+      - 'scripts/upgrade_history_edge_transfer_v119.py'
+      - 'scripts/upgrade_history_edge_transfer_order_v120.py'
+      - '.github/workflows/verify-history-id-v120.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained history decoder stack
+        run: |
+          python scripts/upgrade_history_confirmed_name_anchor_v99.py
+          python scripts/upgrade_history_name_transfer_support_v100.py
+          python scripts/upgrade_history_confirmed_name_one_side_v101.py
+          python scripts/upgrade_history_confirmed_name_global_constraint_v102.py
+          python scripts/upgrade_history_fixture_conditioned_name_pair_v103.py
+          python scripts/upgrade_history_fixture_conditioned_name_global_v104.py
+          python scripts/upgrade_history_canonical_name_alias_v105.py
+          python scripts/upgrade_history_confirmed_name_cohort_v106.py
+          python scripts/upgrade_history_accumulated_name_roster_v107.py
+          python scripts/upgrade_history_accumulated_name_roster_global_v108.py
+          python scripts/upgrade_history_transitive_name_cohort_graph_v109.py
+          python scripts/upgrade_history_transitive_name_pair_counter_v110.py
+          python scripts/upgrade_history_transitive_id_cohort_graph_v111.py
+          python scripts/upgrade_history_local_id_anchor_v112.py
+          python scripts/upgrade_history_fixture_conditioned_id_pair_v113.py
+          python scripts/upgrade_history_fixture_conditioned_id_global_v114.py
+          python scripts/upgrade_history_edge_trim_id_pair_v115.py
+          python scripts/upgrade_history_edge_trim_sort_v116.py
+          python scripts/upgrade_history_edge_trim_score_v117.py
+          python scripts/upgrade_history_edge_duplicate_v118.py
+          python scripts/upgrade_history_edge_transfer_v119.py
+          python scripts/upgrade_history_edge_transfer_order_v120.py
+      - name: Verify compiled importer and binary lineup-order invariant
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          for s in [
+              'def confirmed_id_edge_transfer_pair_pass():',
+              'def binary_order(rows):',
+              "row.get('offset') is not None",
+              'repaired_left=binary_order(list(lkeep)+list(rtol))',
+              'repaired_right=binary_order(list(rkeep)+list(ltor))',
+              'confirmed_id_edge_transfer_binary_order_matches',
+              'unlabelled_rich_confirmed_id_edge_transfer_binary_order_matches',
+              "register_match(ci,f,rev,leid,reid,'unlabelled_retained_confirmed_id_edge_transfer_v119')",
+          ]:assert s in py,s
+          assert 'repaired_left=list(lkeep)+list(rtol)' not in py
+          assert 'repaired_right=list(rkeep)+list(ltor)' not in py
+
+          # Synthetic FM-order invariant. PID 99 was scanned as the final row of the left side but
+          # its true binary offset places it before the right side's first ten records. Appending it
+          # would make it a bench row; binary offset ordering correctly restores it to the front.
+          right=[{'player_id':200+i,'offset':2000+i*214} for i in range(10)]
+          moved={'player_id':99,'offset':1800}
+          appended=right+[moved]
+          assert appended.index(moved)==10
+          ordered=sorted(enumerate(appended),key=lambda it:(0,int(it[1]['offset']),it[0]))
+          repaired=[r for _i,r in ordered]
+          assert repaired.index(moved)==0
+          assert repaired[0]['player_id']==99
+          print('v99-v120 stack compiles; moved cross-side rows preserve FM binary lineup order instead of being forced to bench tail')
+          PY
