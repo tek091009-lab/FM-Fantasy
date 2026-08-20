@@ -1,8 +1,65 @@
 (()=>{
 'use strict';
-const VERSION='atomic-import-rollback-v3-hard-runtime-reset';
+const VERSION='atomic-import-rollback-v4-preserve-failed-debug';
+const DEBUG_DB='FMFantasyDiagnostics';
+const DEBUG_STORE='failures';
+const DEBUG_KEY='lastFailedImport';
 const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
 let lastCanonical=null,lastRestoreAt=0,reloadScheduled=false;
+const debugEvents=[];
+function safeClone(v){try{return clone(v)}catch(_e){try{return JSON.parse(JSON.stringify(v,(_k,x)=>typeof x==='bigint'?String(x):x))}catch(_e2){return String(v)}}}
+function debugEvent(level,message,details){
+  debugEvents.push({at:new Date().toISOString(),level:String(level??''),message:String(message??''),details:safeClone(details)});
+  if(debugEvents.length>1200)debugEvents.splice(0,debugEvents.length-1200);
+}
+function installDebugTap(){
+  let original=null;try{original=globalThis.fmDebugAdd}catch(_e){}
+  if(typeof original!=='function'||original.__fmFailureDebugTap)return false;
+  const wrapped=function(level,message,details,...rest){debugEvent(level,message,details);return original.call(this,level,message,details,...rest)};
+  wrapped.__fmFailureDebugTap=true;wrapped.__fmFailureDebugOriginal=original;
+  try{globalThis.fmDebugAdd=wrapped;return globalThis.fmDebugAdd===wrapped}catch(_e){return false}
+}
+function openDebugDb(){
+  return new Promise((resolve,reject)=>{
+    try{
+      const r=indexedDB.open(DEBUG_DB,1);
+      r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains(DEBUG_STORE))r.result.createObjectStore(DEBUG_STORE)};
+      r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+    }catch(e){reject(e)}
+  });
+}
+async function saveFailureDebug(payload,errorText){
+  const world=(()=>{try{return window.FMCloud?.getWorld?.()||null}catch(_e){return null}})();
+  const report={
+    version:'failed-import-debug-v1',
+    captured_at:new Date().toISOString(),
+    error:String(errorText||''),
+    page:String(location?.href||''),
+    user_agent:String(navigator?.userAgent||''),
+    import_mode:String(payload?.meta?.import_mode||window.__FM_IMPORT_MODE_ACTIVE||''),
+    rejected_payload:safeClone(payload),
+    rejected_meta:safeClone(payload?.meta||null),
+    update_validation:safeClone(payload?.meta?.update_validation||null),
+    weekly_match_detail_repair:safeClone(payload?.meta?.weekly_match_detail_repair||null),
+    canonical_world:{id:world?.id||null,payload_version:world?.payload_version??world?.version??null,meta:safeClone(world?.payload?.meta||null)},
+    captured_debug_events:safeClone(debugEvents),
+    visible_debug_text:(()=>{try{return [...document.querySelectorAll('[id*=debug i],[class*=debug i],[id*=import i][class*=log i],[class*=import i][class*=log i]')].slice(0,20).map(el=>String(el.innerText||el.textContent||'').trim()).filter(Boolean).join('\n\n---\n\n').slice(0,250000)}catch(_e){return ''}})()
+  };
+  try{
+    const db=await openDebugDb();
+    await new Promise((resolve,reject)=>{const t=db.transaction(DEBUG_STORE,'readwrite');t.objectStore(DEBUG_STORE).put(report,DEBUG_KEY);t.oncomplete=()=>resolve();t.onerror=()=>reject(t.error);t.onabort=()=>reject(t.error)});
+    try{sessionStorage.setItem('fmFantasyFailedImportDebugSaved',JSON.stringify({at:Date.now(),error:report.error,version:report.version}))}catch(_e){}
+    return true;
+  }catch(e){
+    console.warn('Could not persist failed-import debug report',e);
+    try{sessionStorage.setItem('fmFantasyFailedImportDebugFallback',JSON.stringify({...report,rejected_payload:undefined,captured_debug_events:report.captured_debug_events.slice(-300)}))}catch(_e){}
+    return false;
+  }
+}
+async function readFailureDebug(){
+  try{const db=await openDebugDb();return await new Promise((resolve,reject)=>{const t=db.transaction(DEBUG_STORE,'readonly'),r=t.objectStore(DEBUG_STORE).get(DEBUG_KEY);r.onsuccess=()=>resolve(r.result||null);r.onerror=()=>reject(r.error)})}catch(_e){try{return JSON.parse(sessionStorage.getItem('fmFantasyFailedImportDebugFallback')||'null')}catch(_e2){return null}}
+}
+async function clearFailureDebug(){try{const db=await openDebugDb();await new Promise((resolve,reject)=>{const t=db.transaction(DEBUG_STORE,'readwrite');t.objectStore(DEBUG_STORE).delete(DEBUG_KEY);t.oncomplete=resolve;t.onerror=()=>reject(t.error)})}catch(_e){}try{sessionStorage.removeItem('fmFantasyFailedImportDebugSaved');sessionStorage.removeItem('fmFantasyFailedImportDebugFallback')}catch(_e){}}
 async function writeLocal(payload){
   if(!payload)return;
   try{
@@ -14,8 +71,8 @@ async function writeLocal(payload){
 function scheduleHardReload(errorText){
   if(reloadScheduled)return;
   reloadScheduled=true;
-  try{sessionStorage.setItem('fmFantasyFailedImportRollback',JSON.stringify({at:Date.now(),error:String(errorText||'')}))}catch(_e){}
-  setTimeout(()=>location.reload(),80);
+  try{sessionStorage.setItem('fmFantasyFailedImportRollback',JSON.stringify({at:Date.now(),error:String(errorText||''),debug_saved:true}))}catch(_e){}
+  setTimeout(()=>location.reload(),180);
 }
 async function restoreCanonical(options={}){
   const hardReload=!!options.hardReload,errorText=String(options.errorText||'');
@@ -36,21 +93,24 @@ async function restoreCanonical(options={}){
   return canonical;
 }
 function install(){
-  const c=window.FMCloud;if(!c||c.__atomicImportRollbackV3||typeof c.publishWorld!=='function')return false;
-  c.__atomicImportRollbackV3=true;
+  installDebugTap();
+  const c=window.FMCloud;if(!c||c.__atomicImportRollbackV4||typeof c.publishWorld!=='function')return false;
+  c.__atomicImportRollbackV4=true;
   const original=c.publishWorld.bind(c);
   c.publishWorld=async(payload,...args)=>{
     if(payload==null)return original(payload,...args);
     try{return await original(payload,...args)}
     catch(err){
       const errorText=String(err?.message||err);
+      await saveFailureDebug(payload,errorText);
       await restoreCanonical({hardReload:true,errorText});
-      try{if(typeof fmDebugAdd==='function')fmDebugAdd('warning','Rejected/failed import restored canonical world and scheduled a clean runtime reload.',{version:VERSION,error:errorText})}catch(_e){}
+      try{if(typeof fmDebugAdd==='function')fmDebugAdd('warning','Rejected/failed import debug preserved; canonical world restored and clean runtime reload scheduled.',{version:VERSION,error:errorText})}catch(_e){}
       throw err;
     }
   };
-  window.FMAtomicImportRollback={version:VERSION,restoreCanonical};
+  window.FMAtomicImportRollback={version:VERSION,restoreCanonical,saveFailureDebug,readFailureDebug,clearFailureDebug};
   return true;
 }
-window.addEventListener('fmcloudready',()=>setTimeout(install,0));let tries=0;const timer=setInterval(()=>{tries++;if(install()||tries>50)clearInterval(timer)},200);
+window.FMAtomicImportRollback={version:VERSION,restoreCanonical,saveFailureDebug,readFailureDebug,clearFailureDebug};
+window.addEventListener('fmcloudready',()=>setTimeout(install,0));let tries=0;const timer=setInterval(()=>{tries++;installDebugTap();if(install()||tries>50)clearInterval(timer)},200);
 })();
