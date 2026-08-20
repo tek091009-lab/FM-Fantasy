@@ -1,13 +1,10 @@
 {
-  "verified_live_sha": "849f4153bd1bf696225aab7187c640d4015a9dc5",
-  "verified_at": "2026-08-20T18:00:42Z",
-  "verification": "v21-retained-rich-source-scope-v98",
-  "importer_rich_scope": "isolated-retained-match-members-only-v98",
-  "unlabelled_rich_allowed_extensions": [".scm", ".apm", ".pkm"],
-  "unlabelled_rich_excludes": "aggregate-sources-including-news.dat-and-play_fixture_manager.dat",
-  "root_cause_verified_on_gw6": "612-candidates-equals-54-retained-plus-524-news.dat-plus-34-play_fixture_manager.dat",
+  "verified_live_sha": "eceafd64c9860f89188aaa1364fa78e1ef666c6c",
+  "verified_at": "2026-08-20T18:19:10Z",
+  "verification": "v20-preserve-failed-import-debug",
   "update_guard": "v11-club-matched-history-repair",
   "first_week_repair": "club-matched-decoded-player-history-plus-safe-side-repartition",
+  "first_week_policy": "history venue alone is insufficient; player club identity must agree with the fixture side and repaired rows must pass exact identity-and-score validation",
   "import_compat": "v84-season-plus-36-row",
   "dynamic_pricing": "v14-sustained-successful-updates",
   "world_load": "automatic-versioned-local-cache-refresh-v2",
@@ -20,6 +17,6 @@
   "registration_news": "canonical-boundary-v2",
   "transfer_news": "proven-visible-club-change-only-v2",
   "current_squad_decoder": "v82-consensus-only",
-  "retained_history": "v98-source-scoped-plus-v81-36-row-variable-squad",
+  "retained_history": "v81-36-row-plus-variable-squad",
   "snapshot_boundary": "append-only-by-snapshot-date-v1"
 }
