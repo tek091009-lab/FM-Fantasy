@@ -51,7 +51,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify deployed fast cached startup and auth-safe rollback shell
+      - name: Verify deployed automatic cached startup and auth-safe rollback shell
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -70,8 +70,8 @@ jobs:
             dbcontrols="$(curl -fsSL --max-time 20 "$base/dbcontrols.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             undo="$(curl -fsSL --max-time 20 "$base/undoimport.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             clearflow="$(curl -fsSL --max-time 20 "$base/clearflowv2.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-fast-cache-v4' \
-              && printf '%s' "$idx" | grep -q 'authfix.js?v=13' \
+            if printf '%s' "$idx" | grep -q 'fm-deploy-auto-restore-v5' \
+              && printf '%s' "$idx" | grep -q 'authfix.js?v=14' \
               && printf '%s' "$idx" | grep -q 'atomicrollbackfix.js?v=2' \
               && printf '%s' "$idx" | grep -q 'dbcontrols.js?v=7' \
               && printf '%s' "$idx" | grep -q 'updateguard.js?v=9' \
@@ -84,7 +84,9 @@ jobs:
               && printf '%s' "$compat" | grep -q 'import-compat-v84-season-plus-36-row' \
               && printf '%s' "$pricing" | grep -q 'dynamic-market-pricing-v14-sustained-successful-updates' \
               && printf '%s' "$auth" | grep -q 'const authoritative=await loadWorld(false)' \
-              && ! printf '%s' "$auth" | grep -q 'if(authoritative)await storeAuthoritativePayload(authoritative)' \
+              && printf '%s' "$auth" | grep -q 'await applyWorldToApp(authoritative)' \
+              && printf '%s' "$auth" | grep -q "applyImportedPayload(authoritative,'load')" \
+              && printf '%s' "$auth" | grep -q 'fmProcessCompletedGameweeks' \
               && printf '%s' "$rollback" | grep -q 'loadWorld(true)' \
               && ! printf '%s' "$dbcontrols" | grep -q "setTimeout(()=>forceLoad().catch" \
               && printf '%s' "$dbcontrols" | grep -q 'Undo Last Import' \
@@ -95,7 +97,7 @@ jobs:
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose the fast cached auth-safe shell' >&2; exit 1; }
+          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose automatic cached world restore' >&2; exit 1; }
       - name: Record current Pages deployment
         shell: bash
         env:
@@ -107,11 +109,12 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v14-fast-cache-auth-safe-v4",
+            "verification": "v14-auto-restore-fast-cache-v5",
             "update_guard": "v9-history-aware-season-catchup",
             "import_compat": "v84-season-plus-36-row",
             "dynamic_pricing": "v14-sustained-successful-updates",
-            "world_load": "versioned-local-cache-normal-refresh-v1",
+            "world_load": "automatic-versioned-local-cache-refresh-v2",
+            "world_apply": "same-pipeline-as-manual-load-v1",
             "rollback": "force-canonical-only-on-failed-import-v2",
             "undo_import": "server-backup-restore-v2-auth-safe",
             "current_squad_decoder": "v82-consensus-only",
@@ -122,7 +125,7 @@ jobs:
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified fast-cache Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified auto-restore Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified fast-cache Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified auto-restore Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
