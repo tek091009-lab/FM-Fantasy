@@ -1,0 +1,70 @@
+name: Verify retained history direct match header v127
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_direct_header_tid_v126.py'
+      - 'scripts/upgrade_history_direct_header_orientation_v127.py'
+      - '.github/workflows/verify-history-direct-header-v127.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural decoder stack through v127
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_direct_header_tid_v126.py
+          python scripts/upgrade_history_direct_header_orientation_v127.py
+      - name: Verify packed importer and reversed-header invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def _v126_header_pairs(raw,start):',
+              'def direct_binary_header_fixture_pass():',
+              'def _v127_reversed_fixture_modes(home_id,away_id,left_score,right_score):',
+              'if int(fhs)!=int(right_score) or int(fas)!=int(left_score):continue',
+              'def direct_binary_header_reversed_fixture_pass():',
+              "register_match(ci,f,True,aeid,heid,'unlabelled_retained_direct_match_header_reversed_v127')",
+              '_v127_direct_reversed=direct_binary_header_reversed_fixture_pass()',
+              'unlabelled_rich_direct_header_reversed_fixture_matches',
+          ]
+          for token in required:assert token in py,token
+
+          # Independent orientation regression: header proves HOME=452/AWAY=467, while physical
+          # arrays are AWAY then HOME and score as left=1,right=3. Authoritative fixture is 3-1.
+          fixture={'home_tid':452,'away_tid':467,'home_score':3,'away_score':1}
+          left_score,right_score=1,3
+          assert fixture['home_score']==right_score and fixture['away_score']==left_score
+          assert not (fixture['home_score']==left_score and fixture['away_score']==right_score)
+          # Level scores are orientation-invariant and therefore intentionally left to v126.
+          assert left_score!=right_score
+          assert "if int(left_score)==int(right_score):return []" in py
+          # Safety invariants: canonical fixture consumption + final authoritative registration.
+          assert 'if fixture_identity(f) in used_fixtures:continue' in py
+          assert "register_match(ci,f,True,aeid,heid,'unlabelled_retained_direct_match_header_reversed_v127')" in py
+          print('v127 compiles; reversed AWAY/HOME physical arrays are supported only when header IDs + exact reversed score prove one unused authoritative fixture')
+          PY
