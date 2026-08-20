@@ -1,11 +1,11 @@
 {
-  "verified_live_sha": "e0846474a45421de6b008ad5b99274ba7487e7ed",
-  "verified_at": "2026-08-20T12:55:08Z",
-  "verification": "v14-pricing-undo-live-v2",
+  "verified_live_sha": "cfcfb43ca15cf90f2089a6c7487783ee788740e3",
+  "verified_at": "2026-08-20T12:59:37Z",
+  "verification": "v14-pricing-undo-auth-safe-v3",
   "update_guard": "v9-history-aware-season-catchup",
   "import_compat": "v84-season-plus-36-row",
   "dynamic_pricing": "v14-sustained-successful-updates",
-  "undo_import": "server-backup-restore-v1",
+  "undo_import": "server-backup-restore-v2-auth-safe",
   "current_squad_decoder": "v82-consensus-only",
   "retained_history": "v81-36-row-plus-variable-squad",
   "snapshot_boundary": "append-only-by-snapshot-date-v1"
