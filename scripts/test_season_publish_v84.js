@@ -40,15 +40,24 @@ function firstWeekPayload(includeUnrecoverable=false){
   const f3={fixture_id:3,gameweek:5,status:'played',home:'Club 5',away:'Club 6',date:'2025-09-06',home_score:1,away_score:0};
   const fixtures=[oldFixture,f2,f3];if(includeUnrecoverable)fixtures.push({fixture_id:4,gameweek:5,status:'played',home:'Club 7',away:'Club 8',date:'2025-09-06',home_score:1,away_score:1});
   const nextPlayers=JSON.parse(JSON.stringify(players));
-  const addHist=(club,rows)=>{for(const r of rows){const p=nextPlayers.find(x=>x.pid===r.player_id);p.history.push({...r});delete p.history[p.history.length-1].player_id}}
-  addHist(3,validRows(3,2,1,'H','Club 3','Club 4','2025-09-06',5));addHist(4,validRows(4,2,1,'A','Club 3','Club 4','2025-09-06',5));
-  addHist(5,validRows(5,1,0,'H','Club 5','Club 6','2025-09-06',5));addHist(6,validRows(6,1,0,'A','Club 5','Club 6','2025-09-06',5));
+  const addHist=rows=>{for(const r of rows){const p=nextPlayers.find(x=>x.pid===r.player_id);p.history.push({...r});delete p.history[p.history.length-1].player_id}}
+  addHist(validRows(3,2,1,'H','Club 3','Club 4','2025-09-06',5));addHist(validRows(4,2,1,'A','Club 3','Club 4','2025-09-06',5));
+  addHist(validRows(5,1,0,'H','Club 5','Club 6','2025-09-06',5));addHist(validRows(6,1,0,'A','Club 5','Club 6','2025-09-06',5));
   const broken={...f2,home_players:[...validRows(3,2,1,'H','Club 3','Club 4','2025-09-06',5).slice(0,10),{...validRows(4,2,1,'A','Club 3','Club 4','2025-09-06',5)[0]}],away_players:validRows(4,2,1,'A','Club 3','Club 4','2025-09-06',5)};
   const next={meta:{import_mode:'update',competition:'EFL Championship',competition_code:'eng_champ',completed_gameweek:5,current_gameweek:6,next_gameweek:6,latest_gameweek_with_result:5,played_results:fixtures.length,rich_matches:2,rich_matches_missing:fixtures.length-2,history_coverage_status:'partial'},clubs,players:nextPlayers,fixtures,matches:[oldMatch,broken]};
   return {old,next};
 }
+function addCaseyStyleCollision(next){
+ const fakeHome=validRows(7,1,1,'H','Club 7','Club 8','2025-09-06',5);
+ const fakeAway=validRows(8,1,1,'A','Club 7','Club 8','2025-09-06',5);
+ for(let j=0;j<12;j++){
+   const hp=next.players.find(p=>p.pid===`1-${j+1}`),ap=next.players.find(p=>p.pid===`2-${j+1}`);
+   const hr={...fakeHome[j]};delete hr.player_id;hp.history.push(hr);
+   const ar={...fakeAway[j]};delete ar.player_id;ap.history.push(ar);
+ }
+}
 const guard=loadGuard();
-if(guard.version!=='world-update-guard-v10-history-repair-before-validation')throw new Error(`wrong guard ${guard.version}`);
+if(guard.version!=='world-update-guard-v11-club-matched-history-repair')throw new Error(`wrong guard ${guard.version}`);
 
 // A clean season/database import may publish recovered partial historical detail.
 const season=buildPayload('season');
@@ -68,7 +77,7 @@ if(updateResult.ok)throw new Error('gameweek update with missing newly-completed
 if(!updateResult.errors.some(x=>x.includes('newly completed fixtures have no validated player-level match detail')))throw new Error('incremental protection error missing');
 if(updateResult.summary.trusted_historical_matches<33)throw new Error(`historical match trust regression: ${updateResult.summary.trusted_historical_matches}`);
 
-// First weekly import: a malformed rich row and a missing rich row are rebuilt from decoded player histories.
+// First weekly import: a malformed rich row and a missing rich row are rebuilt from club-matched decoded player histories.
 const repairCase=firstWeekPayload(false);
 const repairMeta=guard.repairWeeklyMatchDetail(repairCase.next,repairCase.old);
 if(repairMeta.repaired_invalid!==1)throw new Error(`expected one invalid match repair, got ${repairMeta.repaired_invalid}`);
@@ -76,11 +85,20 @@ if(repairMeta.added_missing!==1)throw new Error(`expected one missing match reco
 const repairedResult=guard.validate(repairCase.next,repairCase.old);
 if(!repairedResult.ok)throw new Error(`recoverable first weekly import still blocked: ${repairedResult.errors.join(' | ')}`);
 
-// No guessing: if neither rich detail nor player-history detail exists, the update must remain blocked.
+// No guessing: if neither rich detail nor trustworthy player-history detail exists, the update must remain blocked.
 const hardCase=firstWeekPayload(true);
 const hardMeta=guard.repairWeeklyMatchDetail(hardCase.next,hardCase.old);
 if(hardMeta.unrepaired_missing!==1)throw new Error(`expected one genuinely unrecoverable fixture, got ${hardMeta.unrepaired_missing}`);
 const hardResult=guard.validate(hardCase.next,hardCase.old);
 if(hardResult.ok)throw new Error('unrecoverable first-week fixture incorrectly passed');
 
-console.log(JSON.stringify({guard:guard.version,clean_season_partial_publishes:seasonResult.ok,gameweek_missing_detail_blocked:!updateResult.ok,trusted_history:updateResult.summary.trusted_historical_matches,first_week_repaired_invalid:repairMeta.repaired_invalid,first_week_added_missing:repairMeta.added_missing,first_week_recoverable_passes:repairedResult.ok,unrecoverable_still_blocked:!hardResult.ok}));
+// Casey regression: wrong-club history must not repair a fixture even when it provides 24 unique players and the exact official score.
+const collisionCase=firstWeekPayload(true);addCaseyStyleCollision(collisionCase.next);
+const collisionMeta=guard.repairWeeklyMatchDetail(collisionCase.next,collisionCase.old);
+if(collisionMeta.added_missing!==1)throw new Error(`wrong-club history repaired an extra fixture: ${collisionMeta.added_missing}`);
+if(collisionMeta.unrepaired_missing!==1)throw new Error('Casey-style wrong-club fixture did not remain unrecoverable');
+if((collisionMeta.history_identity?.skipped_club_mismatch||0)<24)throw new Error(`expected >=24 wrong-club history rows to be rejected, got ${collisionMeta.history_identity?.skipped_club_mismatch||0}`);
+const collisionResult=guard.validate(collisionCase.next,collisionCase.old);
+if(collisionResult.ok)throw new Error('Casey-style wrong-club history incorrectly passed weekly validation');
+
+console.log(JSON.stringify({guard:guard.version,clean_season_partial_publishes:seasonResult.ok,gameweek_missing_detail_blocked:!updateResult.ok,trusted_history:updateResult.summary.trusted_historical_matches,first_week_repaired_invalid:repairMeta.repaired_invalid,first_week_added_missing:repairMeta.added_missing,first_week_recoverable_passes:repairedResult.ok,unrecoverable_still_blocked:!hardResult.ok,wrong_club_rows_rejected:collisionMeta.history_identity.skipped_club_mismatch,casey_style_collision_blocked:!collisionResult.ok}));
