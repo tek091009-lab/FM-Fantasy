@@ -1,0 +1,100 @@
+name: Verify retained-ID history recovery v117
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_confirmed_name_anchor_v99.py'
+      - 'scripts/upgrade_history_name_transfer_support_v100.py'
+      - 'scripts/upgrade_history_confirmed_name_one_side_v101.py'
+      - 'scripts/upgrade_history_confirmed_name_global_constraint_v102.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_pair_v103.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_global_v104.py'
+      - 'scripts/upgrade_history_canonical_name_alias_v105.py'
+      - 'scripts/upgrade_history_confirmed_name_cohort_v106.py'
+      - 'scripts/upgrade_history_accumulated_name_roster_v107.py'
+      - 'scripts/upgrade_history_accumulated_name_roster_global_v108.py'
+      - 'scripts/upgrade_history_transitive_name_cohort_graph_v109.py'
+      - 'scripts/upgrade_history_transitive_name_pair_counter_v110.py'
+      - 'scripts/upgrade_history_transitive_id_cohort_graph_v111.py'
+      - 'scripts/upgrade_history_local_id_anchor_v112.py'
+      - 'scripts/upgrade_history_fixture_conditioned_id_pair_v113.py'
+      - 'scripts/upgrade_history_fixture_conditioned_id_global_v114.py'
+      - 'scripts/upgrade_history_edge_trim_id_pair_v115.py'
+      - 'scripts/upgrade_history_edge_trim_sort_v116.py'
+      - 'scripts/upgrade_history_edge_trim_score_v117.py'
+      - '.github/workflows/verify-history-id-v117.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained history decoder stack
+        run: |
+          python scripts/upgrade_history_confirmed_name_anchor_v99.py
+          python scripts/upgrade_history_name_transfer_support_v100.py
+          python scripts/upgrade_history_confirmed_name_one_side_v101.py
+          python scripts/upgrade_history_confirmed_name_global_constraint_v102.py
+          python scripts/upgrade_history_fixture_conditioned_name_pair_v103.py
+          python scripts/upgrade_history_fixture_conditioned_name_global_v104.py
+          python scripts/upgrade_history_canonical_name_alias_v105.py
+          python scripts/upgrade_history_confirmed_name_cohort_v106.py
+          python scripts/upgrade_history_accumulated_name_roster_v107.py
+          python scripts/upgrade_history_accumulated_name_roster_global_v108.py
+          python scripts/upgrade_history_transitive_name_cohort_graph_v109.py
+          python scripts/upgrade_history_transitive_name_pair_counter_v110.py
+          python scripts/upgrade_history_transitive_id_cohort_graph_v111.py
+          python scripts/upgrade_history_local_id_anchor_v112.py
+          python scripts/upgrade_history_fixture_conditioned_id_pair_v113.py
+          python scripts/upgrade_history_fixture_conditioned_id_global_v114.py
+          python scripts/upgrade_history_edge_trim_id_pair_v115.py
+          python scripts/upgrade_history_edge_trim_sort_v116.py
+          python scripts/upgrade_history_edge_trim_score_v117.py
+      - name: Verify compiled importer and repaired-score invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode(); compile(py,'fm_importer.py','exec')
+          required=[
+            'def confirmed_id_edge_trim_pair_pass():',
+            'def trim_options(rows,target_eid):',
+            'def orientation_repairs(ci,heid,aeid,hs,as_,rev):',
+            "repaired=dict(c);repaired['left']=lrows;repaired['right']=rrows",
+            'lscore,rscore=score_of(repaired)',
+            'cached[ci]=repaired',
+            "register_match(ci,f,rev,leid,reid,'unlabelled_retained_confirmed_id_edge_trim_score_v117')",
+            'cached[ci]=original',
+            'confirmed_id_edge_trim_score_changed_matches',
+            'proposals.sort(key=lambda x:(x[0],x[1],-x[2]),reverse=True)',
+            'def confirmed_id_fixture_conditioned_global_pass():',
+            'def confirmed_id_fixture_conditioned_pair_pass():',
+          ]
+          for s in required: assert s in py,s
+          # The old v115 bug must be gone: fixture score cannot be gated only on the original window.
+          segment=py[py.index('    def confirmed_id_edge_trim_pair_pass():'):py.index('    def confirmed_name_transitive_graph_pass():')]
+          assert "lscore,rscore=score_of(c);valid={}" not in segment
+          # Registration must run while cached[ci] is the repaired representation, then restore it.
+          assert segment.index('cached[ci]=repaired') < segment.index('register_match(ci,f,rev,leid,reid') < segment.index('cached[ci]=original')
+          # Synthetic regression: an edge contaminant with one goal changes a 1-0 block to 2-0;
+          # removing that boundary row must restore the authoritative 1-0 score.
+          def score(left,right):
+              return sum(r.get('goals',0) for r in left)+sum(r.get('own_goals',0) for r in right), sum(r.get('goals',0) for r in right)+sum(r.get('own_goals',0) for r in left)
+          left=[{'goals':1,'own_goals':0}]+[{'goals':0,'own_goals':0} for _ in range(9)]+[{'goals':1,'own_goals':0}]
+          right=[{'goals':0,'own_goals':0} for _ in range(10)]
+          assert score(left,right)==(2,0)
+          assert score(left[:-1],right)==(1,0)
+          print('v99-v117 stack compiles; edge-trim recovery recomputes score and registers repaired player rows')
+          PY
