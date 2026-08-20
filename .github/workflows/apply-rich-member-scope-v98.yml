@@ -14,9 +14,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - name: Apply V98 retained source scope
-        run: python scripts/upgrade_rich_member_scope_v98.py
+      - name: Apply and capture V98 result
+        id: apply
+        shell: bash
+        run: |
+          set +e
+          python scripts/upgrade_rich_member_scope_v98.py > _v98_apply_log.txt 2>&1
+          rc=$?
+          echo "exit_code=$rc" >> _v98_apply_log.txt
+          cat _v98_apply_log.txt
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
       - name: Verify packed importer source scope
+        if: steps.apply.outputs.rc == '0'
         run: |
           python - <<'PY'
           import base64,gzip,re
@@ -29,11 +39,15 @@ jobs:
           assert "if not _rich_is_retained_match_member(name):" in py
           print('V98 source-scope verification passed')
           PY
-      - name: Commit packed importer
+      - name: Commit result or failure log
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add app/part* app/fix*
+          git add _v98_apply_log.txt
+          if [ "${{ steps.apply.outputs.rc }}" = "0" ]; then git add app/part* app/fix*; fi
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'Apply V98 retained match source scope'
+          git commit -m 'Apply V98 retained match source scope result'
           git push
+      - name: Fail if patch failed
+        if: steps.apply.outputs.rc != '0'
+        run: exit 1
