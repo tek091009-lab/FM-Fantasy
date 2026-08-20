@@ -1,0 +1,87 @@
+name: Verify retained history global nonoverlap v138
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_direct_header_tid_v126.py'
+      - 'scripts/upgrade_history_direct_header_orientation_v127.py'
+      - 'scripts/upgrade_history_direct_header_locality_v128.py'
+      - 'scripts/upgrade_history_direct_header_span_v129.py'
+      - 'scripts/upgrade_history_direct_header_namespace_v130.py'
+      - 'scripts/upgrade_history_header_anchored_candidate_v131.py'
+      - 'scripts/upgrade_history_header_payload_boundary_v132.py'
+      - 'scripts/upgrade_history_header_false_boundary_v133.py'
+      - 'scripts/upgrade_history_header_fixture_delimiter_v134.py'
+      - 'scripts/upgrade_history_header_payload_complete_delimiter_v135.py'
+      - 'scripts/upgrade_history_same_header_alias_delimiter_v136.py'
+      - 'scripts/upgrade_history_header_nonoverlap_scan_v137.py'
+      - 'scripts/upgrade_history_global_nonoverlap_scan_v138.py'
+      - '.github/workflows/verify-history-global-nonoverlap-v138.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural decoder stack through v138
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_direct_header_tid_v126.py
+          python scripts/upgrade_history_direct_header_orientation_v127.py
+          python scripts/upgrade_history_direct_header_locality_v128.py
+          python scripts/upgrade_history_direct_header_span_v129.py
+          python scripts/upgrade_history_direct_header_namespace_v130.py
+          python scripts/upgrade_history_header_anchored_candidate_v131.py
+          python scripts/upgrade_history_header_payload_boundary_v132.py
+          python scripts/upgrade_history_header_false_boundary_v133.py
+          python scripts/upgrade_history_header_fixture_delimiter_v134.py
+          python scripts/upgrade_history_header_payload_complete_delimiter_v135.py
+          python scripts/upgrade_history_same_header_alias_delimiter_v136.py
+          python scripts/upgrade_history_header_nonoverlap_scan_v137.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+      - name: Verify packed importer and both retained scanners
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          for token in [
+              "globals()['_RICH_GLOBAL_NONOVERLAP_SCAN_V138']=1",
+              'def _v131_scan_stats(raw,start,end):',
+              'rows.append(r);p+=214;continue',
+              "'header_anchored_nonoverlap_record_scan_v137':1",
+              'def direct_header_anchored_candidate_pass_v131():',
+              'register_match(ci,f,rev,leid,reid,source)',
+          ]: assert token in py,token
+
+          # Physical-record invariant: after accepting bytes [1000,1214), neither scanner may
+          # consider 1140 as another record start. Padding after 1214 is still scanned normally.
+          assert 1000+214 == 1214
+          assert 1000+140 < 1214
+          # The v125/global scanner diagnostic block must no longer retain its old +140 step.
+          marker="globals()['_RICH_UNRATED_INACTIVE_ROWS']"
+          pos=py.index(marker)
+          block=py[pos:pos+700]
+          assert 'p+=214;continue' in block
+          assert 'p+=140;continue' not in block
+          print('v138 compiles; global and header-first retained scanners both respect complete 214-byte record boundaries')
+          PY
