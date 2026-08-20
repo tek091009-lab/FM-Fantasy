@@ -25,7 +25,7 @@ jobs:
         with: {node-version: '22'}
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - name: Verify current season/update guard behavior and first-week repair
+      - name: Verify current season/update guard behavior and club-matched first-week repair
         run: node scripts/test_season_publish_v84.js
       - name: Verify squad and registration-news policy
         run: node scripts/test_squad_registration_policy_v3.js
@@ -53,7 +53,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify deployed first-week repair, club-matched squad evidence and hard rollback
+      - name: Verify deployed V11 first-week identity repair, V5 squad evidence and hard rollback
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -75,22 +75,24 @@ jobs:
             dbcontrols="$(curl -fsSL --max-time 20 "$base/dbcontrols.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             undo="$(curl -fsSL --max-time 20 "$base/undoimport.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             clearflow="$(curl -fsSL --max-time 20 "$base/clearflowv2.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-auto-restore-v10-club-matched-squad-v5' \
+            if printf '%s' "$idx" | grep -q 'fm-deploy-auto-restore-v11-club-matched-repair-v11' \
               && printf '%s' "$idx" | grep -q 'authfix.js?v=14' \
               && printf '%s' "$idx" | grep -q 'atomicrollbackfix.js?v=3' \
               && printf '%s' "$idx" | grep -q 'squadeligibilityfix.js?v=5' \
               && printf '%s' "$idx" | grep -q 'registrationnewsguard.js?v=2' \
               && printf '%s' "$idx" | grep -q 'newsview.js?v=5' \
               && printf '%s' "$idx" | grep -q 'dbcontrols.js?v=8' \
-              && printf '%s' "$idx" | grep -q 'updateguard.js?v=10' \
+              && printf '%s' "$idx" | grep -q 'updateguard.js?v=11' \
               && printf '%s' "$idx" | grep -q 'importcompat.js?v=4' \
               && printf '%s' "$idx" | grep -q 'dynamicpricingv13.js?v=14' \
               && printf '%s' "$idx" | grep -q 'undoimport.js?v=4' \
               && printf '%s' "$idx" | grep -q 'clearflowv2.js?v=6' \
               && printf '%s' "$entry" | grep -q 'bootstrap=v84-20260818' \
-              && printf '%s' "$guard" | grep -q 'world-update-guard-v10-history-repair-before-validation' \
+              && printf '%s' "$guard" | grep -q 'world-update-guard-v11-club-matched-history-repair' \
               && printf '%s' "$guard" | grep -q 'repairWeeklyMatchDetail' \
-              && printf '%s' "$guard" | grep -q 'player_history_repair_v10' \
+              && printf '%s' "$guard" | grep -q 'player_history_repair_v11' \
+              && printf '%s' "$guard" | grep -q 'skipped_club_mismatch' \
+              && printf '%s' "$guard" | grep -q 'club_matched_decoded_player_history_v11' \
               && printf '%s' "$compat" | grep -q 'import-compat-v84-season-plus-36-row' \
               && printf '%s' "$pricing" | grep -q 'dynamic-market-pricing-v14-sustained-successful-updates' \
               && printf '%s' "$auth" | grep -q 'const authoritative=await loadWorld(false)' \
@@ -113,7 +115,7 @@ jobs:
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose V5 club-matched squad evidence build' >&2; exit 1; }
+          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose V11 club-matched weekly repair build' >&2; exit 1; }
       - name: Record current Pages deployment
         shell: bash
         env:
@@ -125,10 +127,10 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v18-club-matched-squad-v5",
-            "update_guard": "v10-history-repair-before-validation",
-            "first_week_repair": "decoded-player-history-plus-safe-side-repartition",
-            "first_week_policy": "repair must pass exact identity-and-score validation; unrecoverable fixtures still block",
+            "verification": "v19-club-matched-weekly-repair-v11",
+            "update_guard": "v11-club-matched-history-repair",
+            "first_week_repair": "club-matched-decoded-player-history-plus-safe-side-repartition",
+            "first_week_policy": "history venue alone is insufficient; player club identity must agree with the fixture side and repaired rows must pass exact identity-and-score validation",
             "import_compat": "v84-season-plus-36-row",
             "dynamic_pricing": "v14-sustained-successful-updates",
             "world_load": "automatic-versioned-local-cache-refresh-v2",
@@ -136,7 +138,7 @@ jobs:
             "rollback": "v3-hard-runtime-reset-after-failed-import",
             "undo_import": "server-backup-restore-v2-auth-safe",
             "player_pool": "registered-or-club-matched-senior-evidence-v5",
-            "history_identity_gate": "current-club-must-match-player-club-or-fixture-side",
+            "history_identity_gate": "current-or-previous-canonical-club-must-match-history-fixture-side",
             "registration_news": "canonical-boundary-v2",
             "transfer_news": "proven-visible-club-change-only-v2",
             "current_squad_decoder": "v82-consensus-only",
@@ -147,7 +149,7 @@ jobs:
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V5 club-matched squad deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V11 weekly repair deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V5 club-matched squad deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V11 weekly repair deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
