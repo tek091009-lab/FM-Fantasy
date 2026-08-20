@@ -53,7 +53,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify deployed first-week repair, squad policy and hard rollback
+      - name: Verify deployed first-week repair, squad renderability and hard rollback
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -75,10 +75,10 @@ jobs:
             dbcontrols="$(curl -fsSL --max-time 20 "$base/dbcontrols.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             undo="$(curl -fsSL --max-time 20 "$base/undoimport.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             clearflow="$(curl -fsSL --max-time 20 "$base/clearflowv2.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-auto-restore-v8-first-week-repair-v10' \
+            if printf '%s' "$idx" | grep -q 'fm-deploy-auto-restore-v9-squad-renderability-v4' \
               && printf '%s' "$idx" | grep -q 'authfix.js?v=14' \
               && printf '%s' "$idx" | grep -q 'atomicrollbackfix.js?v=3' \
-              && printf '%s' "$idx" | grep -q 'squadeligibilityfix.js?v=3' \
+              && printf '%s' "$idx" | grep -q 'squadeligibilityfix.js?v=4' \
               && printf '%s' "$idx" | grep -q 'registrationnewsguard.js?v=2' \
               && printf '%s' "$idx" | grep -q 'newsview.js?v=5' \
               && printf '%s' "$idx" | grep -q 'dbcontrols.js?v=8' \
@@ -98,7 +98,8 @@ jobs:
               && printf '%s' "$rollback" | grep -q 'atomic-import-rollback-v3-hard-runtime-reset' \
               && printf '%s' "$rollback" | grep -q 'scheduleHardReload' \
               && printf '%s' "$rollback" | grep -q 'location.reload()' \
-              && printf '%s' "$squad" | grep -q 'squad-eligibility-v3-registered-or-senior-matchday' \
+              && printf '%s' "$squad" | grep -q 'squad-eligibility-v4-visible-pool-not-availability-filter' \
+              && printf '%s' "$squad" | grep -q 'p.visible=true;p.competition_eligible=true;p.available=true' \
               && printf '%s' "$regnews" | grep -q 'registration-news-v2-canonical-boundary-observer-free' \
               && ! printf '%s' "$regnews" | grep -q 'MutationObserver' \
               && printf '%s' "$newsview" | grep -q 'news-view-v5-idempotent-clear' \
@@ -111,7 +112,7 @@ jobs:
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose V10 first-week repair build' >&2; exit 1; }
+          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose V4 squad renderability build' >&2; exit 1; }
       - name: Record current Pages deployment
         shell: bash
         env:
@@ -123,7 +124,7 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v16-first-week-history-repair-v10",
+            "verification": "v17-squad-renderability-v4",
             "update_guard": "v10-history-repair-before-validation",
             "first_week_repair": "decoded-player-history-plus-safe-side-repartition",
             "first_week_policy": "repair must pass exact identity-and-score validation; unrecoverable fixtures still block",
@@ -133,7 +134,7 @@ jobs:
             "world_apply": "same-pipeline-as-manual-load-v1",
             "rollback": "v3-hard-runtime-reset-after-failed-import",
             "undo_import": "server-backup-restore-v2-auth-safe",
-            "player_pool": "registered-or-senior-matchday-v3",
+            "player_pool": "registered-or-senior-matchday-v4-renderable",
             "registration_news": "canonical-boundary-v2",
             "transfer_news": "proven-visible-club-change-only-v2",
             "current_squad_decoder": "v82-consensus-only",
@@ -144,7 +145,7 @@ jobs:
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V10 first-week repair deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V4 squad renderability deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V10 first-week repair deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V4 squad renderability deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
