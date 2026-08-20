@@ -51,7 +51,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify deployed current importer and auth-safe rollback shell
+      - name: Verify deployed fast cached startup and auth-safe rollback shell
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -65,20 +65,28 @@ jobs:
             guard="$(curl -fsSL --max-time 20 "$base/updateguard.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             compat="$(curl -fsSL --max-time 20 "$base/importcompat.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             pricing="$(curl -fsSL --max-time 20 "$base/dynamicpricingv13.js?sha=${GITHUB_SHA}-${attempt}" || true)"
+            auth="$(curl -fsSL --max-time 20 "$base/authfix.js?sha=${GITHUB_SHA}-${attempt}" || true)"
+            rollback="$(curl -fsSL --max-time 20 "$base/atomicrollbackfix.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             dbcontrols="$(curl -fsSL --max-time 20 "$base/dbcontrols.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             undo="$(curl -fsSL --max-time 20 "$base/undoimport.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             clearflow="$(curl -fsSL --max-time 20 "$base/clearflowv2.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-auth-safe-v3' \
+            if printf '%s' "$idx" | grep -q 'fm-deploy-fast-cache-v4' \
+              && printf '%s' "$idx" | grep -q 'authfix.js?v=13' \
+              && printf '%s' "$idx" | grep -q 'atomicrollbackfix.js?v=2' \
+              && printf '%s' "$idx" | grep -q 'dbcontrols.js?v=7' \
               && printf '%s' "$idx" | grep -q 'updateguard.js?v=9' \
               && printf '%s' "$idx" | grep -q 'importcompat.js?v=4' \
               && printf '%s' "$idx" | grep -q 'dynamicpricingv13.js?v=14' \
-              && printf '%s' "$idx" | grep -q 'dbcontrols.js?v=6' \
               && printf '%s' "$idx" | grep -q 'undoimport.js?v=4' \
               && printf '%s' "$idx" | grep -q 'clearflowv2.js?v=6' \
               && printf '%s' "$entry" | grep -q 'bootstrap=v84-20260818' \
               && printf '%s' "$guard" | grep -q 'world-update-guard-v9-history-aware-season-catchup' \
               && printf '%s' "$compat" | grep -q 'import-compat-v84-season-plus-36-row' \
               && printf '%s' "$pricing" | grep -q 'dynamic-market-pricing-v14-sustained-successful-updates' \
+              && printf '%s' "$auth" | grep -q 'const authoritative=await loadWorld(false)' \
+              && ! printf '%s' "$auth" | grep -q 'if(authoritative)await storeAuthoritativePayload(authoritative)' \
+              && printf '%s' "$rollback" | grep -q 'loadWorld(true)' \
+              && ! printf '%s' "$dbcontrols" | grep -q "setTimeout(()=>forceLoad().catch" \
               && printf '%s' "$dbcontrols" | grep -q 'Undo Last Import' \
               && printf '%s' "$undo" | grep -q 'undo-last-import-v2-dbcontrols-owned' \
               && printf '%s' "$clearflow" | grep -q 'creator-clear-v5-auth-safe-no-undo-observer' \
@@ -87,7 +95,7 @@ jobs:
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose the auth-safe import/pricing/undo shell' >&2; exit 1; }
+          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose the fast cached auth-safe shell' >&2; exit 1; }
       - name: Record current Pages deployment
         shell: bash
         env:
@@ -99,10 +107,12 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v14-pricing-undo-auth-safe-v3",
+            "verification": "v14-fast-cache-auth-safe-v4",
             "update_guard": "v9-history-aware-season-catchup",
             "import_compat": "v84-season-plus-36-row",
             "dynamic_pricing": "v14-sustained-successful-updates",
+            "world_load": "versioned-local-cache-normal-refresh-v1",
+            "rollback": "force-canonical-only-on-failed-import-v2",
             "undo_import": "server-backup-restore-v2-auth-safe",
             "current_squad_decoder": "v82-consensus-only",
             "retained_history": "v81-36-row-plus-variable-squad",
@@ -112,7 +122,7 @@ jobs:
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified auth-safe Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified fast-cache Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified auth-safe Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified fast-cache Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
