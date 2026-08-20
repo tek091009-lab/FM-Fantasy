@@ -1,0 +1,81 @@
+name: Verify V12 weekly boundary live
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'historicalfreezev12.js'
+      - 'managernewstransaction.js'
+      - 'index.html'
+      - 'scripts/test_weekly_boundary_v12.js'
+      - '.github/workflows/verify-weekly-boundary-v12.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Run V12 regressions
+        run: node scripts/test_weekly_boundary_v12.js
+      - name: Wait for exact V12 production shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://tek091009-lab.github.io/FM-Fantasy'
+          ok=0
+          for attempt in $(seq 1 72); do
+            idx="$(curl -fsSL --max-time 20 "$base/index.html?v12=${GITHUB_SHA}-${attempt}" || true)"
+            hist="$(curl -fsSL --max-time 20 "$base/historicalfreezev12.js?v12=${GITHUB_SHA}-${attempt}" || true)"
+            news="$(curl -fsSL --max-time 20 "$base/managernewstransaction.js?v12=${GITHUB_SHA}-${attempt}" || true)"
+            if printf '%s' "$idx" | grep -q 'fm-deploy-auto-restore-v14-historical-boundary-pricing-rebase' \
+              && printf '%s' "$idx" | grep -q 'historicalfreezev12.js?v=2' \
+              && printf '%s' "$idx" | grep -q 'managernewstransaction.js?v=1' \
+              && printf '%s' "$hist" | grep -q 'historical-boundary-v12-canonical-through-completed-gw' \
+              && printf '%s' "$hist" | grep -q 'retroactive_backfill_rows_dropped' \
+              && printf '%s' "$hist" | grep -q 'dynamic_pricing_rebased_on_frozen_history' \
+              && printf '%s' "$news" | grep -q 'manager-news-transaction-v1-success-only-canonical-transfers' \
+              && printf '%s' "$news" | grep -q 'transfer_news_guard' \
+              && printf '%s' "$news" | grep -q 'pending=null'; then
+              ok=1; break
+            fi
+            sleep 5
+          done
+          [ "$ok" -eq 1 ] || { echo 'V12 weekly boundary did not become live' >&2; exit 1; }
+      - name: Record verified V12 deployment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          cat > /tmp/marker.json <<JSON
+          {
+            "verified_live_sha": "${GITHUB_SHA}",
+            "verified_at": "${stamp}",
+            "verification": "v22-first-week-canonical-history-boundary-v12",
+            "first_week_expected_transition": "50-played-completed-gw4-to-66-played-completed-gw5",
+            "weekly_history_boundary": "canonical-match-and-player-history-through-previous-completed-gameweek-v12",
+            "retroactive_backfill_policy": "drop-later-save-redecodes-and-backfills-at-or-before-previous-completed-gameweek",
+            "dynamic_pricing_history": "rebased-from-canonical-tracker-against-frozen-history-before-publish",
+            "manager_news_transaction": "success-only-v1",
+            "failed_import_manager_news": "discard-pending-manager-news-on-failed-publish",
+            "transfer_news": "only-meta-transfer_news_guard-proven-visible-club-changes",
+            "polluted_31_transfer_snapshot": "cleared-from-affected-manager-states",
+            "update_guard": "v11-club-matched-history-repair",
+            "importer_rich_scope": "isolated-retained-match-members-only-v98",
+            "unlabelled_rich_allowed_extensions": [".scm", ".apm", ".pkm"],
+            "unlabelled_rich_excludes": "aggregate-sources-including-news.dat-and-play_fixture_manager.dat",
+            "dynamic_pricing": "v14-sustained-successful-updates",
+            "rollback": "v4-hard-runtime-reset-with-failed-debug-preservation",
+            "player_pool": "registered-or-club-matched-senior-evidence-v5",
+            "registration_news": "canonical-boundary-v2",
+            "current_squad_decoder": "v82-consensus-only",
+            "snapshot_boundary": "canonical-through-previous-completed-gameweek-v12"
+          }
+          JSON
+          content="$(base64 -w0 /tmp/marker.json)"
+          existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V12 weekly boundary deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
