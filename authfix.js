@@ -39,8 +39,7 @@
   if(JSON.stringify(raw)!==JSON.stringify(clean))await client.from('manager_states').upsert({world_id:world.id,user_id:uid,state:clean,updated_at:new Date().toISOString()},{onConflict:'world_id,user_id'});
   gate()?.classList.add('hidden');setRoleUI();
   try{
-   const authoritative=await loadWorld(true);
-   if(authoritative)await storeAuthoritativePayload(authoritative);
+   const authoritative=await loadWorld(false);
    if(window.FMCloud.managerState&&typeof state!=='undefined'){state=Object.assign({},DEFAULT,window.FMCloud.managerState);state.chips=state.chips||JSON.parse(JSON.stringify(DEFAULT.chips))}
    if(typeof loadServerImportState==='function')await loadServerImportState();
    if(authoritative&&typeof applyImportedPayload==='function')applyImportedPayload(authoritative,'load');
