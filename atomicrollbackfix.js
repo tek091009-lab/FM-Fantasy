@@ -1,6 +1,6 @@
 (()=>{
 'use strict';
-const VERSION='atomic-import-rollback-v1';
+const VERSION='atomic-import-rollback-v2-force-canonical';
 const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
 async function writeLocal(payload){
   if(!payload)return;
@@ -12,7 +12,7 @@ async function writeLocal(payload){
 }
 async function restoreCanonical(){
   let canonical=null;
-  try{if(typeof window.FMCloud?.loadWorld==='function')canonical=await window.FMCloud.loadWorld()}catch(e){console.warn('Atomic rollback could not reload canonical server world',e)}
+  try{if(typeof window.FMCloud?.loadWorld==='function')canonical=await window.FMCloud.loadWorld(true)}catch(e){console.warn('Atomic rollback could not reload canonical server world',e)}
   if(!canonical){try{canonical=clone(window.FMCloud?.getWorld?.()?.payload||null)}catch(_e){}}
   if(!canonical)return null;
   await writeLocal(canonical);
