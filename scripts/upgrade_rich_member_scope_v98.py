@@ -68,7 +68,14 @@ if 'unlabelled_rich_non_retained_members_skipped' not in py:
     if needle not in py:raise RuntimeError('rich diagnostics export anchor missing')
     py=py.replace(needle,extra,1)
 
-# Keep a visible policy marker in payload/debug.
+compile(py,'fm_importer_v98.py','exec')
+assert "('.scm','.apm','.pkm')" in py
+assert "non_retained_members_skipped" in py
+assert "unlabelled_rich_non_retained_member_names" in py
+new_b64=base64.b64encode(py.encode()).decode()
+html=html[:m.start(1)]+new_b64+html[m.end(1):]
+
+# Keep a visible policy marker in browser-side payload/debug after the Python source replacement.
 for old in [
     "payload.meta.history_recovery_policy='single-archive-scan + cached identity propagation + grounded-fixture retention-v86 + retained-member-min36-v92';",
     "payload.meta.history_recovery_policy='single-archive-scan + cached identity propagation + grounded-fixture retention-v86';"
@@ -78,12 +85,6 @@ for old in [
         html=html.replace(old,new,1)
         break
 
-compile(py,'fm_importer_v98.py','exec')
-assert "('.scm','.apm','.pkm')" in py
-assert "non_retained_members_skipped" in py
-assert "unlabelled_rich_non_retained_member_names" in py
-new_b64=base64.b64encode(py.encode()).decode()
-html=html[:m.start(1)]+new_b64+html[m.end(1):]
 repack(html)
 assert reconstruct()==html
 print('v98: unlabelled rich recovery scoped to isolated .scm/.apm/.pkm retained match members')
