@@ -1,6 +1,2 @@
-Traceback (most recent call last):
-  File "/home/runner/work/FM-Fantasy/FM-Fantasy/scripts/upgrade_rich_member_scope_v98.py", line 67, in <module>
-    if needle not in py:raise RuntimeError('rich diagnostics export anchor missing')
-                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-RuntimeError: rich diagnostics export anchor missing
-exit_code=1
+v98: unlabelled rich recovery scoped to isolated .scm/.apm/.pkm retained match members
+exit_code=0
