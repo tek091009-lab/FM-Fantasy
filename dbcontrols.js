@@ -25,10 +25,11 @@
     }catch(e){console.error('Undo Last Import failed',e);note(e?.message||'Could not undo the last import.',true);alert(e?.message||'Could not undo the last import.');throw e}
   }
   function mount(){
-    if(document.getElementById(ID))return;
+    if(document.getElementById(ID))return true;
+    if(!window.FMCloud?.ready?.())return false;
     const syncBox=document.querySelector('.sidebar .syncbox')||document.querySelector('.syncbox');
     const syncBtns=syncBox?.querySelector('.syncBtns');
-    if(!syncBox||!syncBtns){setTimeout(mount,250);return;}
+    if(!syncBox||!syncBtns)return false;
     const wrap=document.createElement('div');wrap.id=ID;wrap.style.cssText='display:grid;grid-template-columns:1fr;gap:7px;margin-top:7px';
     const mk=label=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.className='syncBtn';return b};
     if(window.FMCloud?.isCreator?.()){
@@ -38,8 +39,14 @@
     const load=mk('Load Saved Database');load.onclick=()=>forceLoad().catch(()=>{});wrap.appendChild(load);
     const status=document.createElement('div');status.id='fmCloudDbStatus';status.className='syncStatus';status.style.marginTop='1px';status.textContent=wasCleared()?'No shared database saved':(window.FMCloud?.isCreator?.()?'Shared creator database':'Shared database');wrap.appendChild(status);
     syncBtns.insertAdjacentElement('afterend',wrap);
+    return true;
+  }
+  function activate(){
+    if(!window.FMCloud?.ready?.())return;
+    if(!mount()){let tries=0;const timer=setInterval(()=>{tries++;if(mount()||tries>=20)clearInterval(timer)},250)}
+    if(!wasCleared())setTimeout(()=>forceLoad().catch(()=>{}),250);
   }
   window.FMCloudDatabase={save:forceSave,load:forceLoad,undoLastImport,markActive};
-  window.addEventListener('fmcloudready',()=>{mount();if(!wasCleared())setTimeout(()=>forceLoad().catch(()=>{}),250)});
-  (async()=>{if(await waitReady()){mount();if(!wasCleared())setTimeout(()=>forceLoad().catch(()=>{}),250)}})();
+  window.addEventListener('fmcloudready',activate);
+  if(window.FMCloud?.ready?.())activate();
 })();
