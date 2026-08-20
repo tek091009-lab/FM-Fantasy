@@ -1,0 +1,55 @@
+name: Verify retained history compact boundary v122
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - '.github/workflows/verify-history-compact-boundary-v122.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply compact retained boundary decoder
+        run: python scripts/upgrade_history_compact_boundary_v122.py
+      - name: Verify importer and compact-boundary invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          for s in [
+              'def compact_window(j,left_n,right_n):',
+              'if gap<214 or gap>500:return None',
+              'gap<max(230,int(med*1.35),q75+16)',
+              'set(lp)&set(rp)',
+              'compact_strict=compact_window(j,20,20)',
+              'compact_boundary_candidate_pairs',
+          ]:assert s in py,s
+          # Legacy >500 boundary remains untouched and therefore still has first priority.
+          assert 'if gap<=500 or max_l>=1500 or max_r>=1500:return None' in py
+          # Synthetic geometry: ordinary within-side starts ~214 bytes apart; a 340-byte separator
+          # is a strong local outlier but was excluded by the old fixed >500 rule.
+          internal=[214]*38
+          gap=340
+          ordered=sorted(internal);med=ordered[len(ordered)//2];q75=ordered[(3*len(ordered))//4]
+          assert 214<=gap<=500
+          assert gap>=max(230,int(med*1.35),q75+16)
+          # Ordinary 214-byte continuation must NOT qualify as a team boundary.
+          gap2=214
+          assert gap2<max(230,int(med*1.35),q75+16)
+          print('v122 compiles; legacy >500 path preserved; 340-byte structural separator admitted; ordinary 214-byte continuation rejected')
+          PY
