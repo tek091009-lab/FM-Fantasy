@@ -31,6 +31,13 @@
  }
  async function bootstrap(){if(!hasCfg){msg('Cloud setup is not connected yet.');return}if(!window.supabase){msg('Login service failed to load. Refresh the page.');return}client=supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});const{data}=await client.auth.getSession();session=data.session;if(session)await hydrate();else showGate();client.auth.onAuthStateChange(async(_e,s)=>{session=s;if(s)await hydrate();else showGate()})}
  function showGate(){gate()?.classList.remove('hidden');profile=world=null;setRoleUI()}
+ async function applyWorldToApp(authoritative){
+  if(window.FMCloud.managerState&&typeof state!=='undefined'&&typeof DEFAULT!=='undefined'){state=Object.assign({},DEFAULT,window.FMCloud.managerState);state.chips=state.chips||JSON.parse(JSON.stringify(DEFAULT.chips))}
+  if(authoritative&&typeof applyImportedPayload==='function')applyImportedPayload(authoritative,'load');
+  else if(typeof loadServerImportState==='function')await loadServerImportState();
+  if(typeof fmProcessCompletedGameweeks==='function')fmProcessCompletedGameweeks();
+  if(typeof renderAll==='function')renderAll();
+ }
  async function hydrate(){
   const uid=session.user.id;const{data:p,error}=await client.from('profiles').select('*').eq('user_id',uid).single();if(error||!p){msg('Account profile could not be loaded.');showGate();return}profile=p;
   const{data:m,error:me}=await client.from('world_members').select('world_id').eq('user_id',uid).limit(1).maybeSingle();if(me||!m?.world_id){msg(me?.message||'Shared FM world could not be loaded.');showGate();return}
@@ -40,11 +47,8 @@
   gate()?.classList.add('hidden');setRoleUI();
   try{
    const authoritative=await loadWorld(false);
-   if(window.FMCloud.managerState&&typeof state!=='undefined'){state=Object.assign({},DEFAULT,window.FMCloud.managerState);state.chips=state.chips||JSON.parse(JSON.stringify(DEFAULT.chips))}
-   if(typeof loadServerImportState==='function')await loadServerImportState();
-   if(authoritative&&typeof applyImportedPayload==='function')applyImportedPayload(authoritative,'load');
-   if(typeof renderAll==='function')renderAll();
-  }catch(e){console.error('Direct cloud database restore failed',e)}
+   await applyWorldToApp(authoritative);
+  }catch(e){console.error('Automatic cloud database restore failed',e)}
   window.dispatchEvent(new Event('fmcloudready'));
  }
  async function login(){const u=document.getElementById('authUsername').value.trim(),p=document.getElementById('authPassword').value;if(!u||!p)return msg('Enter your username and password.');msg('Logging in…');const{error}=await client.auth.signInWithPassword({email:synthetic(u),password:p});if(error)msg(error.message)}
