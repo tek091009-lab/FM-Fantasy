@@ -14,3 +14,4 @@ for name in ['_rich_stat_record_at','_rich_scan_stats','_rich_scan_stats_fast','
     blocks.append(f'===== {name} =====\n'+'\n'.join(lines[start:end]))
 Path('_current_rich_decoder_v98.txt').write_text('\n\n'.join(blocks)+'\n',encoding='utf-8')
 print('wrote _current_rich_decoder_v98.txt')
+# extraction trigger v98
