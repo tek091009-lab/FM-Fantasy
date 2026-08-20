@@ -44,7 +44,6 @@
   function activate(){
     if(!window.FMCloud?.ready?.())return;
     if(!mount()){let tries=0;const timer=setInterval(()=>{tries++;if(mount()||tries>=20)clearInterval(timer)},250)}
-    if(!wasCleared())setTimeout(()=>forceLoad().catch(()=>{}),250);
   }
   window.FMCloudDatabase={save:forceSave,load:forceLoad,undoLastImport,markActive};
   window.addEventListener('fmcloudready',activate);
