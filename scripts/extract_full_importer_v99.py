@@ -10,3 +10,4 @@ py=base64.b64decode(m.group(1)).decode('utf-8')
 compile(py,'current_full_importer_v99.py','exec')
 (ROOT/'_current_full_importer_v99.py').write_text(py,encoding='utf-8')
 print('wrote full embedded importer',len(py),'bytes')
+# trigger 2026-08-20T19:10+01
