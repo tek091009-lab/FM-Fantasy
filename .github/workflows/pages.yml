@@ -27,6 +27,8 @@ jobs:
         with: {python-version: '3.12'}
       - name: Verify current season/update guard behavior
         run: node scripts/test_season_publish_v84.js
+      - name: Verify squad and registration-news policy
+        run: node scripts/test_squad_registration_policy_v3.js
       - name: Verify packed importer compiles
         shell: bash
         run: |
@@ -51,7 +53,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify deployed automatic cached startup and auth-safe rollback shell
+      - name: Verify deployed squad policy, auto restore and hard failed-import rollback
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -67,13 +69,19 @@ jobs:
             pricing="$(curl -fsSL --max-time 20 "$base/dynamicpricingv13.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             auth="$(curl -fsSL --max-time 20 "$base/authfix.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             rollback="$(curl -fsSL --max-time 20 "$base/atomicrollbackfix.js?sha=${GITHUB_SHA}-${attempt}" || true)"
+            squad="$(curl -fsSL --max-time 20 "$base/squadeligibilityfix.js?sha=${GITHUB_SHA}-${attempt}" || true)"
+            regnews="$(curl -fsSL --max-time 20 "$base/registrationnewsguard.js?sha=${GITHUB_SHA}-${attempt}" || true)"
+            newsview="$(curl -fsSL --max-time 20 "$base/newsview.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             dbcontrols="$(curl -fsSL --max-time 20 "$base/dbcontrols.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             undo="$(curl -fsSL --max-time 20 "$base/undoimport.js?sha=${GITHUB_SHA}-${attempt}" || true)"
             clearflow="$(curl -fsSL --max-time 20 "$base/clearflowv2.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-auto-restore-v5' \
+            if printf '%s' "$idx" | grep -q 'fm-deploy-auto-restore-v7-squad-registration-news-hard-rollback' \
               && printf '%s' "$idx" | grep -q 'authfix.js?v=14' \
-              && printf '%s' "$idx" | grep -q 'atomicrollbackfix.js?v=2' \
-              && printf '%s' "$idx" | grep -q 'dbcontrols.js?v=7' \
+              && printf '%s' "$idx" | grep -q 'atomicrollbackfix.js?v=3' \
+              && printf '%s' "$idx" | grep -q 'squadeligibilityfix.js?v=3' \
+              && printf '%s' "$idx" | grep -q 'registrationnewsguard.js?v=2' \
+              && printf '%s' "$idx" | grep -q 'newsview.js?v=5' \
+              && printf '%s' "$idx" | grep -q 'dbcontrols.js?v=8' \
               && printf '%s' "$idx" | grep -q 'updateguard.js?v=9' \
               && printf '%s' "$idx" | grep -q 'importcompat.js?v=4' \
               && printf '%s' "$idx" | grep -q 'dynamicpricingv13.js?v=14' \
@@ -85,9 +93,15 @@ jobs:
               && printf '%s' "$pricing" | grep -q 'dynamic-market-pricing-v14-sustained-successful-updates' \
               && printf '%s' "$auth" | grep -q 'const authoritative=await loadWorld(false)' \
               && printf '%s' "$auth" | grep -q 'await applyWorldToApp(authoritative)' \
-              && printf '%s' "$auth" | grep -q "applyImportedPayload(authoritative,'load')" \
-              && printf '%s' "$auth" | grep -q 'fmProcessCompletedGameweeks' \
-              && printf '%s' "$rollback" | grep -q 'loadWorld(true)' \
+              && printf '%s' "$rollback" | grep -q 'atomic-import-rollback-v3-hard-runtime-reset' \
+              && printf '%s' "$rollback" | grep -q 'scheduleHardReload' \
+              && printf '%s' "$rollback" | grep -q 'location.reload()' \
+              && printf '%s' "$squad" | grep -q 'squad-eligibility-v3-registered-or-senior-matchday' \
+              && printf '%s' "$squad" | grep -q 'registered Championship squad OR selected-league senior matchday evidence' \
+              && printf '%s' "$regnews" | grep -q 'registration-news-v2-canonical-boundary-observer-free' \
+              && printf '%s' "$regnews" | grep -q 'proven canonical visible-player club changes only' \
+              && ! printf '%s' "$regnews" | grep -q 'MutationObserver' \
+              && printf '%s' "$newsview" | grep -q 'news-view-v5-idempotent-clear' \
               && ! printf '%s' "$dbcontrols" | grep -q "setTimeout(()=>forceLoad().catch" \
               && printf '%s' "$dbcontrols" | grep -q 'Undo Last Import' \
               && printf '%s' "$undo" | grep -q 'undo-last-import-v2-dbcontrols-owned' \
@@ -97,7 +111,7 @@ jobs:
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose automatic cached world restore' >&2; exit 1; }
+          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose squad/registration/rollback build' >&2; exit 1; }
       - name: Record current Pages deployment
         shell: bash
         env:
@@ -109,14 +123,17 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v14-auto-restore-fast-cache-v5",
+            "verification": "v15-squad-registration-hard-rollback-v7",
             "update_guard": "v9-history-aware-season-catchup",
             "import_compat": "v84-season-plus-36-row",
             "dynamic_pricing": "v14-sustained-successful-updates",
             "world_load": "automatic-versioned-local-cache-refresh-v2",
             "world_apply": "same-pipeline-as-manual-load-v1",
-            "rollback": "force-canonical-only-on-failed-import-v2",
+            "rollback": "v3-hard-runtime-reset-after-failed-import",
             "undo_import": "server-backup-restore-v2-auth-safe",
+            "player_pool": "registered-or-senior-matchday-v3",
+            "registration_news": "canonical-boundary-v2",
+            "transfer_news": "proven-visible-club-change-only-v2",
             "current_squad_decoder": "v82-consensus-only",
             "retained_history": "v81-36-row-plus-variable-squad",
             "snapshot_boundary": "append-only-by-snapshot-date-v1"
@@ -125,7 +142,7 @@ jobs:
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified auto-restore Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified squad/registration Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified auto-restore Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified squad/registration Pages deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
