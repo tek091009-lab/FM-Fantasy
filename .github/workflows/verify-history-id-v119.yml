@@ -1,0 +1,100 @@
+name: Verify retained-ID history recovery v119
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_confirmed_name_anchor_v99.py'
+      - 'scripts/upgrade_history_name_transfer_support_v100.py'
+      - 'scripts/upgrade_history_confirmed_name_one_side_v101.py'
+      - 'scripts/upgrade_history_confirmed_name_global_constraint_v102.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_pair_v103.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_global_v104.py'
+      - 'scripts/upgrade_history_canonical_name_alias_v105.py'
+      - 'scripts/upgrade_history_confirmed_name_cohort_v106.py'
+      - 'scripts/upgrade_history_accumulated_name_roster_v107.py'
+      - 'scripts/upgrade_history_accumulated_name_roster_global_v108.py'
+      - 'scripts/upgrade_history_transitive_name_cohort_graph_v109.py'
+      - 'scripts/upgrade_history_transitive_name_pair_counter_v110.py'
+      - 'scripts/upgrade_history_transitive_id_cohort_graph_v111.py'
+      - 'scripts/upgrade_history_local_id_anchor_v112.py'
+      - 'scripts/upgrade_history_fixture_conditioned_id_pair_v113.py'
+      - 'scripts/upgrade_history_fixture_conditioned_id_global_v114.py'
+      - 'scripts/upgrade_history_edge_trim_id_pair_v115.py'
+      - 'scripts/upgrade_history_edge_trim_sort_v116.py'
+      - 'scripts/upgrade_history_edge_trim_score_v117.py'
+      - 'scripts/upgrade_history_edge_duplicate_v118.py'
+      - 'scripts/upgrade_history_edge_transfer_v119.py'
+      - '.github/workflows/verify-history-id-v119.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained history decoder stack
+        run: |
+          python scripts/upgrade_history_confirmed_name_anchor_v99.py
+          python scripts/upgrade_history_name_transfer_support_v100.py
+          python scripts/upgrade_history_confirmed_name_one_side_v101.py
+          python scripts/upgrade_history_confirmed_name_global_constraint_v102.py
+          python scripts/upgrade_history_fixture_conditioned_name_pair_v103.py
+          python scripts/upgrade_history_fixture_conditioned_name_global_v104.py
+          python scripts/upgrade_history_canonical_name_alias_v105.py
+          python scripts/upgrade_history_confirmed_name_cohort_v106.py
+          python scripts/upgrade_history_accumulated_name_roster_v107.py
+          python scripts/upgrade_history_accumulated_name_roster_global_v108.py
+          python scripts/upgrade_history_transitive_name_cohort_graph_v109.py
+          python scripts/upgrade_history_transitive_name_pair_counter_v110.py
+          python scripts/upgrade_history_transitive_id_cohort_graph_v111.py
+          python scripts/upgrade_history_local_id_anchor_v112.py
+          python scripts/upgrade_history_fixture_conditioned_id_pair_v113.py
+          python scripts/upgrade_history_fixture_conditioned_id_global_v114.py
+          python scripts/upgrade_history_edge_trim_id_pair_v115.py
+          python scripts/upgrade_history_edge_trim_sort_v116.py
+          python scripts/upgrade_history_edge_trim_score_v117.py
+          python scripts/upgrade_history_edge_duplicate_v118.py
+          python scripts/upgrade_history_edge_transfer_v119.py
+      - name: Verify compiled importer and cross-side boundary transfer invariant
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          for s in [
+              'def confirmed_id_edge_transfer_pair_pass():',
+              'if len(owners)==1 and opposite_eid in owners:',
+              'repaired_left=list(lkeep)+list(rtol)',
+              'repaired_right=list(rkeep)+list(ltor)',
+              'lscore,rscore=score_of(repaired)',
+              "register_match(ci,f,rev,leid,reid,'unlabelled_retained_confirmed_id_edge_transfer_v119')",
+              'f=confirmed_id_edge_transfer_pair_pass()',
+              'confirmed_id_edge_transfer_rows_moved',
+              'unlabelled_rich_confirmed_id_edge_transfer_matches',
+              'confirmed_id_edge_trim_target_duplicate_matches',
+              'confirmed_id_edge_trim_score_changed_matches',
+          ]:assert s in py,s
+
+          # Synthetic boundary invariant: PID 99 belongs to the right/opponent club but was scanned
+          # as the final row of the left side. Moving it (not deleting it) preserves the player's
+          # goal while correcting the team score from an apparent 2-0 to 1-1.
+          left=[{'player_id':10,'goals':1}]+[{'player_id':20+i,'goals':0} for i in range(9)]+[{'player_id':99,'goals':1}]
+          right=[{'player_id':200+i,'goals':0} for i in range(10)]
+          assert sum(r['goals'] for r in left)==2 and sum(r['goals'] for r in right)==0
+          moved=left[-1:];left2=left[:-1];right2=right+moved
+          assert sum(r['goals'] for r in left2)==1 and sum(r['goals'] for r in right2)==1
+          assert any(r['player_id']==99 for r in right2)
+          assert not any(r['player_id']==99 for r in left2)
+          print('v99-v119 stack compiles; opposite-club boundary rows are moved across the side split rather than discarded')
+          PY
