@@ -22,10 +22,7 @@
       const exact=document.getElementById(baseId);
       if(exact)return exact;
       const hidden=document.getElementById(fullId);
-      if(hidden){
-        const parent=hidden.parentElement?.closest?.('[id^="news"],.newsCard,.card,.panel,.box,section');
-        if(parent)return parent;
-      }
+      if(hidden){const parent=hidden.parentElement?.closest?.('[id^="news"],.newsCard,.card,.panel,.box,section');if(parent)return parent}
     }
     let el=btn;for(let i=0;i<8&&el;i++,el=el.parentElement){if(el.id?.startsWith('news')&&!/Full$/.test(el.id)||el.classList?.contains('newsCard'))return el}
     return null;
@@ -36,39 +33,24 @@
     const o=ensure(),body=o.querySelector('.fmNewsBody');o.querySelector('.fmNewsHead h2').textContent=titleFor(section);
     if(cleared()){body.innerHTML='<div class="fmNewsClearedEmpty">No news available. Import an FM database to populate player news.</div>'}
     else{
-      const clone=section.cloneNode(true);
-      clone.querySelectorAll('.newsHidden').forEach(el=>{el.classList.remove('newsHidden');el.style.display=''});
-      clone.querySelectorAll('[data-news-toggle]').forEach(el=>el.remove());
-      clone.querySelectorAll('[data-news-search]').forEach(el=>el.value='');
-      clone.querySelectorAll('[data-news-text]').forEach(el=>el.style.display='');
-      body.replaceChildren(clone);
+      const clone=section.cloneNode(true);clone.querySelectorAll('.newsHidden').forEach(el=>{el.classList.remove('newsHidden');el.style.display=''});clone.querySelectorAll('[data-news-toggle]').forEach(el=>el.remove());clone.querySelectorAll('[data-news-search]').forEach(el=>el.value='');clone.querySelectorAll('[data-news-text]').forEach(el=>el.style.display='');body.replaceChildren(clone)
     }
     o.classList.add('open');document.documentElement.style.overflow='hidden';return true;
   }
 
   function clearVisibleNews(){
     if(!cleared())return;
-    for(const id of ['newsTransfers','newsPriceUp','newsPriceDown','newsInjuries','newsSuspensions']){
-      const el=document.getElementById(id);if(!el)continue;
-      const head=el.querySelector('.newsHead')?.cloneNode(true);
-      el.innerHTML='';if(head)el.appendChild(head);
-      const empty=document.createElement('div');empty.className='fmNewsClearedEmpty';empty.textContent='No news available.';el.appendChild(empty);
+    for(const id of ['newsTransfers','newsRegistrations','newsPriceUp','newsPriceDown','newsInjuries','newsSuspensions']){
+      const el=document.getElementById(id);if(!el||el.dataset.fmNewsCleared==='1')continue;
+      const head=el.querySelector('.newsHead')?.cloneNode(true);el.innerHTML='';if(head)el.appendChild(head);const empty=document.createElement('div');empty.className='fmNewsClearedEmpty';empty.textContent='No news available.';el.appendChild(empty);el.dataset.fmNewsCleared='1'
     }
-    const stamp=document.getElementById('newsStamp');if(stamp)stamp.textContent='No FM database loaded.';
+    const stamp=document.getElementById('newsStamp');if(stamp&&stamp.textContent!=='No FM database loaded.')stamp.textContent='No FM database loaded.';
   }
 
-  document.addEventListener('click',e=>{
-    const b=e.target.closest?.('[data-news-toggle]');if(!b)return;
-    e.preventDefault();e.stopImmediatePropagation();openToggle(b);
-  },true);
+  document.addEventListener('click',e=>{const b=e.target.closest?.('[data-news-toggle]');if(!b)return;e.preventDefault();e.stopImmediatePropagation();openToggle(b)},true);
+  document.addEventListener('click',e=>{const b=e.target.closest?.('button,a,[role="button"]');if(!b||b.hasAttribute('data-news-toggle'))return;const text=(b.textContent||'').trim().replace(/\s+/g,' ');if(!RX_ALL.test(text))return;e.preventDefault();e.stopImmediatePropagation();openToggle(b)},true);
 
-  document.addEventListener('click',e=>{
-    const b=e.target.closest?.('button,a,[role="button"]');if(!b||b.hasAttribute('data-news-toggle'))return;
-    const text=(b.textContent||'').trim().replace(/\s+/g,' ');if(!RX_ALL.test(text))return;
-    e.preventDefault();e.stopImmediatePropagation();openToggle(b);
-  },true);
-
-  let busy=false;new MutationObserver(()=>{if(busy)return;busy=true;requestAnimationFrame(()=>{busy=false;clearVisibleNews()})}).observe(document.documentElement,{subtree:true,childList:true});
+  let busy=false;new MutationObserver(()=>{if(busy||!cleared())return;busy=true;requestAnimationFrame(()=>{busy=false;clearVisibleNews()})}).observe(document.documentElement,{subtree:true,childList:true});
   setTimeout(clearVisibleNews,0);setTimeout(clearVisibleNews,350);
-  window.FMNewsView={openToggle,close,clearVisibleNews,markActive};
+  window.FMNewsView={version:'news-view-v5-idempotent-clear',openToggle,close,clearVisibleNews,markActive};
 })();
