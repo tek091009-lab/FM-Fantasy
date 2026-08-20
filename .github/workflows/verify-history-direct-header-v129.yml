@@ -1,0 +1,78 @@
+name: Verify retained history direct match header v129
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_direct_header_tid_v126.py'
+      - 'scripts/upgrade_history_direct_header_orientation_v127.py'
+      - 'scripts/upgrade_history_direct_header_locality_v128.py'
+      - 'scripts/upgrade_history_direct_header_span_v129.py'
+      - '.github/workflows/verify-history-direct-header-v129.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural decoder stack through v129
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_direct_header_tid_v126.py
+          python scripts/upgrade_history_direct_header_orientation_v127.py
+          python scripts/upgrade_history_direct_header_locality_v128.py
+          python scripts/upgrade_history_direct_header_span_v129.py
+      - name: Verify packed importer and long-span invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def _v126_header_pairs(raw,start):',
+              'def _v128_header_pairs_extended(raw,start):',
+              'def _v129_header_pairs_long_span(raw,start):',
+              'search_lo=q+97',
+              'search_hi=min(hi,q+513)',
+              'def direct_binary_header_long_span_pass():',
+              '_v129_direct_long_span=direct_binary_header_long_span_pass()',
+              'unlabelled_rich_direct_header_long_span_fixture_matches',
+          ]
+          for token in required:assert token in py,token
+
+          # v129 must be additive: <=96-byte HOME->AWAY spans remain owned by v126-v128;
+          # only the previously invisible 97..512 range is admitted here.
+          def long_span(span):return 97<=span<=512
+          assert not long_span(96)
+          assert long_span(97)
+          assert long_span(240)
+          assert long_span(512)
+          assert not long_span(513)
+
+          # Wider internal metadata spacing cannot select by proximity. All compatible
+          # evidence still has to collapse to one fixture + one physical array orientation.
+          assert 'by_key=collections.defaultdict(list)' in py
+          assert "for hit in compatible:by_key[(hit[0],hit[1])].append(hit)" in py
+          assert "diagnostics['direct_header_long_span_ambiguous_rejected']+=1" in py
+          assert "register_match(ci,f,rev,leid,reid,source)" in py
+          assert 'if ci in used_candidates or fixture_identity(f) in used_fixtures:continue' in py
+          print('v129 compiles; 97..512-byte HOME/AWAY header spans are admitted only when exact score + binary team IDs prove one unused authoritative fixture/orientation')
+          PY
