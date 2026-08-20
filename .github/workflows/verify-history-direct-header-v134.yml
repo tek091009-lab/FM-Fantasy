@@ -1,0 +1,90 @@
+name: Verify retained history fixture-validated header delimiters v134
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_direct_header_tid_v126.py'
+      - 'scripts/upgrade_history_direct_header_orientation_v127.py'
+      - 'scripts/upgrade_history_direct_header_locality_v128.py'
+      - 'scripts/upgrade_history_direct_header_span_v129.py'
+      - 'scripts/upgrade_history_direct_header_namespace_v130.py'
+      - 'scripts/upgrade_history_header_anchored_candidate_v131.py'
+      - 'scripts/upgrade_history_header_payload_boundary_v132.py'
+      - 'scripts/upgrade_history_header_false_boundary_v133.py'
+      - 'scripts/upgrade_history_header_fixture_delimiter_v134.py'
+      - '.github/workflows/verify-history-direct-header-v134.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural decoder stack through v134
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_direct_header_tid_v126.py
+          python scripts/upgrade_history_direct_header_orientation_v127.py
+          python scripts/upgrade_history_direct_header_locality_v128.py
+          python scripts/upgrade_history_direct_header_span_v129.py
+          python scripts/upgrade_history_direct_header_namespace_v130.py
+          python scripts/upgrade_history_header_anchored_candidate_v131.py
+          python scripts/upgrade_history_header_payload_boundary_v132.py
+          python scripts/upgrade_history_header_false_boundary_v133.py
+          python scripts/upgrade_history_header_fixture_delimiter_v134.py
+      - name: Verify packed importer and delimiter invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def _v134_header_pair_matches_fixture_namespace(home_id,away_id):',
+              'if hid-ph==aid-pa:return True',
+              'header_anchored_nonfixture_false_delimiters_skipped',
+              'header_anchored_fixture_validated_delimiters',
+              'def _v133_header_embedded_in_stat(raw,hq):',
+              'payload_start=q+span+12',
+              'if len(proposals)!=1:',
+              'register_match(ci,f,rev,leid,reid,source)',
+          ]
+          for token in required: assert token in py,token
+
+          # Structural rule regression: an apparent next-header pair must belong to the same
+          # competition under one coherent integer namespace. Equal HOME/AWAY deltas are accepted;
+          # independently unrelated IDs are not.
+          fixtures=[(452,467),(498,510)]
+          def plausible(h,a):
+              for fh,fa in fixtures:
+                  if (h,a)==(fh,fa): return True
+                  if h-fh==a-fa: return True
+              return False
+          assert plausible(452,467)
+          assert plausible(584,599)   # coherent +132 namespace
+          assert not plausible(584,600)  # unrelated metadata-like pair
+          assert not plausible(12345,67890)
+
+          # v134 changes only where v131 stops scanning. It must not weaken the final proof gates.
+          assert 'if len(proposals)!=1:' in py
+          assert 'fixture_identity(f) in used_fixtures' in py
+          assert 'register_match(ci,f,rev,leid,reid,source)' in py
+          print('v134 compiles; only fixture-compatible structural headers may delimit a retained old-match payload')
+          PY
