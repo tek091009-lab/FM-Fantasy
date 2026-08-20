@@ -1,0 +1,114 @@
+name: Verify V98 importer live
+on:
+  workflow_run:
+    workflows: ["Deploy FM Fantasy to GitHub Pages"]
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  verify:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify public packed importer contains V98 retained-source scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://tek091009-lab.github.io/FM-Fantasy"
+          rm -rf /tmp/fm-v98-live
+          mkdir -p /tmp/fm-v98-live/app
+          ok=0
+          for attempt in $(seq 1 48); do
+            rm -f /tmp/fm-v98-live/app/*
+            good=1
+            for i in $(seq -w 0 16); do
+              curl -fsSL --max-time 20 "$base/app/part${i}?v98=${attempt}-$(date +%s)" -o "/tmp/fm-v98-live/app/part${i}" || { good=0; break; }
+            done
+            if [ "$good" -eq 1 ]; then
+              for i in 17 18 19 20; do
+                curl -fsSL --max-time 20 "$base/app/fix${i}?v98=${attempt}-$(date +%s)" -o "/tmp/fm-v98-live/app/fix${i}" || { good=0; break; }
+              done
+            fi
+            if [ "$good" -eq 1 ] && python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re,sys
+          root=Path('/tmp/fm-v98-live/app')
+          parts=[root/f'part{i:02d}' for i in range(17)]+[root/f'fix{i}' for i in range(17,21)]
+          try:
+              html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+              m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html)
+              assert m,'embedded importer missing from public packed app'
+              py=base64.b64decode(m.group(1)).decode('utf-8')
+              compile(py,'public_live_importer_v98.py','exec')
+              required=[
+                  'def _rich_is_retained_match_member(name:str):',
+                  "('.scm','.apm','.pkm')",
+                  'if not _rich_is_retained_match_member(name):',
+                  'non_retained_members_skipped',
+                  'unlabelled_rich_non_retained_member_names',
+                  'browser_build_payload_from_fs',
+                  'if len(stats)<36:continue',
+                  'range(18,23)',
+                  'v82-current-db-consensus-only-ability-non-authoritative'
+              ]
+              missing=[x for x in required if x not in py]
+              assert not missing,f'missing V98/live importer markers: {missing}'
+              print('PUBLIC V98 IMPORTER VERIFIED')
+          except Exception as e:
+              print(e,file=sys.stderr)
+              raise
+          PY
+            then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          [ "$ok" -eq 1 ] || { echo 'Public Pages never exposed the V98 packed importer' >&2; exit 1; }
+      - name: Record verified V98 public deployment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          sha="${RUN_HEAD_SHA:-${GITHUB_SHA}}"
+          stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          cat > /tmp/marker.json <<JSON
+          {
+            "verified_live_sha": "${sha}",
+            "verified_at": "${stamp}",
+            "verification": "v21-retained-rich-source-scope-v98",
+            "importer_rich_scope": "isolated-retained-match-members-only-v98",
+            "unlabelled_rich_allowed_extensions": [".scm", ".apm", ".pkm"],
+            "unlabelled_rich_excludes": "aggregate-sources-including-news.dat-and-play_fixture_manager.dat",
+            "root_cause_verified_on_gw6": "612-candidates-equals-54-retained-plus-524-news.dat-plus-34-play_fixture_manager.dat",
+            "update_guard": "v11-club-matched-history-repair",
+            "first_week_repair": "club-matched-decoded-player-history-plus-safe-side-repartition",
+            "import_compat": "v84-season-plus-36-row",
+            "dynamic_pricing": "v14-sustained-successful-updates",
+            "world_load": "automatic-versioned-local-cache-refresh-v2",
+            "world_apply": "same-pipeline-as-manual-load-v1",
+            "rollback": "v4-hard-runtime-reset-with-failed-debug-preservation",
+            "failed_import_debug": "rejected-payload-plus-validation-saved-to-indexeddb-before-reload-and-downloadable-after-reload",
+            "undo_import": "server-backup-restore-v2-auth-safe",
+            "player_pool": "registered-or-club-matched-senior-evidence-v5",
+            "history_identity_gate": "current-or-previous-canonical-club-must-match-history-fixture-side",
+            "registration_news": "canonical-boundary-v2",
+            "transfer_news": "proven-visible-club-change-only-v2",
+            "current_squad_decoder": "v82-consensus-only",
+            "retained_history": "v98-source-scoped-plus-v81-36-row-variable-squad",
+            "snapshot_boundary": "append-only-by-snapshot-date-v1"
+          }
+          JSON
+          content="$(base64 -w0 /tmp/marker.json)"
+          existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$existing_sha" ]; then
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V98 importer deployment ${sha::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+          else
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V98 importer deployment ${sha::7}" -f content="$content" -f branch=main >/dev/null
+          fi
