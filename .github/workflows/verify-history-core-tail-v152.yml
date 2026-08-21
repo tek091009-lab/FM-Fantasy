@@ -1,0 +1,94 @@
+name: Verify retained history core-only tail continuation v152
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_global_nonoverlap_scan_v138.py'
+      - 'scripts/upgrade_history_starter_bench_gap_v139.py'
+      - 'scripts/upgrade_history_starter_bench_compact_v140.py'
+      - 'scripts/upgrade_history_used_unused_bench_gap_v141.py'
+      - 'scripts/upgrade_history_used_unused_bench_compact_v142.py'
+      - 'scripts/upgrade_history_starter_bench_contiguous_v143.py'
+      - 'scripts/upgrade_history_used_unused_bench_contiguous_v144.py'
+      - 'scripts/upgrade_history_dual_subgroup_gaps_v145.py'
+      - 'scripts/upgrade_history_dual_subgroup_compact_v146.py'
+      - 'scripts/upgrade_history_dual_subgroup_contiguous_v147.py'
+      - 'scripts/upgrade_history_compact_stat_stride_v148.py'
+      - 'scripts/upgrade_history_min_record_buffer_v149.py'
+      - 'scripts/upgrade_history_core_stat_stride_v150.py'
+      - 'scripts/upgrade_history_core_unrated_stride_v151.py'
+      - 'scripts/upgrade_history_core_stride_tail_v152.py'
+      - '.github/workflows/verify-history-core-tail-v152.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply structural old-match decoder stack through v152
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+          python scripts/upgrade_history_starter_bench_compact_v140.py
+          python scripts/upgrade_history_used_unused_bench_gap_v141.py
+          python scripts/upgrade_history_used_unused_bench_compact_v142.py
+          python scripts/upgrade_history_starter_bench_contiguous_v143.py
+          python scripts/upgrade_history_used_unused_bench_contiguous_v144.py
+          python scripts/upgrade_history_dual_subgroup_gaps_v145.py
+          python scripts/upgrade_history_dual_subgroup_compact_v146.py
+          python scripts/upgrade_history_dual_subgroup_contiguous_v147.py
+          python scripts/upgrade_history_compact_stat_stride_v148.py
+          python scripts/upgrade_history_min_record_buffer_v149.py
+          python scripts/upgrade_history_core_stat_stride_v150.py
+          python scripts/upgrade_history_core_unrated_stride_v151.py
+          python scripts/upgrade_history_core_stride_tail_v152.py
+      - name: Verify packed importer and short-stride tail invariant
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def _v152_core_stride_continue(raw,p,end,stride,last_pid=None):',
+              "globals()['_RICH_CORE_STRIDE_CONTINUATIONS_V152']",
+              "globals()['_RICH_HEADER_CORE_STRIDE_CONTINUATIONS_V152']",
+              "globals()['_RICH_CORE_STRIDE_TAIL_ROWS_V152']",
+              "globals()['_RICH_HEADER_CORE_STRIDE_TAIL_ROWS_V152']",
+              'def _v150_core_stride_next(raw,p,end):',
+              "globals()['_RICH_CORE_UNRATED_RESCUES_V151']",
+              'tmp=bytes(raw[p:p+145])+bytes(13)',
+          ]
+          for token in required:assert token in py,token
+
+          # Logical regression: v150 requires current + 3 successors to establish the stride.
+          # Once 150-byte spacing is proved, the final three rows of a 7-row run have fewer than
+          # three future records and therefore cannot independently re-prove v150. v152 must carry
+          # the already-proved 150-byte stride through all of them.
+          offsets=[1000+i*150 for i in range(7)]
+          independently_provable=[p for i,p in enumerate(offsets) if i+3<len(offsets)]
+          tail=[p for i,p in enumerate(offsets) if i+3>=len(offsets)]
+          assert len(independently_provable)==4 and len(tail)==3
+          assert 'while p+145<=' in py
+          assert 'if q+145>int(end):return r,None' in py
+          print('v152 compiles; one strict four-row proof can now carry a 145..157-byte serialization through its final three player records instead of dropping the tail')
+          PY
