@@ -1,6 +1,6 @@
 (()=>{
  'use strict';
- const VERSION='canonical-publish-v3-launch-price-seal';
+ const VERSION='canonical-publish-v4-news-reactivation';
  const clone=v=>JSON.parse(JSON.stringify(v));
  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
  const norm=v=>String(v??'').trim().toLowerCase();
@@ -38,7 +38,6 @@
      window.FMImportModelV86?.transform,
      window.FMImpactRotationPricingV1?.transform,
      window.FMPremiumDefenderPricingV1?.transform,
-     window.FMPremiumDMPricingV1?.transform,
      window.FMAttackingOutputPricingV1?.transform
    ];
    for(const fn of chain){if(typeof fn==='function')fn(payload)}
@@ -47,6 +46,12 @@
    payload.meta.launch_pricing_seal_policy='season-only corrected launch prices sealed immediately before canonical publish; weekly price history untouched';
    try{if(typeof FM_DEBUG!=='undefined')FM_DEBUG.lastMeta=payload.meta;if(typeof fmDebugAdd==='function')fmDebugAdd('info','Final season launch prices sealed before publish.',{gk:payload.meta.gk_current_shirt_price_changes||0,rotation:payload.meta.impact_rotation_price_changes||0,def:payload.meta.premium_defender_price_changes||0,dm:payload.meta.premium_dm_price_changes||0,attack:payload.meta.proven_attacking_output_price_changes||0})}catch(_e){}
    return payload;
+ }
+ function reactivateNews(payload){
+   if(!payload)return;
+   try{window.FMNewsView?.markActive?.()}catch(_e){}
+   try{setTimeout(()=>window.FMRegistrationNewsGuard?.refresh?.(),0);setTimeout(()=>window.FMRegistrationNewsGuard?.refresh?.(),250)}catch(_e){}
+   try{window.dispatchEvent(new CustomEvent('fmcanonicalpublished',{detail:signature(payload)}))}catch(_e){}
  }
  async function reconcilePublishedWorld(payload,err){
    if(!timeoutLike(err)||typeof window.FMCloud?.loadWorld!=='function')return null;
@@ -58,6 +63,7 @@
        if(samePublish(expected,canonical)){
          console.warn('FM Fantasy publish response timed out, but the canonical world was committed successfully.',{version:VERSION,expected});
          try{if(typeof fmDebugAdd==='function')fmDebugAdd('warning','Publish response timed out but server commit was verified.',{version:VERSION,...expected})}catch(_e){}
+         reactivateNews(canonical);
          return canonical;
        }
      }catch(_e){}
@@ -84,6 +90,7 @@
          }
        }catch(e){console.warn('Canonical FM world could not be mirrored to IndexedDB',e)}
        const w=window.FMCloud.getWorld?.();if(w)w.payload=payload;
+       reactivateNews(payload);
        return payload;
      }
      return original(payload);
@@ -91,7 +98,7 @@
    wrapped.__fmCanonicalPublishWrapped=true;
    wrapped.__fmCanonicalPublishOriginal=original;
    try{fmStoredSet=wrapped}catch(e){console.warn('Could not install canonical import publish wrapper',e);return false}
-   window.FMCanonicalPublish={version:VERSION,replaceInPlace,signature,samePublish,reconcilePublishedWorld,sealSeasonLaunchPrices};
+   window.FMCanonicalPublish={version:VERSION,replaceInPlace,signature,samePublish,reconcilePublishedWorld,sealSeasonLaunchPrices,reactivateNews};
    return true;
  }
  let tries=0;const timer=setInterval(async()=>{tries++;if(await install()||tries>40)clearInterval(timer)},200);
