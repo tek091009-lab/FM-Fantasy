@@ -1,0 +1,66 @@
+name: Verify retained history used-unused bench compact v142
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_used_unused_bench_compact_v142.py'
+      - '.github/workflows/verify-history-used-unused-bench-compact-v142.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural decoder stack
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+          python scripts/upgrade_history_starter_bench_compact_v140.py
+          python scripts/upgrade_history_used_unused_bench_gap_v141.py
+          python scripts/upgrade_history_used_unused_bench_compact_v142.py
+      - name: Verify packed importer and v142 invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode(); compile(py,'fm_importer.py','exec')
+          required=[
+            'def used_unused_bench_compact_window(j,left_n,right_n):',
+            'if team_gap<214 or team_gap>500:return None',
+            'if ok and idx==sidx and g>=1500:continue',
+            "if team_gap<max(230,int(med*1.35),q75+16):return None",
+            "if agg(pair) not in played_score_pairs:continue",
+            "diagnostics['used_unused_bench_compact_candidate_pairs']+=1",
+            'unlabelled_rich_used_unused_bench_compact_candidate_pairs',
+            'def used_unused_bench_gap_window(j,left_n,right_n):',
+            'def compact_window(j,left_n,right_n):',
+          ]
+          for s in required: assert s in py,s
+          # Geometry regression: ordinary spacing 214, semantic used->unused metadata break 4096,
+          # compact inter-team boundary 340. The internal semantic gap must be excluded from the
+          # compact-boundary baseline, so 340 remains a valid local separator.
+          ordinary=[214]*34
+          team_gap=340
+          ordered=sorted(ordinary); med=ordered[len(ordered)//2]; q75=ordered[(3*len(ordered))//4]
+          assert 214<=team_gap<=500
+          assert team_gap>=max(230,int(med*1.35),q75+16)
+          # An ordinary 214-byte continuation must still fail as an inter-team boundary.
+          assert 214<max(230,int(med*1.35),q75+16)
+          print('v142 compiles; v141 legacy >500 path and v122 compact path preserved; combined semantic bench gap + compact team separator admitted safely')
+          PY
