@@ -1,6 +1,6 @@
 (()=>{
 'use strict';
-const VERSION='publish-score-barrier-v1-score-before-import-completes';
+const VERSION='publish-score-barrier-v2-score-before-import-completes';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let installed=false,last={version:VERSION,ok:false,error:'not run'};
 async function score(worldId){
@@ -21,8 +21,19 @@ async function score(worldId){
  }
  throw err||new Error('Manager scoring failed');
 }
-async function rollback(worldId){
- try{return await window.FMSessionRPC?.call?.('fmfantasy_undo_last_import',{p_world_id:worldId})}catch(e){console.error('[FM publish score barrier] rollback failed',e);return null}
+async function rollback(worldId,cloud){
+ try{
+  const undone=await window.FMSessionRPC?.call?.('fmfantasy_undo_last_import',{p_world_id:worldId});
+  if(!undone?.ok)return {ok:false,undo:undone,reloaded:false};
+  let reloaded=false;
+  try{
+   const restored=await cloud?.loadWorld?.(true);
+   const world=cloud?.getWorld?.();if(world)world.payload=restored||null;
+   reloaded=true;
+   try{window.dispatchEvent(new CustomEvent('fmworldloaded',{detail:{source:VERSION,rollback:true}}))}catch(_e){}
+  }catch(e){console.error('[FM publish score barrier] canonical reload after rollback failed',e)}
+  return {ok:true,undo:undone,reloaded};
+ }catch(e){console.error('[FM publish score barrier] rollback failed',e);return {ok:false,error:String(e?.message||e),reloaded:false}}
 }
 function install(){
  const cloud=window.FMCloud;if(!cloud||typeof cloud.publishWorld!=='function'||cloud.publishWorld.__fmScoreBarrier)return false;
@@ -33,15 +44,16 @@ function install(){
   const world=cloud.getWorld?.();if(!world?.id)return canonical;
   try{await score(world.id);return canonical}
   catch(e){
-   last={version:VERSION,ok:false,error:String(e?.message||e),at:new Date().toISOString()};
-   const undone=await rollback(world.id);
-   if(undone?.ok===false)console.error('[FM publish score barrier] undo returned failure',undone);
-   throw new Error(`Weekly import manager scoring failed${undone?' and the world was rolled back':''}: ${String(e?.message||e)}`);
+   const failure=String(e?.message||e),rb=await rollback(world.id,cloud);
+   last={version:VERSION,ok:false,error:failure,rollback:rb,at:new Date().toISOString()};
+   if(!rb.ok)throw new Error(`Weekly import manager scoring failed and rollback also failed: ${failure}`);
+   if(!rb.reloaded)throw new Error(`Weekly import manager scoring failed; server rollback succeeded but local canonical reload failed: ${failure}`);
+   throw new Error(`Weekly import manager scoring failed and the import was rolled back safely: ${failure}`);
   }
  };
  wrapped.__fmScoreBarrier=true;wrapped.__fmOriginal=original;cloud.publishWorld=wrapped;installed=true;return true;
 }
-window.FMPublishScoreBarrier={version:VERSION,install,score,status:()=>Object.assign({installed},last)};
+window.FMPublishScoreBarrier={version:VERSION,install,score,rollback,status:()=>Object.assign({installed},last)};
 let tries=0;const timer=setInterval(()=>{tries++;if(install()||tries>60)clearInterval(timer)},100);
 window.addEventListener('fmcloudready',()=>setTimeout(install,0));
 })();
