@@ -1,0 +1,109 @@
+name: Verify retained history fantasy-complete core stride v155
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_global_nonoverlap_scan_v138.py'
+      - 'scripts/upgrade_history_starter_bench_gap_v139.py'
+      - 'scripts/upgrade_history_starter_bench_compact_v140.py'
+      - 'scripts/upgrade_history_used_unused_bench_gap_v141.py'
+      - 'scripts/upgrade_history_used_unused_bench_compact_v142.py'
+      - 'scripts/upgrade_history_starter_bench_contiguous_v143.py'
+      - 'scripts/upgrade_history_used_unused_bench_contiguous_v144.py'
+      - 'scripts/upgrade_history_dual_subgroup_gaps_v145.py'
+      - 'scripts/upgrade_history_dual_subgroup_compact_v146.py'
+      - 'scripts/upgrade_history_dual_subgroup_contiguous_v147.py'
+      - 'scripts/upgrade_history_compact_stat_stride_v148.py'
+      - 'scripts/upgrade_history_min_record_buffer_v149.py'
+      - 'scripts/upgrade_history_core_stat_stride_v150.py'
+      - 'scripts/upgrade_history_core_unrated_stride_v151.py'
+      - 'scripts/upgrade_history_core_stride_tail_v152.py'
+      - 'scripts/upgrade_history_core_stride_unique_pid_v153.py'
+      - 'scripts/upgrade_history_core_stride_integrity_v154.py'
+      - 'scripts/upgrade_history_core_stride_fantasy_complete_v155.py'
+      - '.github/workflows/verify-history-core-fantasy-v155.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply structural old-match decoder stack through v155
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+          python scripts/upgrade_history_starter_bench_compact_v140.py
+          python scripts/upgrade_history_used_unused_bench_gap_v141.py
+          python scripts/upgrade_history_used_unused_bench_compact_v142.py
+          python scripts/upgrade_history_starter_bench_contiguous_v143.py
+          python scripts/upgrade_history_used_unused_bench_contiguous_v144.py
+          python scripts/upgrade_history_dual_subgroup_gaps_v145.py
+          python scripts/upgrade_history_dual_subgroup_compact_v146.py
+          python scripts/upgrade_history_dual_subgroup_contiguous_v147.py
+          python scripts/upgrade_history_compact_stat_stride_v148.py
+          python scripts/upgrade_history_min_record_buffer_v149.py
+          python scripts/upgrade_history_core_stat_stride_v150.py
+          python scripts/upgrade_history_core_unrated_stride_v151.py
+          python scripts/upgrade_history_core_stride_tail_v152.py
+          python scripts/upgrade_history_core_stride_unique_pid_v153.py
+          python scripts/upgrade_history_core_stride_integrity_v154.py
+          python scripts/upgrade_history_core_stride_fantasy_complete_v155.py
+      - name: Verify packed importer restores exact fantasy core without fabricating extended tail
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def _v155_prepare_core_fantasy_row(r):',
+              "r['historical_fantasy_core_complete_v155']=True",
+              "r['historical_extended_stats_complete_v155']=False",
+              "r['core_exact_goals_conceded_v155']",
+              "r['core_exact_saves_v155']",
+              "globals()['_RICH_CORE_ONLY_ROWS_RESTORED_V155']",
+              "globals()['_RICH_HEADER_CORE_ONLY_ROWS_RESTORED_V155']",
+              "'goals_conceded':c[21]",
+              "'save_component_1':c[50]",
+              "'save_component_2':c[51]",
+              "'save_component_3':c[52]",
+          ]
+          for token in required: assert token in py,token
+          # The short representation must retain exact core fantasy values but never claim the
+          # absent +151/+152/+157 extended bytes. They are explicitly nulled by v155.
+          hs=py.index('def _v155_prepare_core_fantasy_row(r):'); he=py.find('\ndef ',hs+1)
+          helper=py[hs:he]
+          assert "'shots_on_target_faced'" in helper
+          assert "r[k]=None" in helper
+          assert "core_exact_saves_v155" in helper
+          # Both scanner routes must append the prepared row before advancing the short stride.
+          gmark=py.index("globals()['_RICH_GLOBAL_NONOVERLAP_SCAN_V138']=1")
+          gs=py.rfind('\ndef ',0,gmark); ge=py.find('\ndef ',gmark)
+          g=py[gs:ge]
+          guard=g[g.index("if bool(r.get('core_only_v150')):"):]
+          assert guard.index('_v155_prepare_core_fantasy_row') < guard.index('out.append(r)')
+          hs2=py.index('def _v131_scan_stats(raw,start,end):'); he2=py.find('\ndef ',hs2+1)
+          h=py[hs2:he2]
+          guard=h[h.index("if bool(r.get('core_only_v150')):"):]
+          assert guard.index('_v155_prepare_core_fantasy_row') < guard.index('rows.append(r)')
+          print('v155 compiles: 145-byte short-stride rows keep exact core goals-conceded/saves and re-enter rich history; only unavailable extended diagnostics remain None')
+          PY
