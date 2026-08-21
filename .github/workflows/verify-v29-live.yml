@@ -1,0 +1,68 @@
+name: Verify V29 live
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check V29 JavaScript syntax
+        run: |
+          node --check sessionrpcbridge.js
+          node --check newsdiffbridge.js
+          node --check worldscorerauthv3.js
+      - name: Wait for V29 on public Pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://tek091009-lab.github.io/FM-Fantasy'
+          ok=0
+          for attempt in $(seq 1 60); do
+            stamp="${GITHUB_SHA}-${attempt}-$(date +%s)"
+            idx="$(curl -fsSL --max-time 20 "$base/index.html?v=$stamp" || true)"
+            rpc="$(curl -fsSL --max-time 20 "$base/sessionrpcbridge.js?v=$stamp" || true)"
+            scorer="$(curl -fsSL --max-time 20 "$base/worldscorerauthv3.js?v=$stamp" || true)"
+            news="$(curl -fsSL --max-time 20 "$base/newsdiffbridge.js?v=$stamp" || true)"
+            if printf '%s' "$idx" | grep -q 'fm-deploy-v29-shared-auth-session-scoring-news' \
+              && printf '%s' "$idx" | grep -q 'sessionrpcbridge.js?v=1' \
+              && printf '%s' "$idx" | grep -q 'worldscorerauthv3.js?v=1' \
+              && printf '%s' "$idx" | grep -q 'newsdiffbridge.js?v=3' \
+              && printf '%s' "$rpc" | grep -q 'session-rpc-bridge-v1-persisted-auth-jwt' \
+              && printf '%s' "$scorer" | grep -q 'world-scorer-auth-v3-shared-session-rpc' \
+              && printf '%s' "$news" | grep -q 'news-diff-bridge-v3-shared-session-rpc'; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          [ "$ok" -eq 1 ] || { echo 'V29 did not become live in time' >&2; exit 1; }
+      - name: Record verified V29
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v29
+          cat > /tmp/v29/live.json <<JSON
+          {
+            "verified_live_sha": "${GITHUB_SHA}",
+            "verified_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "version": "v29-shared-auth-session-scoring-news",
+            "manager_scoring": "shared persisted authenticated JWT -> creator list/save RPC",
+            "transfer_news": "shared persisted authenticated JWT -> last-import read-only diff RPC",
+            "manual_world_or_manager_mutation": "none"
+          }
+          JSON
+          content="$(base64 -w0 /tmp/v29/live.json)"
+          old="$(gh api repos/${GITHUB_REPOSITORY}/contents/.deploy/v29-live.json?ref=main --jq .sha 2>/dev/null || true)"
+          if [ -n "$old" ]; then
+            gh api --method PUT repos/${GITHUB_REPOSITORY}/contents/.deploy/v29-live.json -f message="Record verified V29 live" -f content="$content" -f sha="$old" -f branch=main >/dev/null
+          else
+            gh api --method PUT repos/${GITHUB_REPOSITORY}/contents/.deploy/v29-live.json -f message="Record verified V29 live" -f content="$content" -f branch=main >/dev/null
+          fi
