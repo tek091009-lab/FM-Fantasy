@@ -1,6 +1,6 @@
 (()=>{
 'use strict';
-const VERSION='registration-news-v4-canonical-render-arrival-diff';
+const VERSION='registration-news-v5-canonical-render-backup-fallback';
 const arr=v=>Array.isArray(v)?v:[];
 const norm=v=>String(v??'').trim().toLowerCase().replace(/\s+/g,' ');
 const sid=p=>String(p?.pid??p?.player_id??p?.person_id??p?.eid??p?.id??'');
@@ -60,7 +60,7 @@ function buildEvidence(next,old){
 function installPublishGuard(){const c=window.FMCloud;if(!c||c.__registrationNewsV4||typeof c.publishWorld!=='function')return false;c.__registrationNewsV4=true;c.__registrationNewsV3=true;const original=c.publishWorld.bind(c);c.publishWorld=async(payload,...args)=>{if(!payload)return original(payload,...args);const old=JSON.parse(JSON.stringify(c.getWorld?.()?.payload||null));buildEvidence(payload,old);return original(payload,...args)};return true}
 function currentPayload(){try{return window.FMCloud?.getWorld?.()?.payload||null}catch(_e){return null}}
 function currentPlayers(){return new Map(arr(currentPayload()?.players).map(p=>[sid(p),p]).filter(([id])=>id))}
-function transferEvents(){return arr(currentPayload()?.meta?.transfer_news_guard?.events)}
+function transferEvents(){const canonical=arr(currentPayload()?.meta?.transfer_news_guard?.events);return canonical.length?canonical:arr(window.FMNewsDiffBridge?.events?.())}
 function registrationEvents(){return arr(currentPayload()?.meta?.registration_news?.events)}
 function activateNews(){try{if(currentPayload())window.FMNewsView?.markActive?.()}catch(_e){}}
 function ensureTransferHost(root=document){const card=root.querySelector?.('#newsTransfers');if(!card)return null;let host=card.querySelector('.fmCanonicalTransferRows');if(host)return {card,host};host=document.createElement('div');host.className='fmCanonicalTransferRows';const search=card.querySelector('[data-news-search]'),head=card.querySelector('.newsHead');(search||head)?.insertAdjacentElement('afterend',host);if(!host.parentElement)card.appendChild(host);return {card,host}}
