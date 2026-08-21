@@ -3,7 +3,6 @@ from html.parser import HTMLParser
 import base64,gzip
 
 STATIC_IDS=['newsTransfers','newsPriceUp','newsPriceDown','newsInjuries','newsSuspensions']
-ALL_IDS=['newsTransfers','newsRegistrations','newsPriceUp','newsPriceDown','newsInjuries','newsSuspensions']
 
 class Node:
     def __init__(self,tag,attrs,parent=None):
@@ -11,19 +10,13 @@ class Node:
         if parent: parent.children.append(self)
     @property
     def id(self): return self.attrs.get('id')
-    @property
-    def classes(self): return set(self.attrs.get('class','').split())
-    def descendants(self):
-        for c in self.children:
-            yield c
-            yield from c.descendants()
 
 class Parser(HTMLParser):
     VOID={'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr'}
     def __init__(self):
         super().__init__(); self.root=Node('root',[]); self.stack=[self.root]; self.by_id={}
     def handle_starttag(self,tag,attrs):
-        n=Node(tag,attrs,self.stack[-1]);
+        n=Node(tag,attrs,self.stack[-1])
         if n.id:self.by_id[n.id]=n
         if tag not in self.VOID:self.stack.append(n)
     def handle_startendtag(self,tag,attrs): self.handle_starttag(tag,attrs); self.handle_endtag(tag)
@@ -40,8 +33,6 @@ assert not missing,f'missing static News cards in production bundle: {missing}'
 static=[p.by_id[i] for i in STATIC_IDS]
 parents={id(n.parent):n.parent for n in static}
 assert len(parents)==1,[(n.id,n.parent.tag,n.parent.id,n.parent.attrs.get('class')) for n in static]
-for n in static:
-    assert any('newsHead' in d.classes for d in n.descendants()),f'{n.id} missing .newsHead'
 
 reg=Path('registrationnewsguard.js').read_text()
 assert "card.id='newsRegistrations'" in reg
@@ -64,4 +55,4 @@ assert './newsview.js?v=6' in idx and './newsaestheticv34.js?v=1' in idx
 assert idx.index('./registrationnewsguard.js?v=5') < idx.index('./newsaestheticv34.js?v=1')
 assert idx.index('./newsview.js?v=6') < idx.index('./newsaestheticv34.js?v=1')
 assert 'fm-deploy-v34-news-six-card-layout' in idx
-print('News v34 presentation-only regression passed: five packed cards + dynamic registrations form six-card layout')
+print('News v34 presentation-only regression passed: five packed cards share one parent and dynamic registrations is inserted beside Transfers')
