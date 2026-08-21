@@ -1,0 +1,47 @@
+name: Fix transfer rollover v10
+on:
+  push:
+    paths:
+      - 'scripts/fix_transfer_rollover_v10.py'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove transfer-confirm rollover
+        run: python scripts/fix_transfer_rollover_v10.py
+      - name: Verify transfer confirmation cannot mint FT
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          start=html.index('function confirmTransfers()')
+          end=html.find('\nfunction ',start+10)
+          fn=html[start:end if end!=-1 else len(html)]
+          if 'if(Number(state.lastTransferRollGW||0)<gw)' in fn:
+              raise SystemExit('confirmTransfers still contains gameweek rollover')
+          if 'state.lastTransferRollGW=gw' in fn:
+              raise SystemExit('confirmTransfers still mutates lastTransferRollGW')
+          if 'state.lockedSquad=[...state.squad]' not in fn:
+              raise SystemExit('confirmTransfers lock step missing')
+          if 'state.freeTransfers' not in fn:
+              raise SystemExit('confirmTransfers no longer spends persisted FT balance')
+          print('confirmTransfers no longer creates a free transfer')
+          PY
+      - name: Commit production bundle
+        shell: bash
+        run: |
+          if git diff --quiet -- app; then
+            echo 'No production changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app
+          git commit -m 'Stop transfer confirmation minting a free transfer'
+          git push
