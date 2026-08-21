@@ -1,14 +1,13 @@
 {
-  "verified_commit_sha": "2dd7fa550135a4f9b5a40bbacba57190e7cf58cf",
-  "prepared_at": "2026-08-21T10:18:00Z",
-  "verification": "v28-1-authenticated-world-manager-scoring-league-sync",
-  "manager_scoring": "creator-wide scorer uses authenticated creator RPCs to read and save every submitted manager state",
-  "manager_scoring_persistence": "GW points are written into authoritative top-level pointsHistory and totalPoints, not only local UI state",
-  "league_sync": "authoritative manager totals, pointsHistory, lineup, captain and vice are propagated into every nested league member snapshot",
-  "current_gw5_regression": "TKFantasy expected 30; Kian expected 66",
-  "viewed_captain_display": "read-only viewed manager context; Kian captain Ivanovic displays 32 from raw 16 without double-counting team total",
-  "world_database_mutation": "none by assistant; scorer runs from creator client after deploy/refresh",
-  "new_entrant_pricing": "Rio canonical price 7.5m",
-  "weekly_history_boundary": "canonical-through-previous-completed-gameweek-v12",
-  "update_guard": "v11-club-matched-history-repair"
+  "verified_live_sha": "6ab8ada48d5b2f117f97b6d2f53f64a8e9855e6d",
+  "verified_at": "2026-08-21T17:25:49Z",
+  "verification": "v33-core-integrity",
+  "database_import": "canonical publish is server authoritative and weekly history merge uses indexed player maps",
+  "team_state": "manager hydrate restores critical saved squad, locked transfer baseline, bank, gameweek, points and FT state while preserving imported-world News",
+  "transfers": "confirmed teams seed a real 15-player locked baseline; transfer confirmation cannot mint the current gameweek FT",
+  "leagues": "server scoring synchronises member identity and points using user id with team/name/squad fallbacks",
+  "weekly_import": "publish is not considered complete until manager scoring succeeds; scoring failure retries then rolls back and reloads the previous canonical world",
+  "undo": "controlled import rollback may regress the canonical world while ordinary imports may not",
+  "news": "V32.8 News persistence and refresh protections retained",
+  "regressions": "season publish, squad registration, News persistence, manager critical state, transfer baseline, FT spend, publish scoring barrier, rollback reload, packed importer compile"
 }
