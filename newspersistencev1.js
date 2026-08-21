@@ -1,6 +1,6 @@
 (()=>{
 'use strict';
-const VERSION='news-persistence-v2-final-import-snapshot-only';
+const VERSION='news-persistence-v3-state-global-dom-import-only';
 const PREFIX='fmFantasyNewsSnapshotV1:';
 const SECTION_IDS=['newsTransfers','newsRegistrations','newsPriceUp','newsPriceDown','newsInjuries','newsSuspensions'];
 const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
@@ -13,6 +13,7 @@ function worldRef(){try{return window.FMCloud?.getWorld?.()||null}catch(_e){retu
 function payloadRef(){try{return worldRef()?.payload||null}catch(_e){return null}}
 function importMode(){try{return norm(window.__FM_IMPORT_MODE_ACTIVE||'')}catch(_e){return ''}}
 function key(){const id=String(worldRef()?.id||'');return id?PREFIX+id:''}
+function globalNewsRef(){try{if(Array.isArray(window.NEWS))return window.NEWS;if(typeof NEWS!=='undefined'&&Array.isArray(NEWS))return NEWS}catch(_e){}return null}
 function signature(payload=payloadRef()){
  const m=payload?.meta||{},w=worldRef()||{};
  return [String(m.fingerprint||''),String(m.snapshot_date||''),String(m.completed_gameweek||''),String(m.played_results||''),String(arr(payload?.players).length),String(w.payload_version||'')].join('|');
@@ -27,10 +28,11 @@ function captureDom(){
  return {sections,stamp:stamp?.textContent||'',count};
 }
 function captureStateNews(){const st=stateRef();return clone(st?.news)}
+function captureGlobalNews(){const n=globalNewsRef();return n?clone(n):undefined}
 function canonicalSnapshot(payload=payloadRef()){
  const x=payload?.meta?.news_snapshot_v1;
  if(!x||typeof x!=='object')return null;
- return {version:String(x.version||VERSION),signature:String(x.signature||''),snapshot_date:String(x.snapshot_date||payload?.meta?.snapshot_date||''),fingerprint:String(x.fingerprint||payload?.meta?.fingerprint||''),import_mode:String(x.import_mode||''),state_news:clone(x.state_news),dom:null};
+ return {version:String(x.version||VERSION),signature:String(x.signature||''),snapshot_date:String(x.snapshot_date||payload?.meta?.snapshot_date||''),fingerprint:String(x.fingerprint||payload?.meta?.fingerprint||''),import_mode:String(x.import_mode||''),state_news:clone(x.state_news),global_news:clone(x.global_news),dom:null};
 }
 function compatible(snap,payload=payloadRef()){
  if(!snap||!payload)return false;
@@ -58,14 +60,20 @@ function applyStateNews(news){
  try{if(window.FMCloud?.managerState&&JSON.stringify(window.FMCloud.managerState.news)!==JSON.stringify(news)){window.FMCloud.managerState.news=clone(news);changed=true}}catch(_e){}
  return changed;
 }
+function applyGlobalNews(news){
+ if(news===undefined)return false;
+ const current=globalNewsRef();
+ if(current){if(JSON.stringify(current)===JSON.stringify(news))return false;current.length=0;current.push(...clone(arr(news)));return true}
+ try{window.NEWS=clone(arr(news));return true}catch(_e){return false}
+}
 function restore(){
  if(restoring||Date.now()<commitWindowUntil)return false;
  if(!payloadRef()){clearLocal();return false}
  const snap=chooseSnapshot();if(!snap)return false;
  committed=snap;restoring=true;
  try{
-  const stateChanged=applyStateNews(snap.state_news);
-  if(stateChanged)try{if(typeof renderAll==='function')renderAll()}catch(_e){}
+  const changed=applyStateNews(snap.state_news)||applyGlobalNews(snap.global_news);
+  if(changed)try{if(typeof renderAll==='function')renderAll()}catch(_e){}
   if(snap.dom)restoreDom(snap.dom);
   try{window.FMRegistrationNewsGuard?.refresh?.()}catch(_e){}
   return true;
@@ -73,20 +81,19 @@ function restore(){
 }
 function persistFinalImportSnapshot(){
  if(!committed||Date.now()>commitWindowUntil)return;
- const news=captureStateNews(),dom=captureDom();
- committed={...committed,state_news:clone(news),dom:dom.count?dom:committed.dom};
+ const stateNews=captureStateNews(),globalNews=captureGlobalNews(),dom=captureDom();
+ committed={...committed,state_news:clone(stateNews),global_news:clone(globalNews),dom:dom.count?dom:committed.dom};
  writeLocal(committed);
- try{const p=payloadRef();if(p?.meta?.news_snapshot_v1)p.meta.news_snapshot_v1.state_news=clone(news)}catch(_e){}
+ try{const p=payloadRef();if(p?.meta?.news_snapshot_v1){p.meta.news_snapshot_v1.state_news=clone(stateNews);p.meta.news_snapshot_v1.global_news=clone(globalNews)}}catch(_e){}
 }
 function makeImportSnapshot(payload,mode){
- const stNews=captureStateNews();
- return {version:VERSION,signature:signature(payload),snapshot_date:String(payload?.meta?.snapshot_date||''),fingerprint:String(payload?.meta?.fingerprint||''),import_mode:mode,state_news:clone(stNews),dom:null};
+ return {version:VERSION,signature:signature(payload),snapshot_date:String(payload?.meta?.snapshot_date||''),fingerprint:String(payload?.meta?.fingerprint||''),import_mode:mode,state_news:captureStateNews(),global_news:captureGlobalNews(),dom:null};
 }
 function sealIntoPayload(payload,mode){
  if(!payload||!mode)return null;
  payload.meta=payload.meta||{};
  const snap=makeImportSnapshot(payload,mode);
- payload.meta.news_snapshot_v1={version:VERSION,signature:snap.signature,snapshot_date:snap.snapshot_date,fingerprint:snap.fingerprint,import_mode:mode,state_news:clone(snap.state_news)};
+ payload.meta.news_snapshot_v1={version:VERSION,signature:snap.signature,snapshot_date:snap.snapshot_date,fingerprint:snap.fingerprint,import_mode:mode,state_news:clone(snap.state_news),global_news:clone(snap.global_news)};
  pendingImport=snap;
  return snap;
 }
@@ -126,7 +133,7 @@ function installQueueGuard(){
  queueInstalled=true;return true;
 }
 function scheduleRestore(){for(const ms of [0,80,250,700,1500])setTimeout(restore,ms)}
-window.FMNewsPersistence={version:VERSION,restore,readLocal,chooseSnapshot,captureDom,captureStateNews,clearLocal,persistFinalImportSnapshot,status:()=>({version:VERSION,queueInstalled,storeInstalled,hasCommitted:!!committed,commitWindow:Math.max(0,commitWindowUntil-Date.now()),local:readLocal(),canonical:canonicalSnapshot()})};
+window.FMNewsPersistence={version:VERSION,restore,readLocal,chooseSnapshot,captureDom,captureStateNews,captureGlobalNews,clearLocal,persistFinalImportSnapshot,status:()=>({version:VERSION,queueInstalled,storeInstalled,hasCommitted:!!committed,commitWindow:Math.max(0,commitWindowUntil-Date.now()),local:readLocal(),canonical:canonicalSnapshot()})};
 window.addEventListener('fmcloudready',()=>{installQueueGuard();installStoreWrapper();scheduleRestore()});
 window.addEventListener('fmworldloaded',scheduleRestore);
 window.addEventListener('focus',scheduleRestore);
