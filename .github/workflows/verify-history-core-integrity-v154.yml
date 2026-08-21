@@ -1,0 +1,103 @@
+name: Verify retained history core-only integrity v154
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_global_nonoverlap_scan_v138.py'
+      - 'scripts/upgrade_history_starter_bench_gap_v139.py'
+      - 'scripts/upgrade_history_starter_bench_compact_v140.py'
+      - 'scripts/upgrade_history_used_unused_bench_gap_v141.py'
+      - 'scripts/upgrade_history_used_unused_bench_compact_v142.py'
+      - 'scripts/upgrade_history_starter_bench_contiguous_v143.py'
+      - 'scripts/upgrade_history_used_unused_bench_contiguous_v144.py'
+      - 'scripts/upgrade_history_dual_subgroup_gaps_v145.py'
+      - 'scripts/upgrade_history_dual_subgroup_compact_v146.py'
+      - 'scripts/upgrade_history_dual_subgroup_contiguous_v147.py'
+      - 'scripts/upgrade_history_compact_stat_stride_v148.py'
+      - 'scripts/upgrade_history_min_record_buffer_v149.py'
+      - 'scripts/upgrade_history_core_stat_stride_v150.py'
+      - 'scripts/upgrade_history_core_unrated_stride_v151.py'
+      - 'scripts/upgrade_history_core_stride_tail_v152.py'
+      - 'scripts/upgrade_history_core_stride_unique_pid_v153.py'
+      - 'scripts/upgrade_history_core_stride_integrity_v154.py'
+      - '.github/workflows/verify-history-core-integrity-v154.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply structural old-match decoder stack through v154
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+          python scripts/upgrade_history_starter_bench_compact_v140.py
+          python scripts/upgrade_history_used_unused_bench_gap_v141.py
+          python scripts/upgrade_history_used_unused_bench_compact_v142.py
+          python scripts/upgrade_history_starter_bench_contiguous_v143.py
+          python scripts/upgrade_history_used_unused_bench_contiguous_v144.py
+          python scripts/upgrade_history_dual_subgroup_gaps_v145.py
+          python scripts/upgrade_history_dual_subgroup_compact_v146.py
+          python scripts/upgrade_history_dual_subgroup_contiguous_v147.py
+          python scripts/upgrade_history_compact_stat_stride_v148.py
+          python scripts/upgrade_history_min_record_buffer_v149.py
+          python scripts/upgrade_history_core_stat_stride_v150.py
+          python scripts/upgrade_history_core_unrated_stride_v151.py
+          python scripts/upgrade_history_core_stride_tail_v152.py
+          python scripts/upgrade_history_core_stride_unique_pid_v153.py
+          python scripts/upgrade_history_core_stride_integrity_v154.py
+      - name: Verify packed importer quarantines incomplete core-only rows
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              "r['historical_stats_complete_v154']=False",
+              "if bool(r.get('core_only_v150')):",
+              "globals()['_RICH_CORE_ONLY_ROWS_QUARANTINED_V154']",
+              "globals()['_RICH_HEADER_CORE_ONLY_ROWS_QUARANTINED_V154']",
+              "'team_goals_conceded_while_on_pitch'",
+              "'shots_on_target_faced'",
+              'def _v150_core_stride_next(raw,p,end):',
+              'def _v152_core_stride_continue(raw,p,end,stride,last_pid=None):',
+          ]
+          for token in required: assert token in py,token
+          # Critical integrity invariant: v150's 145-byte isolation deliberately has no real bytes
+          # 145..157, so those rows may be structural evidence but cannot be counted as complete
+          # player-level history. The quarantine must execute before both rich-list append sites.
+          gmark=py.index("globals()['_RICH_GLOBAL_NONOVERLAP_SCAN_V138']=1")
+          gs=py.rfind('\ndef ',0,gmark); ge=py.find('\ndef ',gmark)
+          g=py[gs:ge]
+          assert g.index("if bool(r.get('core_only_v150')):") < g.index('out.append(r)')
+          hs=py.index('def _v131_scan_stats(raw,start,end):'); he=py.find('\ndef ',hs+1)
+          h=py[hs:he]
+          assert h.index("if bool(r.get('core_only_v150')):") < h.index('rows.append(r)')
+          # These offsets are real decoded fields in the normal representation and must never be
+          # silently fabricated as zero by the core-only route.
+          assert "'team_goals_conceded_while_on_pitch':c[146]" in py
+          assert "'shots_on_target_against_team':c[151]" in py
+          assert "'total_shots_on_target_against_team':c[152]" in py
+          assert "'shots_on_target_faced':c[157]" in py
+          print('v154 compiles and quarantines 145-byte core-only rows before rich history; missing defensive/GK tail fields remain explicit evidence rather than fabricated zeros')
+          PY
