@@ -31,13 +31,16 @@ jobs:
         run: |
           node scripts/test_season_publish_v84.js
           node scripts/test_squad_registration_policy_v3.js
-          node scripts/test_news_persistence_v6.js
+          node scripts/test_news_persistence_v7.js
           if [ -f scripts/test_weekly_boundary_v12.js ]; then node scripts/test_weekly_boundary_v12.js; fi
       - name: Check current JavaScript syntax
         run: |
           node --check sessionrpcbridge.js
           node --check newsdiffbridge.js
-          node --check newspersistencev4.js
+          node --check newsview.js
+          node --check cloudapply.js
+          node --check newspersistencev5.js
+          node --check newsworldrecovery.js
           node --check servermanagerscoreclientv1.js
           node --check managerstateauthorityv1.js
           node --check captainpointsdisplay.js
@@ -63,7 +66,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify V32.6 public deployment
+      - name: Verify V32.7 public deployment
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -74,24 +77,29 @@ jobs:
           for attempt in $(seq 1 60); do
             stamp="${GITHUB_SHA}-${attempt}-$(date +%s)"
             idx="$(curl -fsSL --max-time 20 "$base/index.html?v=$stamp" || true)"
-            persist="$(curl -fsSL --max-time 20 "$base/newspersistencev4.js?v=$stamp" || true)"
-            news="$(curl -fsSL --max-time 20 "$base/newsdiffbridge.js?v=$stamp" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-v32-6-authoritative-news-persistence' \
-              && printf '%s' "$idx" | grep -q 'newspersistencev4.js?v=6' \
-              && ! printf '%s' "$idx" | grep -q 'newspersistencev3.js?v=5' \
-              && printf '%s' "$persist" | grep -q 'news-persistence-v6-import-snapshot-authority' \
-              && printf '%s' "$persist" | grep -q 'Saving is passive/read-only and is therefore allowed while the import flag is still active' \
-              && printf '%s' "$persist" | grep -q 'authoritative for this exact imported FM database' \
-              && printf '%s' "$persist" | grep -q 'Refresh/load mechanics such as payload_version are intentionally excluded' \
-              && ! printf '%s' "$persist" | grep -q 'fmStoredSet=' \
-              && ! printf '%s' "$persist" | grep -q 'queueManagerSave=' \
-              && printf '%s' "$news" | grep -q 'news-diff-bridge-v4-public-readonly-rpc'; then
+            persist="$(curl -fsSL --max-time 20 "$base/newspersistencev5.js?v=$stamp" || true)"
+            view="$(curl -fsSL --max-time 20 "$base/newsview.js?v=$stamp" || true)"
+            recover="$(curl -fsSL --max-time 20 "$base/newsworldrecovery.js?v=$stamp" || true)"
+            cloud="$(curl -fsSL --max-time 20 "$base/cloudapply.js?v=$stamp" || true)"
+            if printf '%s' "$idx" | grep -q 'fm-deploy-v32-7-news-lifecycle-authority' \
+              && printf '%s' "$idx" | grep -q 'newsview.js?v=6' \
+              && printf '%s' "$idx" | grep -q 'newspersistencev5.js?v=7' \
+              && printf '%s' "$idx" | grep -q 'newsworldrecovery.js?v=1' \
+              && ! printf '%s' "$idx" | grep -q 'newspersistencev4.js?v=6' \
+              && printf '%s' "$persist" | grep -q 'news-persistence-v7-import-news-authority' \
+              && printf '%s' "$persist" | grep -q 'active_statuses:active' \
+              && printf '%s' "$persist" | grep -q 'recoverFromPayload' \
+              && printf '%s' "$view" | grep -q 'news-view-v6-payload-aware-clear-state' \
+              && printf '%s' "$view" | grep -q 'if(hasPayload()){markActive();return false}' \
+              && printf '%s' "$recover" | grep -q 'news-world-recovery-v1-canonical-payload-authority' \
+              && printf '%s' "$recover" | grep -q 'FMCloud.loadWorld(true)' \
+              && printf '%s' "$cloud" | grep -q 'cloud-apply-v2-canonical-world-beats-stale-clear-flag'; then
               ok=1; break
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'V32.6 did not become live' >&2; exit 1; }
-      - name: Record verified V32.6 deployment
+          [ "$ok" -eq 1 ] || { echo 'V32.7 did not become live' >&2; exit 1; }
+      - name: Record verified V32.7 deployment
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,10 +110,12 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v32-6-authoritative-news-persistence",
-            "news_persistence": "meaningful News is passively snapshotted as soon as it exists during or immediately after an FM import; the snapshot is authoritative across refresh for that exact imported database",
-            "news_change_policy": "refresh/load cannot invalidate News through payload_version or native rerendering; restore is blocked during imports and the next import replaces the snapshot",
-            "news_regression_test": "visible News saves even while import mode remains active; payload_version changes do not invalidate it; refresh restores the saved snapshot; the next import replaces it",
+            "verification": "v32-7-news-lifecycle-authority",
+            "news_clear_lifecycle": "a non-null canonical FM world automatically removes stale clear markers; the News clear observer is forbidden from wiping sections while a real payload exists",
+            "news_persistence": "state.news, state.activeStatuses, global NEWS and rendered News DOM are persisted for the imported database; season injury/suspension News can be rebuilt directly from the imported player availability payload even without a prior snapshot",
+            "news_refresh_policy": "refresh immediately restores the matching imported News model and cannot be blocked by a capture window or payload_version; late native rerenders are guarded",
+            "news_world_recovery": "canonical world loading deliberately ignores a stale local clear marker so a successful import cannot be hidden on the next refresh",
+            "news_regression_test": "verifies full active-status persistence, payload recovery hooks, payload-aware clear handling and canonical-world stale-clear recovery",
             "transfer_news": "server BEFORE-update canonical transfer-news trigger plus public read-only current-import fallback",
             "manager_scoring": "server-authoritative completed-gameweek trigger",
             "weekly_history_boundary": "canonical-through-previous-completed-gameweek-v12"
@@ -114,7 +124,7 @@ jobs:
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.6 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.7 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.6 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.7 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
