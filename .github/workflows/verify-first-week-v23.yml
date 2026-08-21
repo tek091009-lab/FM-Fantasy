@@ -1,0 +1,84 @@
+name: Verify V23 first-week post-publish fixes
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'registrationnewsguard.js'
+      - 'managernewstransaction.js'
+      - 'newentrantpricingv1.js'
+      - 'managerscorebridgev1.js'
+      - 'scripts/test_first_week_postpublish_v23.js'
+      - 'index.html'
+      - '.github/workflows/verify-first-week-v23.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Run first-week post-publish regressions
+        run: node scripts/test_first_week_postpublish_v23.js
+      - name: Wait for exact V23 production shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://tek091009-lab.github.io/FM-Fantasy'
+          ok=0
+          for attempt in $(seq 1 90); do
+            q="v23=${GITHUB_SHA}-${attempt}"
+            idx="$(curl -fsSL --max-time 20 "$base/index.html?$q" || true)"
+            reg="$(curl -fsSL --max-time 20 "$base/registrationnewsguard.js?$q" || true)"
+            news="$(curl -fsSL --max-time 20 "$base/managernewstransaction.js?$q" || true)"
+            price="$(curl -fsSL --max-time 20 "$base/newentrantpricingv1.js?$q" || true)"
+            score="$(curl -fsSL --max-time 20 "$base/managerscorebridgev1.js?$q" || true)"
+            if printf '%s' "$idx" | grep -q 'fm-deploy-v23-manager-score-transfer-entry-pricing' \
+              && printf '%s' "$idx" | grep -q 'registrationnewsguard.js?v=3' \
+              && printf '%s' "$idx" | grep -q 'managernewstransaction.js?v=2' \
+              && printf '%s' "$idx" | grep -q 'newentrantpricingv1.js?v=1' \
+              && printf '%s' "$idx" | grep -q 'managerscorebridgev1.js?v=1' \
+              && printf '%s' "$reg" | grep -q 'registration-news-v3-success-boundary-transfer-arrivals' \
+              && printf '%s' "$reg" | grep -q 'validated_import_arrival' \
+              && printf '%s' "$news" | grep -q 'manager-news-transaction-v2-success-only-transfer-handoff' \
+              && printf '%s' "$news" | grep -q '_transfer_news_candidates_v3' \
+              && printf '%s' "$price" | grep -q 'new-entrant-pricing-v1-arrival-window-role' \
+              && printf '%s' "$price" | grep -q 'initial Fantasy entry price only' \
+              && printf '%s' "$score" | grep -q 'manager-score-bridge-v1-valid-lineup-authority' \
+              && printf '%s' "$score" | grep -q 'fmfantasy_creator_list_manager_states'; then
+              ok=1; break
+            fi
+            sleep 5
+          done
+          [ "$ok" -eq 1 ] || { echo 'V23 post-publish fixes did not become live' >&2; exit 1; }
+      - name: Record verified V23 deployment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          cat > /tmp/marker.json <<JSON
+          {
+            "verified_live_sha": "${GITHUB_SHA}",
+            "verified_at": "${stamp}",
+            "verification": "v23-first-week-manager-score-transfer-entry-pricing",
+            "manager_scoring": "creator update scores every valid 15-man/11-starter submitted lineup even when stale teamConfirmed is false",
+            "manager_scoring_trigger": "immediate after successful canonical publish plus normal retry loop",
+            "transfer_news": "v3 successful-boundary canonical club changes plus validated import-observed new-league arrivals",
+            "transfer_news_persistence": "v2 transient rows handed into canonical validation before publish; failed imports still discard pending news",
+            "new_entrant_pricing": "v1 ability-team-arrival-role initial pricing; no goals-assists-points-ratings-or-injury effect",
+            "rio_ngumoha_regression": "CA125 Millwall MID 100pct first-arrival match role projects 7.5m not 4.5m backup cap",
+            "new_registration": "registration-news-v3",
+            "weekly_history_boundary": "canonical-through-previous-completed-gameweek-v12",
+            "update_guard": "v11-club-matched-history-repair",
+            "importer_rich_scope": "isolated-retained-match-members-only-v98",
+            "dynamic_pricing": "v14-sustained-successful-updates",
+            "rollback": "v4-hard-runtime-reset-with-failed-debug-preservation"
+          }
+          JSON
+          content="$(base64 -w0 /tmp/marker.json)"
+          existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V23 first-week post-publish deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
