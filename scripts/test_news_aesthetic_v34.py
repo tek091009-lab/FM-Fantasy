@@ -35,6 +35,8 @@ parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for
 html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
 p=Parser(); p.feed(html)
 missing=[i for i in IDS if i not in p.by_id]
+if missing:
+    print('production News ids:',sorted(i for i in p.by_id if i.lower().startswith('news')))
 assert not missing,f'missing News cards in production bundle: {missing}'
 nodes=[p.by_id[i] for i in IDS]
 parents={id(n.parent):n.parent for n in nodes}
