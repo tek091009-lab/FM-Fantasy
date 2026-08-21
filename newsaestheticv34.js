@@ -1,38 +1,42 @@
 (()=>{
 'use strict';
-/* Presentation-only News layout. Do not read or mutate fantasy/import/manager state here. */
-const VERSION='news-aesthetic-v34-six-equal-cards';
+/* Presentation-only News layout. No fantasy state is read or mutated here. */
+const VERSION='news-aesthetic-v35-full-width-parent-grid';
+const GRID_ID='fmNewsSixGrid';
 const IDS=['newsTransfers','newsRegistrations','newsPriceUp','newsPriceDown','newsInjuries','newsSuspensions'];
 const EMPTY_RX=/\b(?:no confirmed transfers|no transfers|no registration|no new registration|no changes|no active players|no news available|no items|nothing to show)\b/i;
-const VIEW_RX=/^(?:show|view)\s*all(?:\s+\d+)?$/i;
 let raf=0,busy=false;
 
 function addStyles(){
-  if(document.getElementById('fmNewsAestheticV34Styles'))return;
+  if(document.getElementById('fmNewsAestheticV35Styles'))return;
   const s=document.createElement('style');
-  s.id='fmNewsAestheticV34Styles';
+  s.id='fmNewsAestheticV35Styles';
   s.textContent=`
-    #fmNewsSixGrid{
+    #newsPage{width:100%!important;max-width:none!important;min-width:0!important}
+    #${GRID_ID}{
       width:100%!important;
+      max-width:none!important;
       min-width:0!important;
       display:grid!important;
       grid-template-columns:repeat(2,minmax(0,1fr))!important;
-      grid-template-rows:repeat(3,minmax(0,1fr))!important;
+      grid-template-rows:repeat(3,minmax(0,1fr)) auto!important;
+      grid-auto-flow:row!important;
       gap:12px!important;
       align-items:stretch!important;
       box-sizing:border-box!important;
       margin:0!important;
       padding:0!important;
     }
-    #fmNewsSixGrid>#newsTransfers,
-    #fmNewsSixGrid>#newsRegistrations,
-    #fmNewsSixGrid>#newsPriceUp,
-    #fmNewsSixGrid>#newsPriceDown,
-    #fmNewsSixGrid>#newsInjuries,
-    #fmNewsSixGrid>#newsSuspensions{
+    #${GRID_ID}>#newsTransfers,
+    #${GRID_ID}>#newsRegistrations,
+    #${GRID_ID}>#newsPriceUp,
+    #${GRID_ID}>#newsPriceDown,
+    #${GRID_ID}>#newsInjuries,
+    #${GRID_ID}>#newsSuspensions{
       grid-column:auto!important;
       grid-row:auto!important;
       width:100%!important;
+      max-width:none!important;
       min-width:0!important;
       min-height:0!important;
       height:100%!important;
@@ -42,7 +46,16 @@ function addStyles(){
       overflow:hidden!important;
       align-self:stretch!important;
     }
-    #fmNewsSixGrid .newsHead{
+    #${GRID_ID}>[data-fm-news-full-width-v35="1"]{
+      grid-column:1/-1!important;
+      width:100%!important;
+      max-width:none!important;
+      min-width:0!important;
+      margin-left:0!important;
+      margin-right:0!important;
+      box-sizing:border-box!important;
+    }
+    #${GRID_ID} .newsHead{
       min-height:62px!important;
       box-sizing:border-box!important;
       display:flex!important;
@@ -51,20 +64,19 @@ function addStyles(){
       gap:10px!important;
       overflow:visible!important;
     }
-    #fmNewsSixGrid .fmNewsViewAllV34{
+    #${GRID_ID} .fmNewsViewAllV34{
       display:inline-flex!important;
       align-items:center!important;
       justify-content:center!important;
       flex:0 0 auto!important;
       min-height:28px!important;
       padding:6px 10px!important;
-      margin-left:6px!important;
+      margin-left:auto!important;
       border:1px solid rgba(255,255,255,.13)!important;
       border-radius:9px!important;
       background:rgba(255,255,255,.065)!important;
       color:#fff!important;
       font:800 10px/1 Inter,system-ui,sans-serif!important;
-      letter-spacing:0!important;
       white-space:nowrap!important;
       cursor:pointer!important;
       opacity:1!important;
@@ -72,21 +84,21 @@ function addStyles(){
       position:static!important;
       transform:none!important;
     }
-    #fmNewsSixGrid .fmNewsViewAllV34:hover{background:rgba(255,255,255,.11)!important}
+    #${GRID_ID} .fmNewsViewAllV34:hover{background:rgba(255,255,255,.11)!important}
     @media(max-width:900px){
-      #fmNewsSixGrid{
+      #${GRID_ID}{
         height:auto!important;
         min-height:0!important;
         grid-template-columns:1fr!important;
         grid-template-rows:none!important;
         grid-auto-rows:minmax(220px,auto)!important;
       }
-      #fmNewsSixGrid>#newsTransfers,
-      #fmNewsSixGrid>#newsRegistrations,
-      #fmNewsSixGrid>#newsPriceUp,
-      #fmNewsSixGrid>#newsPriceDown,
-      #fmNewsSixGrid>#newsInjuries,
-      #fmNewsSixGrid>#newsSuspensions{min-height:220px!important;height:auto!important}
+      #${GRID_ID}>#newsTransfers,
+      #${GRID_ID}>#newsRegistrations,
+      #${GRID_ID}>#newsPriceUp,
+      #${GRID_ID}>#newsPriceDown,
+      #${GRID_ID}>#newsInjuries,
+      #${GRID_ID}>#newsSuspensions{min-height:220px!important;height:auto!important}
     }
   `;
   document.head.appendChild(s);
@@ -95,20 +107,36 @@ function addStyles(){
 function cards(){return IDS.map(id=>document.getElementById(id)).filter(Boolean)}
 function commonParent(nodes){if(nodes.length!==IDS.length)return null;const p=nodes[0].parentElement;return p&&nodes.every(n=>n.parentElement===p)?p:null}
 
+function unwrapLegacyGrid(cs){
+  const old=document.getElementById(GRID_ID);
+  if(!old||old.dataset.fmParentGridV35==='1')return;
+  if(!cs.length||!cs.every(card=>card.parentElement===old))return;
+  const parent=old.parentElement;if(!parent)return;
+  cs.forEach(card=>parent.insertBefore(card,old));
+  old.remove();
+}
+
 function ensureGrid(){
-  const cs=cards();if(cs.length!==IDS.length)return null;
-  let grid=document.getElementById('fmNewsSixGrid');
-  if(!grid){
-    const parent=commonParent(cs);if(!parent)return null;
-    grid=document.createElement('div');grid.id='fmNewsSixGrid';grid.dataset.fmPresentationOnly='1';
-    parent.insertBefore(grid,cs[0]);
-  }
+  let cs=cards();if(cs.length!==IDS.length)return null;
+  unwrapLegacyGrid(cs);
+  cs=cards();
+  const parent=commonParent(cs);if(!parent)return null;
+  const stale=document.getElementById(GRID_ID);
+  if(stale&&stale!==parent)stale.removeAttribute('id');
+  parent.id=GRID_ID;
+  parent.dataset.fmPresentationOnly='1';
+  parent.dataset.fmParentGridV35='1';
   cs.forEach((card,i)=>{
-    if(card.parentElement!==grid)grid.appendChild(card);
     card.dataset.fmNewsSlot=String(i+1);
     card.style.order=String(i+1);
+    delete card.dataset.fmNewsFullWidthV35;
   });
-  return grid;
+  for(const el of Array.from(parent.children)){
+    if(IDS.includes(el.id))continue;
+    el.dataset.fmNewsFullWidthV35='1';
+    el.style.order='99';
+  }
+  return parent;
 }
 
 function headerOf(card){return card.querySelector('.newsHead')||card.firstElementChild||null}
@@ -139,8 +167,7 @@ function hasInfo(card,head){
 function bodyViewButtons(card){
   return Array.from(card.querySelectorAll('[data-news-toggle],button,a,[role="button"]')).filter(el=>{
     if(el.classList.contains('fmNewsViewAllV34'))return false;
-    if(el.hasAttribute('data-news-toggle'))return true;
-    return VIEW_RX.test((el.textContent||'').trim().replace(/\s+/g,' '));
+    return el.hasAttribute('data-news-toggle')||/^(?:show|view)\s*all(?:\s+\d+)?$/i.test((el.textContent||'').trim().replace(/\s+/g,' '));
   });
 }
 function placeViewAll(card){
@@ -150,26 +177,23 @@ function placeViewAll(card){
   let btn=head.querySelector('.fmNewsViewAllV34[data-fm-created-view-all-v34="1"]');
   if(!info){if(btn)btn.remove();return}
   if(!btn){
-    btn=document.createElement('button');btn.type='button';btn.dataset.newsToggle=card.id+'Full';btn.dataset.fmCreatedViewAllV34='1';btn.className='fmNewsViewAllV34';btn.textContent='View all';head.appendChild(btn);
+    btn=document.createElement('button');
+    btn.type='button';
+    btn.dataset.newsToggle=card.id+'Full';
+    btn.dataset.fmCreatedViewAllV34='1';
+    btn.className='fmNewsViewAllV34';
+    btn.textContent='View all';
+    head.appendChild(btn);
   }
   btn.hidden=false;btn.removeAttribute('aria-hidden');btn.style.display='inline-flex';
 }
 
-function aboutBlock(grid){
-  const parent=grid?.parentElement;if(!parent)return null;
-  for(const el of Array.from(parent.children)){
-    if(el===grid)continue;
-    if(/about this data/i.test((el.textContent||'').replace(/\s+/g,' ')))return el;
-  }
-  return null;
-}
 function sizeGrid(grid){
   if(!grid)return;
   if(window.innerWidth<=900){grid.style.removeProperty('height');return}
   const top=grid.getBoundingClientRect().top;
   if(!Number.isFinite(top)||top<0)return;
-  const about=aboutBlock(grid),aboutH=about?Math.ceil(about.getBoundingClientRect().height):0;
-  const h=Math.max(510,Math.floor(window.innerHeight-top-aboutH-22));
+  const h=Math.max(620,Math.floor(window.innerHeight-top-10));
   grid.style.height=h+'px';
 }
 
