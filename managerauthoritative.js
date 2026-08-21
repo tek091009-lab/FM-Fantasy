@@ -1,5 +1,5 @@
 (()=>{
- const VERSION='manager-authoritative-v3-critical-state-integrity';
+ const VERSION='manager-authoritative-v4-preserve-transfer-drafts';
  const cfg=window.FM_FANTASY_CONFIG||{};
  if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return;
  let client=null,busy=false,lastStamp='';
@@ -7,6 +7,7 @@
  const arr=v=>Array.isArray(v)?v:[];
  const num=v=>Number(v||0)||0;
  const ids=v=>arr(v).map(String).join('|');
+ const idSet=v=>arr(v).map(String).sort().join('|');
  function cloudClient(){
   if(!window.FMCloud?.ready?.())return null;
   if(!client)client=supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:false,detectSessionInUrl:false}});
@@ -24,12 +25,37 @@
   if(Object.prototype.hasOwnProperty.call(saved,'news'))state.news=saved.news;
   if(Object.prototype.hasOwnProperty.call(saved,'activeStatuses'))state.activeStatuses=saved.activeStatuses;
  }
+ function hasTransferDraft(st){
+  st=st||(typeof state!=='undefined'?state:null);
+  if(!st?.teamConfirmed||arr(st.lockedSquad).length!==15)return false;
+  const squad=arr(st.squad),locked=arr(st.lockedSquad);
+  // An empty/broken startup state is not treated as a user draft. The transfer
+  // integrity guard/server restore is allowed to repair it from lockedSquad.
+  if(!squad.length||squad.length>15)return false;
+  if(squad.length!==15)return true;
+  if(idSet(squad)!==idSet(locked))return true;
+  const bank=Number(st.bank),lockedBank=Number(st.lockedBank);
+  return Number.isFinite(bank)&&Number.isFinite(lockedBank)&&Math.abs(bank-lockedBank)>1e-9;
+ }
+ function captureTransferDraft(){
+  if(typeof state==='undefined'||!hasTransferDraft(state))return null;
+  const out={};
+  for(const k of ['squad','starters','bench','captain','vice','bank'])if(Object.prototype.hasOwnProperty.call(state,k))out[k]=clone(state[k]);
+  return out;
+ }
+ function restoreTransferDraft(saved){
+  if(typeof state==='undefined'||!state||!saved)return false;
+  for(const k of ['squad','starters','bench','captain','vice','bank'])if(Object.prototype.hasOwnProperty.call(saved,k))state[k]=clone(saved[k]);
+  return true;
+ }
  function signature(remote,updatedAt=''){
   return [updatedAt,ids(remote?.squad),ids(remote?.lockedSquad),arr(remote?.starters).length,arr(remote?.bench).length,num(remote?.currentGameweek),num(remote?.completedGameweek),arr(remote?.pointsHistory).length,num(remote?.totalPoints),num(remote?.freeTransfers),num(remote?.lastTransferRollGW),String(remote?.lockedBank??''),String(remote?.teamName??''),String(remote?.managerName??'')].join('~');
  }
  function criticalHealthy(remote){
   if(typeof state==='undefined'||!state)return false;
-  if(arr(state.squad).length!==15||arr(state.starters).length!==11||arr(state.bench).length!==4)return false;
+  const draft=hasTransferDraft(state);
+  if(!draft&&(arr(state.squad).length!==15||arr(state.starters).length!==11||arr(state.bench).length!==4))return false;
+  if(draft&&(!arr(state.squad).length||arr(state.squad).length>15))return false;
   if(remote?.teamConfirmed&&arr(remote?.lockedSquad).length===15){
     if(arr(state.lockedSquad).length!==15||ids(state.lockedSquad)!==ids(remote.lockedSquad))return false;
     if(String(state.lockedBank??'')!==String(remote.lockedBank??''))return false;
@@ -56,10 +82,16 @@
    const sig=signature(clean,data.updated_at||'');
    if(sig===lastStamp&&criticalHealthy(clean))return true;
    if(typeof state==='undefined'||typeof DEFAULT==='undefined')return false;
+   // The server owns confirmed manager progress, but it must never erase a
+   // transfer the user is still drafting in the browser. Capture only editable
+   // transfer fields; FT balance, GW progress, points and the locked baseline
+   // continue to come from the server.
+   const transferDraft=captureTransferDraft();
    const worldDerived=captureWorldDerivedState();
    state=Object.assign({},DEFAULT,clean);
    state.chips=state.chips||clone(DEFAULT.chips);
    restoreWorldDerivedState(worldDerived);
+   restoreTransferDraft(transferDraft);
    if(window.FMCloud)window.FMCloud.managerState=clone(clean);
    lastStamp=sig;
    if(typeof renderTransferPitch==='function')renderTransferPitch();
@@ -76,7 +108,7 @@
  }
  const schedule=(ms=80)=>setTimeout(restore,ms);
  window.fmRestoreManagerFromCloud=restore;
- window.FMManagerAuthoritative={version:VERSION,restore,captureWorldDerivedState,restoreWorldDerivedState,criticalHealthy,signature};
+ window.FMManagerAuthoritative={version:VERSION,restore,captureWorldDerivedState,restoreWorldDerivedState,hasTransferDraft,captureTransferDraft,restoreTransferDraft,criticalHealthy,signature};
  window.addEventListener('fmcloudready',()=>schedule(250));
  window.addEventListener('fmcanonicalpublished',()=>schedule(60));
  window.addEventListener('fmworldmanagersscored',()=>schedule(60));
