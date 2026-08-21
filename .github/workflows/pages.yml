@@ -31,12 +31,13 @@ jobs:
         run: |
           node scripts/test_season_publish_v84.js
           node scripts/test_squad_registration_policy_v3.js
+          node scripts/test_news_persistence_v5.js
           if [ -f scripts/test_weekly_boundary_v12.js ]; then node scripts/test_weekly_boundary_v12.js; fi
       - name: Check current JavaScript syntax
         run: |
           node --check sessionrpcbridge.js
           node --check newsdiffbridge.js
-          node --check newspersistencev2.js
+          node --check newspersistencev3.js
           node --check servermanagerscoreclientv1.js
           node --check managerstateauthorityv1.js
           node --check captainpointsdisplay.js
@@ -62,7 +63,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify V32.4 public deployment
+      - name: Verify V32.5 public deployment
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -73,22 +74,23 @@ jobs:
           for attempt in $(seq 1 60); do
             stamp="${GITHUB_SHA}-${attempt}-$(date +%s)"
             idx="$(curl -fsSL --max-time 20 "$base/index.html?v=$stamp" || true)"
-            persist="$(curl -fsSL --max-time 20 "$base/newspersistencev2.js?v=$stamp" || true)"
+            persist="$(curl -fsSL --max-time 20 "$base/newspersistencev3.js?v=$stamp" || true)"
             news="$(curl -fsSL --max-time 20 "$base/newsdiffbridge.js?v=$stamp" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-v32-4-refresh-safe-news-persistence' \
-              && printf '%s' "$idx" | grep -q 'newspersistencev2.js?v=4' \
-              && printf '%s' "$idx" | grep -q 'newsdiffbridge.js?v=4' \
-              && printf '%s' "$persist" | grep -q 'news-persistence-v4-refresh-safe-import-only' \
-              && printf '%s' "$persist" | grep -q 'news_snapshot_v1' \
-              && printf '%s' "$persist" | grep -q 'commitWindowUntil' \
-              && printf '%s' "$persist" | grep -q '__fmCanonicalPublishWrapped' \
+            if printf '%s' "$idx" | grep -q 'fm-deploy-v32-5-passive-news-persistence' \
+              && printf '%s' "$idx" | grep -q 'newspersistencev3.js?v=5' \
+              && ! printf '%s' "$idx" | grep -q 'newspersistencev2.js?v=4' \
+              && printf '%s' "$persist" | grep -q 'news-persistence-v5-passive-post-import-only' \
+              && printf '%s' "$persist" | grep -q 'Native generation always wins' \
+              && printf '%s' "$persist" | grep -q 'Absolute rule: persistence is read/write silent while an FM import is active' \
+              && ! printf '%s' "$persist" | grep -q 'fmStoredSet=' \
+              && ! printf '%s' "$persist" | grep -q 'queueManagerSave=' \
               && printf '%s' "$news" | grep -q 'news-diff-bridge-v4-public-readonly-rpc'; then
               ok=1; break
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'V32.4 did not become live' >&2; exit 1; }
-      - name: Record verified V32.4 deployment
+          [ "$ok" -eq 1 ] || { echo 'V32.5 did not become live' >&2; exit 1; }
+      - name: Record verified V32.5 deployment
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -99,9 +101,10 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v32-4-refresh-safe-news-persistence",
-            "news_persistence": "final state.news plus rendered News DOM captured only after a successful import and restored locally after refresh once the real world payload is present",
-            "news_change_policy": "startup/refresh/focus/render/normal manager saves cannot delete or replace committed News; only the next successful import changes it; clear database deletes it",
+            "verification": "v32-5-passive-news-persistence",
+            "news_persistence": "native News generation is untouched during import; only meaningful post-import News is snapshotted locally and refresh restoration is fallback-only when native News is empty",
+            "news_change_policy": "persistence cannot write or restore during an import and cannot overwrite meaningful native News; only a successful import opens the snapshot capture window; clear database deletes the local snapshot",
+            "news_regression_test": "season import blocks persistence, generated News saves only after import mode ends, empty refresh restores both state.news and global NEWS, meaningful native News wins",
             "transfer_news": "server BEFORE-update canonical transfer-news trigger plus public read-only current-import fallback",
             "manager_scoring": "server-authoritative completed-gameweek trigger",
             "weekly_history_boundary": "canonical-through-previous-completed-gameweek-v12"
@@ -110,7 +113,7 @@ jobs:
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.4 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.5 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.4 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.5 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
