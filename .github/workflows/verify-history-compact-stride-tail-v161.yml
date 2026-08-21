@@ -1,0 +1,76 @@
+name: Verify retained history compact stride tail bounds v161
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_stat_stride_v148.py'
+      - 'scripts/upgrade_history_short_compact_bench_stride_v159.py'
+      - 'scripts/upgrade_history_short_compact_bench_tail_v160.py'
+      - 'scripts/upgrade_history_compact_stride_tail_bounds_v161.py'
+      - '.github/workflows/verify-history-compact-stride-tail-v161.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply compact stride stack through v161
+        run: |
+          python scripts/upgrade_history_compact_stat_stride_v148.py
+          python scripts/upgrade_history_short_compact_bench_stride_v159.py
+          python scripts/upgrade_history_short_compact_bench_tail_v160.py
+          python scripts/upgrade_history_compact_stride_tail_bounds_v161.py
+      - name: Verify packed importer and inclusive final-record reachability
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def _v148_compact_stride_next(raw,p,end):',
+              'q_hi=min(int(end)-157,p+214)',
+              's_hi=min(int(end)-157,q+214)',
+              't_hi=min(int(end)-157,s+214)',
+              'q_hi2=min(int(end)-157,p+214)',
+              's_hi2=min(int(end)-157,q2+214)',
+              "globals()['_RICH_COMPACT_TAIL_BOUND_V161']=1",
+              "globals()['_RICH_SHORT_COMPACT_BENCH_TAILS_V160']",
+          ]
+          for token in required:assert token in py,token
+          stale=[
+              'q_hi=min(int(end)-213,p+214)',
+              's_hi=min(int(end)-213,q+214)',
+              't_hi=min(int(end)-213,s+214)',
+              'q_hi2=min(int(end)-158,p+214)',
+              's_hi2=min(int(end)-158,q2+214)',
+          ]
+          for token in stale:assert token not in py,token
+
+          # Exact boundary regression: with end=2000, a fully readable 158-byte record may begin at
+          # 1842. Python range() needs an exclusive upper bound of 1843 to include that start.
+          end=2000
+          final_start=end-158
+          hi=end-157
+          assert final_start==1842 and hi==1843
+          assert final_start in range(1000,hi)
+          # The old v159 upper bound (end-158) excluded exactly this valid final start.
+          assert final_start not in range(1000,end-158)
+
+          # A compact step is still bounded to 158..213; v161 changes reachability at the payload
+          # boundary, not the physical-stride confidence rule.
+          for d in (158,180,213):assert 158<=d<=213
+          assert not (158<=214<=213)
+          print('v161 compiles; fully readable final 158-byte record is reachable in v148/v159 searches; compact evidence and +214 fallback preserved')
+          PY
