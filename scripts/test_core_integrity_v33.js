@@ -7,7 +7,7 @@ function basicCtx(){
   const listeners={};
   const ctx={
     console,JSON,Object,Array,Promise,Number,String,Math,Date,
-    setTimeout:(fn)=>{fn();return 1},clearTimeout(){},setInterval:(fn)=>{fn();return 1},clearInterval(){},
+    setTimeout:(fn)=>{fn();return 1},clearTimeout(){},setInterval:()=>1,clearInterval(){},
     requestAnimationFrame:fn=>fn(),
     CustomEvent:function(type,init){this.type=type;this.detail=init?.detail},
     MutationObserver:function(){this.observe=()=>{}},
@@ -68,7 +68,7 @@ async function publishBarrierSuccessRegression(){
   };
   ctx.FMSessionRPC={async call(fn){calls.push(fn);if(fn==='fmfantasy_creator_score_world_managers')return {ok:true,target:5,managers:[{username:'A'}]};throw new Error('unexpected')}};
   ctx.FMManagerStateAuthority={async refreshOwnFromServer(){calls.push('refresh')}};
-  run('publishscorebarrier.js',ctx);
+  run('publishscorebarrier.js',ctx);ctx.FMPublishScoreBarrier.install();
   const payload={meta:{completed_gameweek:5}};
   const out=await ctx.FMCloud.publishWorld(payload);
   assert.strictEqual(out,payload);
@@ -86,7 +86,7 @@ async function publishBarrierRollbackRegression(){
     async loadWorld(force){calls.push(`reload:${!!force}`);return oldPayload}
   };
   ctx.FMSessionRPC={async call(fn){calls.push(fn);if(fn==='fmfantasy_creator_score_world_managers'){scoreAttempts++;throw new Error('score fail')}if(fn==='fmfantasy_undo_last_import')return {ok:true};throw new Error('unexpected')}};
-  run('publishscorebarrier.js',ctx);
+  run('publishscorebarrier.js',ctx);ctx.FMPublishScoreBarrier.install();
   let threw=false;
   try{await ctx.FMCloud.publishWorld(newPayload)}catch(e){threw=true;assert(String(e.message).includes('rolled back safely'))}
   assert(threw,'failed manager scoring must reject import completion');
