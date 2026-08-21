@@ -1,30 +1,56 @@
 (()=>{
 'use strict';
-const VERSION='transfer-integrity-guard-v1-locked-squad-authority';
+const VERSION='transfer-integrity-guard-v2-locked-squad-authority';
 const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
 const arr=v=>Array.isArray(v)?v:[];
 function stateRef(){try{return typeof state!=='undefined'?state:null}catch(_e){return null}}
+function cloudRef(){return window.FMCloud?.managerState||null}
+function validSquad(v){return arr(v).length===15}
+function validStarters(v){return arr(v).length===11}
+function validBench(v){return arr(v).length===4}
 function source(){
- const st=stateRef(),cloud=window.FMCloud?.managerState;
- if(arr(st?.lockedSquad).length===15)return st;
- if(arr(cloud?.lockedSquad).length===15)return cloud;
- if(st?.teamConfirmed&&arr(st?.squad).length===15)return st;
- if(cloud?.teamConfirmed&&arr(cloud?.squad).length===15)return cloud;
+ const st=stateRef(),cloud=cloudRef();
+ if(validSquad(st?.lockedSquad))return st;
+ if(validSquad(cloud?.lockedSquad))return cloud;
+ if(st?.teamConfirmed&&validSquad(st?.squad))return st;
+ if(cloud?.teamConfirmed&&validSquad(cloud?.squad))return cloud;
  return null;
 }
 function repairBaseline(){
- const st=stateRef(),src=source();if(!st||!src||!st.teamConfirmed)return false;
- let changed=false;
- if(arr(st.lockedSquad).length!==15&&arr(src.lockedSquad).length===15){st.lockedSquad=clone(src.lockedSquad);changed=true}
- if((st.lockedBank===undefined||st.lockedBank===null)&&src.lockedBank!==undefined){st.lockedBank=Number(src.lockedBank||0);changed=true}
+ const st=stateRef();if(!st||!st.teamConfirmed)return false;
+ const cloud=cloudRef();let changed=false;
+ if(!validSquad(st.lockedSquad)){
+  if(validSquad(cloud?.lockedSquad)){
+   st.lockedSquad=clone(cloud.lockedSquad);
+   st.lockedBank=Number(cloud.lockedBank??cloud.bank??st.bank??0);
+   if(cloud.lockedCaptain!==undefined)st.lockedCaptain=cloud.lockedCaptain;
+   if(cloud.lockedVice!==undefined)st.lockedVice=cloud.lockedVice;
+   changed=true;
+  }else if(validSquad(st.squad)){
+   // A confirmed team with no baseline is the exact first-load corruption that
+   // previously appeared as 15 pending transfers / £100m bank. Seed once only.
+   st.lockedSquad=clone(st.squad);
+   st.lockedBank=Number(st.bank??0);
+   st.lockedCaptain=st.captain??null;
+   st.lockedVice=st.vice??null;
+   changed=true;
+  }
+ }
+ if(validSquad(st.lockedSquad)&&(st.lockedBank===undefined||st.lockedBank===null||!Number.isFinite(Number(st.lockedBank)))){
+  st.lockedBank=Number(cloud?.lockedBank??st.bank??0);changed=true;
+ }
  return changed;
 }
 function canonicalBase(nativeBase){
  repairBaseline();const st=stateRef(),src=source();if(!st||!src||!st.teamConfirmed)return nativeBase;
- const locked=arr(src.lockedSquad).length===15?src.lockedSquad:src.squad;
- if(arr(locked).length!==15)return nativeBase;
- return Object.assign({},nativeBase||{},
-  {squad:clone(locked),bank:Number(src.lockedBank??src.bank??0),starters:clone(nativeBase?.starters??st.starters??[]),bench:clone(nativeBase?.bench??st.bench??[]),captain:nativeBase?.captain??st.captain??null,vice:nativeBase?.vice??st.vice??null});
+ const locked=validSquad(st.lockedSquad)?st.lockedSquad:(validSquad(src.lockedSquad)?src.lockedSquad:src.squad);
+ if(!validSquad(locked))return nativeBase;
+ const bank=validSquad(st.lockedSquad)?Number(st.lockedBank??st.bank??0):Number(src.bank??0);
+ const starters=validStarters(nativeBase?.starters)?nativeBase.starters:(validStarters(st.starters)?st.starters:[]);
+ const bench=validBench(nativeBase?.bench)?nativeBase.bench:(validBench(st.bench)?st.bench:[]);
+ const captain=nativeBase?.captain??st.lockedCaptain??st.captain??null;
+ const vice=nativeBase?.vice??st.lockedVice??st.vice??null;
+ return Object.assign({},nativeBase||{},{squad:clone(locked),bank,starters:clone(starters),bench:clone(bench),captain,vice});
 }
 let nativeBase=null,nativeSummary=null,nativePitch=null;
 function install(){
@@ -46,7 +72,7 @@ function install(){
  return !!window.transferSessionBase;
 }
 function refresh(){repairBaseline();install();try{if(typeof renderTransferSummary==='function')renderTransferSummary();if(typeof renderTransferPitch==='function')renderTransferPitch()}catch(_e){}}
-window.FMTransferIntegrityGuard={version:VERSION,install,repairBaseline,canonicalBase,refresh,status:()=>({version:VERSION,installed:!!window.transferSessionBase?.__fmIntegrityGuard,locked:arr(stateRef()?.lockedSquad).length})};
+window.FMTransferIntegrityGuard={version:VERSION,install,repairBaseline,canonicalBase,refresh,status:()=>({version:VERSION,installed:!!window.transferSessionBase?.__fmIntegrityGuard,locked:arr(stateRef()?.lockedSquad).length,bank:stateRef()?.lockedBank})};
 [0,100,350,900,2000].forEach(ms=>setTimeout(install,ms));
 window.addEventListener('fmcloudready',()=>setTimeout(refresh,120));
 window.addEventListener('fmcanonicalpublished',()=>setTimeout(refresh,120));
