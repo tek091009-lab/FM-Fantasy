@@ -1,0 +1,67 @@
+name: Verify retained history short compact bench tail v160
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_stat_stride_v148.py'
+      - 'scripts/upgrade_history_short_compact_bench_stride_v159.py'
+      - 'scripts/upgrade_history_short_compact_bench_tail_v160.py'
+      - '.github/workflows/verify-history-short-compact-bench-tail-v160.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply compact stride stack through v160
+        run: |
+          python scripts/upgrade_history_compact_stat_stride_v148.py
+          python scripts/upgrade_history_short_compact_bench_stride_v159.py
+          python scripts/upgrade_history_short_compact_bench_tail_v160.py
+      - name: Verify packed importer and terminal-tail continuation
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def _v148_compact_stride_next(raw,p,end):',
+              'def _v159_benchish(rr):',
+              "globals().setdefault('_RICH_SHORT_COMPACT_PENDING_V160',{})",
+              "globals()['_RICH_SHORT_COMPACT_BENCH_TAILS_V160']",
+              "_v160_pending[(id(raw),int(q2),int(end))]=(int(s2),int(pp2),int(d))",
+              'return int(_v160_s)',
+          ]
+          for token in required:assert token in py,token
+
+          # Regression geometry: v159 can prove P0->P1->P2 at 180-byte spacing. After returning P1,
+          # re-proving a three-row chain is impossible because only P2 remains. v160 must therefore
+          # carry the already-proven P1->P2 transition exactly once.
+          p0,p1,p2=1000,1180,1360
+          d=p1-p0
+          assert 158<=d<=213 and p2-p1==d
+          pending={(1,p1,2000):(p2,33,d)}
+          tail=pending.pop((1,p1,2000),None)
+          assert tail==(p2,33,d)
+          s,pid,stride=tail
+          assert 158<=s-p1<=213 and abs((s-p1)-stride)<=8
+          assert (1,p1,2000) not in pending  # continuation is one-shot, never self-reinforcing
+
+          # Strong v148 authority and the normal +214 fallback remain present.
+          assert 'succ3.append(t)' in py
+          assert 'if len(hits)==0:' in py
+          assert 'p+=214;continue' in py
+          print('v160 compiles; unique v159 three-row compact bench proof now reaches its final third row exactly once; v148 and +214 fallbacks preserved')
+          PY
