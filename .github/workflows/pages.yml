@@ -74,7 +74,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify V34 public deployment
+      - name: Verify V35 public deployment
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -95,16 +95,18 @@ jobs:
             barrier="$(curl -fsSL --max-time 20 "$base/publishscorebarrier.js?v=$stamp" || true)"
             transfer="$(curl -fsSL --max-time 20 "$base/transferintegrityguard.js?v=$stamp" || true)"
             rollover="$(curl -fsSL --max-time 20 "$base/transferrolloverguard.js?v=$stamp" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-v34-news-six-card-layout' \
-              && printf '%s' "$idx" | grep -q 'newsaestheticv34.js?v=1' \
+            if printf '%s' "$idx" | grep -q 'fm-deploy-v35-news-full-width-parent-grid' \
+              && printf '%s' "$idx" | grep -q 'newsaestheticv34.js?v=2' \
               && printf '%s' "$idx" | grep -q 'sessionrpcbridge.js?v=2' \
               && printf '%s' "$idx" | grep -q 'publishscorebarrier.js?v=2' \
               && printf '%s' "$idx" | grep -q 'managerauthoritative.js?v=4' \
               && printf '%s' "$idx" | grep -q 'transferintegrityguard.js?v=2' \
               && printf '%s' "$idx" | grep -q 'transferrolloverguard.js?v=1' \
-              && printf '%s' "$aesthetic" | grep -q 'news-aesthetic-v34-six-equal-cards' \
+              && printf '%s' "$aesthetic" | grep -q 'news-aesthetic-v35-full-width-parent-grid' \
+              && printf '%s' "$aesthetic" | grep -q 'parent.id=GRID_ID' \
               && printf '%s' "$aesthetic" | grep -q 'grid-template-columns:repeat(2,minmax(0,1fr))' \
-              && printf '%s' "$aesthetic" | grep -q 'grid-template-rows:repeat(3,minmax(0,1fr))' \
+              && printf '%s' "$aesthetic" | grep -q 'grid-template-rows:repeat(3,minmax(0,1fr)) auto' \
+              && ! printf '%s' "$aesthetic" | grep -q "grid=document.createElement('div')" \
               && ! printf '%s' "$aesthetic" | grep -q 'FMCloud' \
               && ! printf '%s' "$aesthetic" | grep -q 'publishWorld' \
               && ! printf '%s' "$aesthetic" | grep -q 'managerState' \
@@ -126,8 +128,8 @@ jobs:
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'V34 did not become live' >&2; exit 1; }
-      - name: Record verified V34 deployment
+          [ "$ok" -eq 1 ] || { echo 'V35 did not become live' >&2; exit 1; }
+      - name: Record verified V35 deployment
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -138,22 +140,22 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v34-news-six-card-layout",
+            "verification": "v35-news-full-width-parent-grid",
             "database_import": "V33 canonical import and weekly scoring protections retained unchanged",
             "team_state": "V33 manager squad, locked baseline, bank, gameweek, points and FT protections retained unchanged",
             "transfers": "V33 transfer integrity protections retained unchanged",
             "leagues": "V33 authoritative manager and league sync retained unchanged",
             "weekly_import": "V33 publish-score barrier and safe rollback retained unchanged",
             "undo": "V33 controlled rollback retained unchanged",
-            "news": "six existing News sections render as two equal columns by three equal rows; View all is header-visible whenever a section contains data",
-            "presentation_scope": "newsaestheticv34.js is DOM/CSS only and does not read or mutate FMCloud, manager state, imports, scoring, transfers or persistence",
-            "regressions": "V33 core suite plus packed News DOM, dynamic registration-card insertion, V34 syntax and presentation-only source guard"
+            "news": "the existing full-width News parent is now the two-column by three-row grid; the six cards are no longer nested inside one legacy grid cell; View all remains header-visible whenever a section contains data",
+            "presentation_scope": "newsaestheticv34.js is DOM/CSS only and does not read or mutate fantasy, import, scoring, transfer or persistence state",
+            "regressions": "V33 core suite plus full-width-parent regression, packed News DOM, dynamic registration-card insertion, syntax and presentation-only source guard"
           }
           JSON
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V34 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V35 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V34 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V35 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
