@@ -62,7 +62,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify V32 public deployment
+      - name: Verify V32.2 public deployment
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -75,19 +75,20 @@ jobs:
             idx="$(curl -fsSL --max-time 20 "$base/index.html?v=$stamp" || true)"
             persist="$(curl -fsSL --max-time 20 "$base/newspersistencev1.js?v=$stamp" || true)"
             news="$(curl -fsSL --max-time 20 "$base/newsdiffbridge.js?v=$stamp" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-v32-import-bound-news-persistence' \
-              && printf '%s' "$idx" | grep -q 'newspersistencev1.js?v=1' \
+            if printf '%s' "$idx" | grep -q 'fm-deploy-v32-2-import-bound-news-persistence' \
+              && printf '%s' "$idx" | grep -q 'newspersistencev1.js?v=2' \
               && printf '%s' "$idx" | grep -q 'newsdiffbridge.js?v=4' \
-              && printf '%s' "$persist" | grep -q 'news-persistence-v1-import-snapshot-only' \
+              && printf '%s' "$persist" | grep -q 'news-persistence-v2-final-import-snapshot-only' \
               && printf '%s' "$persist" | grep -q 'news_snapshot_v1' \
+              && printf '%s' "$persist" | grep -q 'commitWindowUntil' \
               && printf '%s' "$persist" | grep -q '__fmCanonicalPublishWrapped' \
               && printf '%s' "$news" | grep -q 'news-diff-bridge-v4-public-readonly-rpc'; then
               ok=1; break
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'V32 did not become live' >&2; exit 1; }
-      - name: Record verified V32 deployment
+          [ "$ok" -eq 1 ] || { echo 'V32.2 did not become live' >&2; exit 1; }
+      - name: Record verified V32.2 deployment
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -98,9 +99,9 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v32-import-bound-news-persistence",
-            "news_persistence": "complete state.news snapshot sealed only on successful import, mirrored to localStorage and restored on reload",
-            "news_change_policy": "refresh/focus/render cannot replace committed news; next successful import replaces it; clear database deletes it",
+            "verification": "v32-2-import-bound-news-persistence",
+            "news_persistence": "final state.news plus rendered News DOM captured only in a five-second successful-import commit window and mirrored locally",
+            "news_change_policy": "refresh/focus/render/normal manager saves cannot replace committed News; only next successful import changes it; clear database deletes it",
             "transfer_news": "server BEFORE-update canonical transfer-news trigger plus public read-only current-import fallback",
             "manager_scoring": "server-authoritative completed-gameweek trigger",
             "weekly_history_boundary": "canonical-through-previous-completed-gameweek-v12"
@@ -109,7 +110,7 @@ jobs:
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.2 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.2 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
