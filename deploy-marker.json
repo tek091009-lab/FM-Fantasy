@@ -1,9 +1,9 @@
 {
-  "verified_live_sha": "97afbc7779950a7197d36f1fb64812109f701fb9",
-  "verified_at": "2026-08-21T08:27:57Z",
+  "verified_live_sha": "6a699ea1f4f3cadd7a4d1df522098d4ab319778d",
+  "verified_at": "2026-08-21T08:31:18Z",
   "verification": "v23-first-week-manager-score-transfer-entry-pricing",
-  "manager_scoring": "creator update scores every valid 15-man/11-starter submitted lineup even when stale teamConfirmed is false",
-  "manager_scoring_trigger": "immediate after successful canonical publish plus normal retry loop",
+  "manager_scoring": "creator update repairs stale teamConfirmed from a structurally valid 15-man/11-starter/4-bench submitted lineup, persists that repair server-side, then scores every manager",
+  "manager_scoring_trigger": "immediate after successful canonical publish plus load/focus retry",
   "transfer_news": "v3 successful-boundary canonical club changes plus validated import-observed new-league arrivals",
   "transfer_news_persistence": "v2 transient rows handed into canonical validation before publish; failed imports still discard pending news",
   "new_entrant_pricing": "v1 ability-team-arrival-role initial pricing; no goals-assists-points-ratings-or-injury effect",
