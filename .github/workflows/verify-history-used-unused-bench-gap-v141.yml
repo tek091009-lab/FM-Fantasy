@@ -1,0 +1,118 @@
+name: Verify retained history used-unused bench gap v141
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_direct_header_tid_v126.py'
+      - 'scripts/upgrade_history_direct_header_orientation_v127.py'
+      - 'scripts/upgrade_history_direct_header_locality_v128.py'
+      - 'scripts/upgrade_history_direct_header_span_v129.py'
+      - 'scripts/upgrade_history_direct_header_namespace_v130.py'
+      - 'scripts/upgrade_history_header_anchored_candidate_v131.py'
+      - 'scripts/upgrade_history_header_payload_boundary_v132.py'
+      - 'scripts/upgrade_history_header_false_boundary_v133.py'
+      - 'scripts/upgrade_history_header_fixture_delimiter_v134.py'
+      - 'scripts/upgrade_history_header_payload_complete_delimiter_v135.py'
+      - 'scripts/upgrade_history_same_header_alias_delimiter_v136.py'
+      - 'scripts/upgrade_history_header_nonoverlap_scan_v137.py'
+      - 'scripts/upgrade_history_global_nonoverlap_scan_v138.py'
+      - 'scripts/upgrade_history_starter_bench_gap_v139.py'
+      - 'scripts/upgrade_history_starter_bench_compact_v140.py'
+      - 'scripts/upgrade_history_used_unused_bench_gap_v141.py'
+      - '.github/workflows/verify-history-used-unused-bench-gap-v141.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural decoder stack through v141
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_direct_header_tid_v126.py
+          python scripts/upgrade_history_direct_header_orientation_v127.py
+          python scripts/upgrade_history_direct_header_locality_v128.py
+          python scripts/upgrade_history_direct_header_span_v129.py
+          python scripts/upgrade_history_direct_header_namespace_v130.py
+          python scripts/upgrade_history_header_anchored_candidate_v131.py
+          python scripts/upgrade_history_header_payload_boundary_v132.py
+          python scripts/upgrade_history_header_false_boundary_v133.py
+          python scripts/upgrade_history_header_fixture_delimiter_v134.py
+          python scripts/upgrade_history_header_payload_complete_delimiter_v135.py
+          python scripts/upgrade_history_same_header_alias_delimiter_v136.py
+          python scripts/upgrade_history_header_nonoverlap_scan_v137.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+          python scripts/upgrade_history_starter_bench_compact_v140.py
+          python scripts/upgrade_history_used_unused_bench_gap_v141.py
+      - name: Verify packed importer and bench subgroup geometry
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          for token in [
+              'def used_unused_bench_internal_spacing(rows):',
+              'def used_unused_bench_gap_window(j,left_n,right_n):',
+              'if idx<11:return False,0,-1',
+              "if not all(int(r.get('sub_on',0) or 0)>0 for r in used):return False,0,-1",
+              'if not all(inactive_bench(r) for r in unused):return False,0,-1',
+              "diagnostics['used_unused_bench_gap_candidate_pairs']+=1",
+              'unlabelled_rich_used_unused_bench_gap_candidate_pairs',
+              'def starter_bench_gap_window(j,left_n,right_n):',
+              'def starter_bench_compact_window(j,left_n,right_n):',
+              "globals()['_RICH_GLOBAL_NONOVERLAP_SCAN_V138']=1",
+          ]:assert token in py,token
+
+          # Regression of the physical rule: 11 starters + 3 used subs + unused bench with one
+          # 4 KiB metadata gap at the used->unused transition qualifies. The same gap before row 12,
+          # inside the used-sub block, or with an active player after the gap must fail.
+          def qualifies(sub_on,gaps,inactive):
+              if not (18<=len(sub_on)<=22):return False
+              special=[]
+              for idx,g in enumerate(gaps):
+                  if g<214:return False
+                  if g>=1500:
+                      if idx<11:return False
+                      special.append((idx,g))
+              if len(special)!=1:return False
+              idx,g=special[0]
+              if g>16384:return False
+              used=sub_on[11:idx+1];unused=sub_on[idx+1:]
+              if not used or not unused:return False
+              if not all(x>0 for x in used):return False
+              if not all(inactive[k] and sub_on[k]<=0 for k in range(idx+1,len(sub_on))):return False
+              return True
+
+          n=20
+          subs=[0]*11+[60,70,80]+[0]*(n-14)
+          inactive=[False]*14+[True]*(n-14)
+          gaps=[214]*(n-1);gaps[13]=4096
+          assert qualifies(subs,gaps,inactive)
+          bad_xi=list(gaps);bad_xi[13]=214;bad_xi[10]=4096
+          assert not qualifies(subs,bad_xi,inactive)
+          bad_used=list(gaps);bad_used[13]=214;bad_used[12]=4096
+          assert not qualifies(subs,bad_used,inactive)
+          bad_active=list(inactive);bad_active[16]=False
+          assert not qualifies(subs,gaps,bad_active)
+          print('v141 compiles; only a semantically proven used-sub -> unused-bench metadata break is admitted')
+          PY
