@@ -61,7 +61,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify V30 public deployment
+      - name: Verify V31 public deployment
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -72,24 +72,22 @@ jobs:
           for attempt in $(seq 1 60); do
             stamp="${GITHUB_SHA}-${attempt}-$(date +%s)"
             idx="$(curl -fsSL --max-time 20 "$base/index.html?v=$stamp" || true)"
-            rpc="$(curl -fsSL --max-time 20 "$base/sessionrpcbridge.js?v=$stamp" || true)"
             scorer="$(curl -fsSL --max-time 20 "$base/servermanagerscoreclientv1.js?v=$stamp" || true)"
             news="$(curl -fsSL --max-time 20 "$base/newsdiffbridge.js?v=$stamp" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-v30-server-authoritative-manager-scoring-news-auth' \
-              && printf '%s' "$idx" | grep -q 'sessionrpcbridge.js?v=1' \
+            if printf '%s' "$idx" | grep -q 'fm-deploy-v31-server-scored-public-transfer-news' \
               && printf '%s' "$idx" | grep -q 'servermanagerscoreclientv1.js?v=1' \
-              && printf '%s' "$idx" | grep -q 'newsdiffbridge.js?v=3' \
+              && printf '%s' "$idx" | grep -q 'newsdiffbridge.js?v=4' \
               && ! printf '%s' "$idx" | grep -q 'worldscorefix.js' \
               && ! printf '%s' "$idx" | grep -q 'worldscorerauthv3.js' \
-              && printf '%s' "$rpc" | grep -q 'session-rpc-bridge-v1-persisted-auth-jwt' \
               && printf '%s' "$scorer" | grep -q 'server-manager-score-client-v1-authoritative-rpc' \
-              && printf '%s' "$news" | grep -q 'news-diff-bridge-v3-shared-session-rpc'; then
+              && printf '%s' "$news" | grep -q 'news-diff-bridge-v4-public-readonly-rpc' \
+              && printf '%s' "$news" | grep -q 'fmfantasy_last_import_news_diff_public'; then
               ok=1; break
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'V30 did not become live' >&2; exit 1; }
-      - name: Record verified V30 deployment
+          [ "$ok" -eq 1 ] || { echo 'V31 did not become live' >&2; exit 1; }
+      - name: Record verified V31 deployment
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -100,21 +98,21 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v30-server-authoritative-manager-scoring-news-auth",
+            "verification": "v31-server-scored-public-transfer-news",
             "manager_scoring": "server-authoritative-rpc plus world completed-gameweek advance trigger",
-            "current_world_scoring_dry_run": "Kian 66; TKFantasy 30; no writes",
-            "transfer_news_current_fallback": "24 proven last-import arrivals via authenticated read-only diff",
+            "current_world_scoring": "Kian 66; TKFantasy 30 applied by authoritative server scorer",
+            "transfer_news_current_fallback": "24 proven last-import arrivals via public read-only diff",
+            "future_transfer_news": "server BEFORE-update canonical transfer-news trigger v1",
             "registration_news": "canonical registration-news-v5 renderer",
             "captain_display": "viewed-manager-context-v2",
             "update_guard": "v11-club-matched-history-repair",
-            "weekly_history_boundary": "canonical-through-previous-completed-gameweek-v12",
-            "manual_world_or_manager_mutation": "none"
+            "weekly_history_boundary": "canonical-through-previous-completed-gameweek-v12"
           }
           JSON
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V30 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V31 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V30 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V31 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
