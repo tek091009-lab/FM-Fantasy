@@ -1,8 +1,23 @@
 (()=>{
+  'use strict';
+  const VERSION='news-view-v6-payload-aware-clear-state';
   const ID='fmNewsOverlay', CLEAR_KEY='fmFantasyCloudDatabaseCleared';
+  const SECTION_IDS=['newsTransfers','newsRegistrations','newsPriceUp','newsPriceDown','newsInjuries','newsSuspensions'];
   const RX_ALL=/^(?:show|view)\s*all(?:\s+\d+)?$/i;
-  const cleared=()=>{try{return localStorage.getItem(CLEAR_KEY)==='1'||sessionStorage.getItem(CLEAR_KEY)==='1'}catch(_){return false}};
-  const markActive=()=>{try{localStorage.removeItem(CLEAR_KEY);sessionStorage.removeItem(CLEAR_KEY)}catch(_){}};
+  const payload=()=>{try{return window.FMCloud?.getWorld?.()?.payload||null}catch(_){return null}};
+  const hasPayload=()=>{const p=payload();return !!p&&Array.isArray(p.players)&&p.players.length>0};
+  function markActive(){
+    try{localStorage.removeItem(CLEAR_KEY);sessionStorage.removeItem(CLEAR_KEY)}catch(_){}
+    for(const id of SECTION_IDS){
+      const el=document.getElementById(id);if(!el)continue;
+      if(el.dataset)delete el.dataset.fmNewsCleared;
+      el.querySelectorAll?.('.fmNewsClearedEmpty').forEach?.(n=>n.remove());
+    }
+  }
+  const cleared=()=>{
+    if(hasPayload()){markActive();return false}
+    try{return localStorage.getItem(CLEAR_KEY)==='1'||sessionStorage.getItem(CLEAR_KEY)==='1'}catch(_){return false}
+  };
 
   function addStyles(){if(document.getElementById('fmNewsOverlayStyles'))return;const s=document.createElement('style');s.id='fmNewsOverlayStyles';s.textContent=`
     #${ID}{position:fixed;inset:0;z-index:99999;display:none;align-items:center;justify-content:center;padding:28px;background:rgba(5,2,18,.82);backdrop-filter:blur(8px)}
@@ -39,18 +54,25 @@
   }
 
   function clearVisibleNews(){
-    if(!cleared())return;
-    for(const id of ['newsTransfers','newsRegistrations','newsPriceUp','newsPriceDown','newsInjuries','newsSuspensions']){
+    // A real imported payload always beats the stale local clear marker. This prevents the
+    // clear observer from erasing freshly generated/restored News after a successful import.
+    if(hasPayload()){markActive();return false}
+    if(!cleared())return false;
+    for(const id of SECTION_IDS){
       const el=document.getElementById(id);if(!el||el.dataset.fmNewsCleared==='1')continue;
       const head=el.querySelector('.newsHead')?.cloneNode(true);el.innerHTML='';if(head)el.appendChild(head);const empty=document.createElement('div');empty.className='fmNewsClearedEmpty';empty.textContent='No news available.';el.appendChild(empty);el.dataset.fmNewsCleared='1'
     }
     const stamp=document.getElementById('newsStamp');if(stamp&&stamp.textContent!=='No FM database loaded.')stamp.textContent='No FM database loaded.';
+    return true;
   }
 
   document.addEventListener('click',e=>{const b=e.target.closest?.('[data-news-toggle]');if(!b)return;e.preventDefault();e.stopImmediatePropagation();openToggle(b)},true);
   document.addEventListener('click',e=>{const b=e.target.closest?.('button,a,[role="button"]');if(!b||b.hasAttribute('data-news-toggle'))return;const text=(b.textContent||'').trim().replace(/\s+/g,' ');if(!RX_ALL.test(text))return;e.preventDefault();e.stopImmediatePropagation();openToggle(b)},true);
 
-  let busy=false;new MutationObserver(()=>{if(busy||!cleared())return;busy=true;requestAnimationFrame(()=>{busy=false;clearVisibleNews()})}).observe(document.documentElement,{subtree:true,childList:true});
-  setTimeout(clearVisibleNews,0);setTimeout(clearVisibleNews,350);
-  window.FMNewsView={version:'news-view-v5-idempotent-clear',openToggle,close,clearVisibleNews,markActive};
+  let busy=false;new MutationObserver(()=>{if(busy)return;if(hasPayload()){markActive();return}if(!cleared())return;busy=true;requestAnimationFrame(()=>{busy=false;clearVisibleNews()})}).observe(document.documentElement,{subtree:true,childList:true});
+  window.addEventListener('fmcloudready',()=>{if(hasPayload())markActive()});
+  window.addEventListener('fmworldloaded',()=>{if(hasPayload())markActive()});
+  window.addEventListener('fmcanonicalpublished',()=>markActive());
+  setTimeout(clearVisibleNews,0);setTimeout(clearVisibleNews,350);setTimeout(()=>{if(hasPayload())markActive()},1000);
+  window.FMNewsView={version:VERSION,openToggle,close,clearVisibleNews,markActive,cleared,hasPayload};
 })();
