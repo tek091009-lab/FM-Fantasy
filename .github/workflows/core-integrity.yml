@@ -22,6 +22,7 @@ jobs:
           node scripts/test_news_persistence_v7.js
           node scripts/test_news_refresh_manager_state_v8.js
           node scripts/test_core_integrity_v33.js
+          node scripts/test_transfer_draft_survives_restore_v37.js
           if [ -f scripts/test_weekly_boundary_v12.js ]; then node scripts/test_weekly_boundary_v12.js; fi
           python scripts/test_news_aesthetic_v34.py
           node scripts/test_news_parent_layout_v35.js
