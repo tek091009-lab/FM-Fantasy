@@ -3,7 +3,7 @@ const assert=require('assert');
 const fs=require('fs');
 const vm=require('vm');
 const source=fs.readFileSync('managerauthoritative.js','utf8');
-assert(source.includes('manager-authoritative-v3-critical-state-integrity'));
+assert(source.includes('manager-authoritative-v4-preserve-transfer-drafts'));
 assert(source.includes("out.news=clone(state.news)"));
 assert(source.includes("out.activeStatuses=clone(state.activeStatuses)"));
 assert(source.includes('restoreWorldDerivedState(worldDerived)'));

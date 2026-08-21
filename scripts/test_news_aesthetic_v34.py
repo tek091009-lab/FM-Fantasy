@@ -60,5 +60,5 @@ assert './registrationnewsguard.js?v=5' in idx
 assert './newsview.js?v=6' in idx and './newsaestheticv34.js?v=3' in idx
 assert idx.index('./registrationnewsguard.js?v=5') < idx.index('./newsaestheticv34.js?v=3')
 assert idx.index('./newsview.js?v=6') < idx.index('./newsaestheticv34.js?v=3')
-assert 'fm-deploy-v36-news-stable-empty-state' in idx
-print('News v36 presentation regression passed: full-width six-card grid plus one stable No changes this import empty state')
+assert 'fm-deploy-v37-transfer-draft-restore' in idx
+print('News v36 presentation regression retained under V37 loader: full-width six-card grid plus one stable No changes this import empty state')
