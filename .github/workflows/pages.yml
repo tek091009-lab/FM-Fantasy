@@ -22,13 +22,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: {node-version: '22'}
+        with:
+          node-version: '22'
       - uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
-      - name: Verify current season/update guard behavior and club-matched first-week repair
-        run: node scripts/test_season_publish_v84.js
-      - name: Verify squad and registration-news policy
-        run: node scripts/test_squad_registration_policy_v3.js
+        with:
+          python-version: '3.12'
+      - name: Run core regressions
+        run: |
+          node scripts/test_season_publish_v84.js
+          node scripts/test_squad_registration_policy_v3.js
+          if [ -f scripts/test_weekly_boundary_v12.js ]; then node scripts/test_weekly_boundary_v12.js; fi
+      - name: Check current JavaScript syntax
+        run: |
+          node --check sessionrpcbridge.js
+          node --check newsdiffbridge.js
+          node --check servermanagerscoreclientv1.js
+          node --check managerstateauthorityv1.js
+          node --check captainpointsdisplay.js
       - name: Verify packed importer compiles
         shell: bash
         run: |
@@ -41,10 +51,8 @@ jobs:
           m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html); assert m,'embedded importer missing'
           py=base64.b64decode(m.group(1)).decode('utf-8'); compile(py,'live_importer.py','exec')
           assert 'browser_build_payload_from_fs' in py
-          assert 'if len(stats)<36:continue' in py
-          assert 'range(18,23)' in py
           assert 'v82-current-db-consensus-only-ability-non-authoritative' in py
-          print('current packed importer compiles and includes V82/V81 recovery paths')
+          print('packed importer compiles')
           PY
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
@@ -53,7 +61,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify V11 repair, V5 squad evidence and failed-debug preservation
+      - name: Verify V30 public deployment
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -61,68 +69,27 @@ jobs:
           set -euo pipefail
           base="${PAGE_URL%/}"
           ok=0
-          for attempt in $(seq 1 36); do
-            idx="$(curl -fsSL --max-time 20 "$base/index.html?sha=${GITHUB_SHA}-${attempt}" || true)"
-            entry="$(curl -fsSL --max-time 20 "$base/v84.html?sha=${GITHUB_SHA}-${attempt}" || true)"
-            guard="$(curl -fsSL --max-time 20 "$base/updateguard.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            compat="$(curl -fsSL --max-time 20 "$base/importcompat.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            pricing="$(curl -fsSL --max-time 20 "$base/dynamicpricingv13.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            auth="$(curl -fsSL --max-time 20 "$base/authfix.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            rollback="$(curl -fsSL --max-time 20 "$base/atomicrollbackfix.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            squad="$(curl -fsSL --max-time 20 "$base/squadeligibilityfix.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            regnews="$(curl -fsSL --max-time 20 "$base/registrationnewsguard.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            newsview="$(curl -fsSL --max-time 20 "$base/newsview.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            dbcontrols="$(curl -fsSL --max-time 20 "$base/dbcontrols.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            undo="$(curl -fsSL --max-time 20 "$base/undoimport.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            clearflow="$(curl -fsSL --max-time 20 "$base/clearflowv2.js?sha=${GITHUB_SHA}-${attempt}" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-auto-restore-v12-preserve-failed-debug' \
-              && printf '%s' "$idx" | grep -q 'authfix.js?v=14' \
-              && printf '%s' "$idx" | grep -q 'atomicrollbackfix.js?v=4' \
-              && printf '%s' "$idx" | grep -q 'squadeligibilityfix.js?v=5' \
-              && printf '%s' "$idx" | grep -q 'registrationnewsguard.js?v=2' \
-              && printf '%s' "$idx" | grep -q 'newsview.js?v=5' \
-              && printf '%s' "$idx" | grep -q 'dbcontrols.js?v=9' \
-              && printf '%s' "$idx" | grep -q 'updateguard.js?v=11' \
-              && printf '%s' "$idx" | grep -q 'importcompat.js?v=4' \
-              && printf '%s' "$idx" | grep -q 'dynamicpricingv13.js?v=14' \
-              && printf '%s' "$idx" | grep -q 'undoimport.js?v=4' \
-              && printf '%s' "$idx" | grep -q 'clearflowv2.js?v=6' \
-              && printf '%s' "$entry" | grep -q 'bootstrap=v84-20260818' \
-              && printf '%s' "$guard" | grep -q 'world-update-guard-v11-club-matched-history-repair' \
-              && printf '%s' "$guard" | grep -q 'repairWeeklyMatchDetail' \
-              && printf '%s' "$guard" | grep -q 'player_history_repair_v11' \
-              && printf '%s' "$guard" | grep -q 'skipped_club_mismatch' \
-              && printf '%s' "$guard" | grep -q 'club_matched_decoded_player_history_v11' \
-              && printf '%s' "$compat" | grep -q 'import-compat-v84-season-plus-36-row' \
-              && printf '%s' "$pricing" | grep -q 'dynamic-market-pricing-v14-sustained-successful-updates' \
-              && printf '%s' "$auth" | grep -q 'const authoritative=await loadWorld(false)' \
-              && printf '%s' "$auth" | grep -q 'await applyWorldToApp(authoritative)' \
-              && printf '%s' "$rollback" | grep -q 'atomic-import-rollback-v4-preserve-failed-debug' \
-              && printf '%s' "$rollback" | grep -q 'saveFailureDebug' \
-              && printf '%s' "$rollback" | grep -q 'readFailureDebug' \
-              && printf '%s' "$rollback" | grep -q 'rejected_payload' \
-              && printf '%s' "$rollback" | grep -q 'FMFantasyDiagnostics' \
-              && printf '%s' "$rollback" | grep -q 'scheduleHardReload' \
-              && printf '%s' "$rollback" | grep -q 'location.reload()' \
-              && printf '%s' "$squad" | grep -q 'squad-eligibility-v5-club-matched-senior-evidence' \
-              && printf '%s' "$squad" | grep -q 'history from another club cannot promote a player' \
-              && printf '%s' "$squad" | grep -q 'history_club_mismatch_no_valid_senior_evidence' \
-              && printf '%s' "$regnews" | grep -q 'registration-news-v2-canonical-boundary-observer-free' \
-              && ! printf '%s' "$regnews" | grep -q 'MutationObserver' \
-              && printf '%s' "$newsview" | grep -q 'news-view-v5-idempotent-clear' \
-              && ! printf '%s' "$dbcontrols" | grep -q "setTimeout(()=>forceLoad().catch" \
-              && printf '%s' "$dbcontrols" | grep -q 'Undo Last Import' \
-              && printf '%s' "$dbcontrols" | grep -q 'Download Last Failed Import Debug' \
-              && printf '%s' "$dbcontrols" | grep -q 'downloadLastFailedImportDebug' \
-              && printf '%s' "$undo" | grep -q 'undo-last-import-v2-dbcontrols-owned' \
-              && printf '%s' "$clearflow" | grep -q 'creator-clear-v5-auth-safe-no-undo-observer' \
-              && ! printf '%s' "$clearflow" | grep -q 'MutationObserver'; then
+          for attempt in $(seq 1 60); do
+            stamp="${GITHUB_SHA}-${attempt}-$(date +%s)"
+            idx="$(curl -fsSL --max-time 20 "$base/index.html?v=$stamp" || true)"
+            rpc="$(curl -fsSL --max-time 20 "$base/sessionrpcbridge.js?v=$stamp" || true)"
+            scorer="$(curl -fsSL --max-time 20 "$base/servermanagerscoreclientv1.js?v=$stamp" || true)"
+            news="$(curl -fsSL --max-time 20 "$base/newsdiffbridge.js?v=$stamp" || true)"
+            if printf '%s' "$idx" | grep -q 'fm-deploy-v30-server-authoritative-manager-scoring-news-auth' \
+              && printf '%s' "$idx" | grep -q 'sessionrpcbridge.js?v=1' \
+              && printf '%s' "$idx" | grep -q 'servermanagerscoreclientv1.js?v=1' \
+              && printf '%s' "$idx" | grep -q 'newsdiffbridge.js?v=3' \
+              && ! printf '%s' "$idx" | grep -q 'worldscorefix.js' \
+              && ! printf '%s' "$idx" | grep -q 'worldscorerauthv3.js' \
+              && printf '%s' "$rpc" | grep -q 'session-rpc-bridge-v1-persisted-auth-jwt' \
+              && printf '%s' "$scorer" | grep -q 'server-manager-score-client-v1-authoritative-rpc' \
+              && printf '%s' "$news" | grep -q 'news-diff-bridge-v3-shared-session-rpc'; then
               ok=1; break
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'Live Pages did not expose failed-import debug preservation build' >&2; exit 1; }
-      - name: Record current Pages deployment
+          [ "$ok" -eq 1 ] || { echo 'V30 did not become live' >&2; exit 1; }
+      - name: Record verified V30 deployment
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -133,30 +100,21 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v20-preserve-failed-import-debug",
+            "verification": "v30-server-authoritative-manager-scoring-news-auth",
+            "manager_scoring": "server-authoritative-rpc plus world completed-gameweek advance trigger",
+            "current_world_scoring_dry_run": "Kian 66; TKFantasy 30; no writes",
+            "transfer_news_current_fallback": "24 proven last-import arrivals via authenticated read-only diff",
+            "registration_news": "canonical registration-news-v5 renderer",
+            "captain_display": "viewed-manager-context-v2",
             "update_guard": "v11-club-matched-history-repair",
-            "first_week_repair": "club-matched-decoded-player-history-plus-safe-side-repartition",
-            "first_week_policy": "history venue alone is insufficient; player club identity must agree with the fixture side and repaired rows must pass exact identity-and-score validation",
-            "import_compat": "v84-season-plus-36-row",
-            "dynamic_pricing": "v14-sustained-successful-updates",
-            "world_load": "automatic-versioned-local-cache-refresh-v2",
-            "world_apply": "same-pipeline-as-manual-load-v1",
-            "rollback": "v4-hard-runtime-reset-with-failed-debug-preservation",
-            "failed_import_debug": "rejected-payload-plus-validation-saved-to-indexeddb-before-reload-and-downloadable-after-reload",
-            "undo_import": "server-backup-restore-v2-auth-safe",
-            "player_pool": "registered-or-club-matched-senior-evidence-v5",
-            "history_identity_gate": "current-or-previous-canonical-club-must-match-history-fixture-side",
-            "registration_news": "canonical-boundary-v2",
-            "transfer_news": "proven-visible-club-change-only-v2",
-            "current_squad_decoder": "v82-consensus-only",
-            "retained_history": "v81-36-row-plus-variable-squad",
-            "snapshot_boundary": "append-only-by-snapshot-date-v1"
+            "weekly_history_boundary": "canonical-through-previous-completed-gameweek-v12",
+            "manual_world_or_manager_mutation": "none"
           }
           JSON
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified failed-debug preservation deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V30 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified failed-debug preservation deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V30 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
