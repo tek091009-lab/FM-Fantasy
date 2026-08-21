@@ -1,16 +1,18 @@
 (()=>{
 'use strict';
 /* Presentation-only News layout. No fantasy state is read or mutated here. */
-const VERSION='news-aesthetic-v35-full-width-parent-grid';
+const VERSION='news-aesthetic-v36-stable-empty-state';
 const GRID_ID='fmNewsSixGrid';
 const IDS=['newsTransfers','newsRegistrations','newsPriceUp','newsPriceDown','newsInjuries','newsSuspensions'];
+const EMPTY_TEXT='No changes this import.';
 const EMPTY_RX=/\b(?:no confirmed transfers|no transfers|no registration|no new registration|no changes|no active players|no news available|no items|nothing to show)\b/i;
 let raf=0,busy=false;
 
 function addStyles(){
-  if(document.getElementById('fmNewsAestheticV35Styles'))return;
+  if(document.getElementById('fmNewsAestheticV36Styles'))return;
+  document.getElementById('fmNewsAestheticV35Styles')?.remove();
   const s=document.createElement('style');
-  s.id='fmNewsAestheticV35Styles';
+  s.id='fmNewsAestheticV36Styles';
   s.textContent=`
     #newsPage{width:100%!important;max-width:none!important;min-width:0!important}
     #${GRID_ID}{
@@ -45,6 +47,9 @@ function addStyles(){
       box-sizing:border-box!important;
       overflow:hidden!important;
       align-self:stretch!important;
+      position:relative!important;
+      display:flex!important;
+      flex-direction:column!important;
     }
     #${GRID_ID}>[data-fm-news-full-width-v35="1"]{
       grid-column:1/-1!important;
@@ -63,6 +68,7 @@ function addStyles(){
       flex-wrap:nowrap!important;
       gap:10px!important;
       overflow:visible!important;
+      flex:0 0 auto!important;
     }
     #${GRID_ID} .fmNewsViewAllV34{
       display:inline-flex!important;
@@ -85,6 +91,36 @@ function addStyles(){
       transform:none!important;
     }
     #${GRID_ID} .fmNewsViewAllV34:hover{background:rgba(255,255,255,.11)!important}
+
+    /* One authoritative visual empty state. Underlying News renderers remain untouched. */
+    #${GRID_ID}>.fmNewsEmptyStateV36>*:not(.newsHead):not(.fmNewsEmptyV36){display:none!important}
+    #${GRID_ID}>.fmNewsEmptyStateV36>.fmNewsEmptyV36{
+      flex:1 1 auto!important;
+      min-height:0!important;
+      display:flex!important;
+      flex-direction:column!important;
+      align-items:center!important;
+      justify-content:center!important;
+      gap:8px!important;
+      padding:18px!important;
+      box-sizing:border-box!important;
+      text-align:center!important;
+      color:#b9add8!important;
+      font-size:11px!important;
+    }
+    #${GRID_ID} .fmNewsEmptyDotV36{
+      width:34px!important;
+      height:34px!important;
+      border-radius:999px!important;
+      display:grid!important;
+      place-items:center!important;
+      background:rgba(113,54,190,.20)!important;
+      color:#d6b8ff!important;
+      font-size:18px!important;
+      line-height:1!important;
+    }
+    #${GRID_ID} .fmNewsEmptyDotV36::before{content:'•'}
+
     @media(max-width:900px){
       #${GRID_ID}{
         height:auto!important;
@@ -152,17 +188,39 @@ function numericCount(head){
 function hasInfo(card,head){
   if(card.id==='newsTransfers'){
     const host=card.querySelector('.fmCanonicalTransferRows');
-    if(host)return !!host.querySelector('.fmNewsTransferRow');
+    if(host?.querySelector('.fmNewsTransferRow'))return true;
   }
   if(card.id==='newsRegistrations'){
     const host=card.querySelector('.newsRegRows');
-    if(host)return !!host.querySelector('.newsRegRow');
+    if(host?.querySelector('.newsRegRow'))return true;
   }
   const c=numericCount(head);if(c!==null)return c>0;
-  const rows=Array.from(card.querySelectorAll('[data-news-text],.newsRow,.newsItem')).filter(el=>!EMPTY_RX.test((el.textContent||'').replace(/\s+/g,' ')));
-  if(rows.length)return true;
-  const bodyText=(Array.from(card.children).filter(n=>n!==head).map(n=>n.textContent||'').join(' ')).replace(/\s+/g,' ').trim();
-  return !!bodyText&&!EMPTY_RX.test(bodyText);
+  const rows=Array.from(card.querySelectorAll('[data-news-text],.newsRow,.newsItem,.priceRow,.statusRow,.injury,.suspension,.transfer,tr')).filter(el=>{
+    if(el.closest('.fmNewsEmptyV36'))return false;
+    const text=(el.textContent||'').replace(/\s+/g,' ').trim();
+    return !!text&&!EMPTY_RX.test(text);
+  });
+  return rows.length>0;
+}
+function syncEmptyState(card){
+  const head=headerOf(card);if(!head)return false;
+  const info=hasInfo(card,head);
+  let empty=Array.from(card.children).find(el=>el.classList?.contains('fmNewsEmptyV36'))||null;
+  if(info){
+    card.classList.remove('fmNewsEmptyStateV36');
+    empty?.remove();
+    return true;
+  }
+  card.classList.add('fmNewsEmptyStateV36');
+  if(!empty){
+    empty=document.createElement('div');
+    empty.className='fmNewsEmptyV36';
+    empty.dataset.fmPresentationOnly='1';
+    empty.innerHTML='<span class="fmNewsEmptyDotV36" aria-hidden="true"></span><span class="fmNewsEmptyTextV36"></span>';
+    card.appendChild(empty);
+  }
+  const text=empty.querySelector('.fmNewsEmptyTextV36');if(text&&text.textContent!==EMPTY_TEXT)text.textContent=EMPTY_TEXT;
+  return false;
 }
 function bodyViewButtons(card){
   return Array.from(card.querySelectorAll('[data-news-toggle],button,a,[role="button"]')).filter(el=>{
@@ -201,7 +259,8 @@ function apply(){
   busy=true;
   try{
     addStyles();const grid=ensureGrid();if(!grid)return false;
-    cards().forEach(placeViewAll);sizeGrid(grid);return true;
+    cards().forEach(card=>{syncEmptyState(card);placeViewAll(card)});
+    sizeGrid(grid);return true;
   }finally{busy=false}
 }
 function schedule(){if(busy||raf)return;raf=requestAnimationFrame(()=>{raf=0;apply()})}
@@ -211,6 +270,6 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 window.addEventListener('resize',schedule,{passive:true});
 window.addEventListener('fmcloudready',schedule);window.addEventListener('fmworldloaded',schedule);window.addEventListener('fmcanonicalpublished',schedule);
 new MutationObserver(()=>schedule()).observe(document.documentElement,{subtree:true,childList:true,characterData:true});
-setTimeout(schedule,0);setTimeout(schedule,300);setTimeout(schedule,1200);
+setTimeout(schedule,0);setTimeout(schedule,100);setTimeout(schedule,300);setTimeout(schedule,800);setTimeout(schedule,1600);
 window.FMNewsAestheticV34={version:VERSION,apply,schedule};
 })();
