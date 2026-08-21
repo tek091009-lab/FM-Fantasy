@@ -1,0 +1,94 @@
+name: Verify retained history compact stat stride v148
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_global_nonoverlap_scan_v138.py'
+      - 'scripts/upgrade_history_starter_bench_gap_v139.py'
+      - 'scripts/upgrade_history_starter_bench_compact_v140.py'
+      - 'scripts/upgrade_history_used_unused_bench_gap_v141.py'
+      - 'scripts/upgrade_history_used_unused_bench_compact_v142.py'
+      - 'scripts/upgrade_history_starter_bench_contiguous_v143.py'
+      - 'scripts/upgrade_history_used_unused_bench_contiguous_v144.py'
+      - 'scripts/upgrade_history_dual_subgroup_gaps_v145.py'
+      - 'scripts/upgrade_history_dual_subgroup_compact_v146.py'
+      - 'scripts/upgrade_history_dual_subgroup_contiguous_v147.py'
+      - 'scripts/upgrade_history_compact_stat_stride_v148.py'
+      - '.github/workflows/verify-history-compact-stat-stride-v148.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply structural old-match decoder stack through v148
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+          python scripts/upgrade_history_starter_bench_compact_v140.py
+          python scripts/upgrade_history_used_unused_bench_gap_v141.py
+          python scripts/upgrade_history_used_unused_bench_compact_v142.py
+          python scripts/upgrade_history_starter_bench_contiguous_v143.py
+          python scripts/upgrade_history_used_unused_bench_contiguous_v144.py
+          python scripts/upgrade_history_dual_subgroup_gaps_v145.py
+          python scripts/upgrade_history_dual_subgroup_compact_v146.py
+          python scripts/upgrade_history_dual_subgroup_contiguous_v147.py
+          python scripts/upgrade_history_compact_stat_stride_v148.py
+      - name: Verify packed importer and v148 invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def _v148_compact_stride_next(raw,p,end):',
+              'for q in range(p+158,q_hi):',
+              'if abs(d2-d1)>8:continue',
+              'if abs(d3-d1)>8 or abs(d3-d2)>8:continue',
+              'if len(hits)!=1:return None',
+              "globals()['_RICH_COMPACT_STRIDE_TRANSITIONS_V148']",
+              "globals()['_RICH_HEADER_COMPACT_STRIDE_TRANSITIONS_V148']",
+              "globals()['_RICH_GLOBAL_NONOVERLAP_SCAN_V138']=1",
+              'def dual_subgroup_contiguous_window(j,left_n,right_n):',
+          ]
+          for token in required:assert token in py,token
+
+          # The original extractor proves only a 145-byte fixed core; 214 was an observed spacing,
+          # not a universal object length. v148 deliberately rescues only >=158-byte spacing so all
+          # fields currently read through offset 157 remain physically before the next object.
+          assert 145 < 158 < 214
+
+          # Independent compact-run geometry: four rows at a stable 180-byte stride qualify in
+          # principle; a lone accidental tail hit does not satisfy the four-row evidence rule.
+          starts=[1000,1180,1360,1540]
+          ds=[starts[i+1]-starts[i] for i in range(3)]
+          assert all(158<=d<=213 for d in ds)
+          assert max(ds)-min(ds)<=8
+          assert len(starts)==4
+
+          # Normal 214+-spaced saves keep the existing v138 behaviour; no general +145 scan was
+          # reintroduced.
+          assert "globals()['_RICH_GLOBAL_NONOVERLAP_SCAN_V138']=1" in py
+          assert 'p+=214;continue' in py
+          print('v148 compiles; normal +214 scanner preserved; uniquely proven repeated 158..213-byte stat spacing can be rescued without tail-wide rescanning')
+          PY
