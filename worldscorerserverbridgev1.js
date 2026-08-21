@@ -1,12 +1,13 @@
 (()=>{
 'use strict';
-const VERSION='world-scorer-server-bridge-v1-authenticated-manager-rpc';
+const VERSION='world-scorer-server-bridge-v2-authenticated-rpc-league-sync';
 const cfg=window.FM_FANTASY_CONFIG||{};
 const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
 const arr=v=>Array.isArray(v)?v:[];
 const num=v=>Number(v||0)||0;
 const has=(o,k)=>Object.prototype.hasOwnProperty.call(o||{},String(k));
 const chip=v=>String(v||'').toLowerCase().replace(/[^a-z]/g,'');
+const norm=v=>String(v??'').trim().toLowerCase().replace(/\s+/g,' ');
 let client=null,busy=false,lastSig='';
 function getClient(){
  if(client)return client;
@@ -37,6 +38,9 @@ function chipKey(v){const c=chip(v);if(c.includes('triple'))return'triple';if(c.
 function chipHalf(gw,payload){const total=Math.max(2,num(payload?.meta?.total_gameweeks)||46);return Number(gw)<=Math.ceil(total/2)?'first':'second'}
 function reconcileChips(st,payload){st.chips=st.chips||{};st.chips.first=Object.assign({wildcard:false,triple:false,bench:false},st.chips.first||{});st.chips.second=Object.assign({wildcard:false,triple:false,bench:false},st.chips.second||{});for(const r of arr(st?.pointsHistory)){const key=chipKey(r?.chip);if(key)st.chips[chipHalf(num(r?.gw),payload)][key]=true}}
 function applyResult(st,lineup,result,gw,payload){st.pointsHistory=arr(st.pointsHistory).filter(x=>num(x?.gw)!==gw);st.pointsHistory.push(result);st.pointsHistory.sort((a,b)=>num(a?.gw)-num(b?.gw));if(!st.gameweekLineups||typeof st.gameweekLineups!=='object'||Array.isArray(st.gameweekLineups))st.gameweekLineups={};st.gameweekLineups[String(gw)]={gw:Number(gw),squad:[...(lineup.squad||[])],starters:[...(lineup.starters||[])],bench:[...(lineup.bench||[])],captain:lineup.captain||null,vice:lineup.vice||null,chip:lineup.chip||null,hit:num(lineup.hit)};st.totalPoints=st.pointsHistory.reduce((n,x)=>n+num(x?.net??x?.gross),0);st.completedGameweek=gw;st.currentGameweek=gw+1;st.firstGameweekPlayed=true;if(num(st.lastTransferRollGW)<gw){st.freeTransfers=Math.min(5,Math.max(0,num(st.freeTransfers))+1);st.lastTransferRollGW=gw}st.transferHitThisGW=0;st.activeChip=null;reconcileChips(st,payload)}
+function identityMaps(items){const byTeam=new Map(),byName=new Map();for(const item of items){const st=item.state||{},team=norm(st.teamName||st.team||''),name=norm(st.managerName||st.name||'');if(team&&!byTeam.has(team))byTeam.set(team,item);if(name&&!byName.has(name))byName.set(name,item)}return{byTeam,byName}}
+function authoritativeMemberPatch(source){const st=source?.state||{};return{points:num(st.totalPoints),totalPoints:num(st.totalPoints),pointsHistory:clone(arr(st.pointsHistory)),currentGameweek:num(st.currentGameweek)||Math.max(1,num(st.entryGameweek)||1),completedGameweek:doneGw(st),entryGameweek:Math.max(1,num(st.entryGameweek)||1),teamConfirmed:st.teamConfirmed===true,squad:clone(arr(st.squad)),starters:clone(arr(st.starters)),bench:clone(arr(st.bench)),captain:st.captain||null,vice:st.vice||null,gameweekLineups:clone(st.gameweekLineups&&typeof st.gameweekLineups==='object'?st.gameweekLineups:{})}}
+function syncLeagueMembers(item,maps){const st=item.state;if(!Array.isArray(st?.leagues))return false;let changed=false;for(const league of st.leagues){if(!Array.isArray(league?.members))continue;for(const member of league.members){const source=maps.byTeam.get(norm(member?.team||member?.teamName||''))||maps.byName.get(norm(member?.name||member?.managerName||''));if(!source)continue;const before=JSON.stringify({points:member.points,totalPoints:member.totalPoints,pointsHistory:member.pointsHistory,currentGameweek:member.currentGameweek,completedGameweek:member.completedGameweek,entryGameweek:member.entryGameweek,teamConfirmed:member.teamConfirmed,squad:member.squad,starters:member.starters,bench:member.bench,captain:member.captain,vice:member.vice,gameweekLineups:member.gameweekLineups});Object.assign(member,authoritativeMemberPatch(source));const after=JSON.stringify({points:member.points,totalPoints:member.totalPoints,pointsHistory:member.pointsHistory,currentGameweek:member.currentGameweek,completedGameweek:member.completedGameweek,entryGameweek:member.entryGameweek,teamConfirmed:member.teamConfirmed,squad:member.squad,starters:member.starters,bench:member.bench,captain:member.captain,vice:member.vice,gameweekLineups:member.gameweekLineups});if(before!==after)changed=true}}return changed}
 async function finaliseAll(force=false){
  if(busy||!window.FMCloud?.ready?.()||!window.FMCloud?.isCreator?.())return false;
  busy=true;
@@ -47,29 +51,24 @@ async function finaliseAll(force=false){
   const target=num(payload?.meta?.completed_gameweek);if(!target)return false;
   const sig=`${world.id}|${target}|${world.updated_at||''}|${world.payload_version||0}`;if(!force&&sig===lastSig)return true;
   const {data:rows,error:listError}=await c.rpc('fmfantasy_creator_list_manager_states',{p_world_id:world.id});if(listError)throw listError;
-  const map=playerMap(payload);let changed=0,eligible=0;const scored=[];
-  for(const row of arr(rows)){
-   const st=clone(row?.state||{});if(!(st.teamConfirmed===true||validSubmitted(st)))continue;eligible++;
-   if(st.teamConfirmed!==true)st.teamConfirmed=true;
+  const map=playerMap(payload),items=arr(rows).map(row=>({user_id:String(row.user_id),original:clone(row.state||{}),state:clone(row.state||{}),scored:false,from:doneGw(row.state||{}),to:doneGw(row.state||{})}));let eligible=0;
+  for(const item of items){
+   const st=item.state;if(!(st.teamConfirmed===true||validSubmitted(st)))continue;eligible++;if(st.teamConfirmed!==true)st.teamConfirmed=true;
    const entry=Math.max(1,num(st.entryGameweek)||1),oldDone=doneGw(st);let done=oldDone;
-   for(let gw=Math.max(entry,oldDone+1);gw<=target;gw++){
-    const lineup=lineupFor(st,gw,map);if(!lineup)break;
-    const result=score(map,lineup,gw);if(!result)break;
-    applyResult(st,lineup,result,gw,payload);done=gw;
-   }
-   if(done>oldDone){
-    const {error:saveError}=await c.rpc('fmfantasy_creator_save_manager_state',{p_world_id:world.id,p_user_id:row.user_id,p_state:st});if(saveError)throw saveError;
-    changed++;scored.push({user_id:String(row.user_id),from:oldDone,to:done,total:num(st.totalPoints)});
-   }
+   for(let gw=Math.max(entry,oldDone+1);gw<=target;gw++){const lineup=lineupFor(st,gw,map);if(!lineup)break;const result=score(map,lineup,gw);if(!result)break;applyResult(st,lineup,result,gw,payload);done=gw}
+   item.from=oldDone;item.to=done;item.scored=done>oldDone;
   }
+  const maps=identityMaps(items);for(const item of items)syncLeagueMembers(item,maps);
+  let changed=0;const scored=[];
+  for(const item of items){if(JSON.stringify(item.original)===JSON.stringify(item.state))continue;const {error:saveError}=await c.rpc('fmfantasy_creator_save_manager_state',{p_world_id:world.id,p_user_id:item.user_id,p_state:item.state});if(saveError)throw saveError;changed++;if(item.scored)scored.push({user_id:item.user_id,from:item.from,to:item.to,total:num(item.state.totalPoints)})}
   lastSig=sig;
   console.info('[FM world scorer bridge]',{version:VERSION,target,eligible,changed,scored});
-  if(changed){window.dispatchEvent(new CustomEvent('fmworldmanagersscored',{detail:{gameweek:target,managers:changed,scored,source:VERSION}}));setTimeout(()=>{try{window.FMManagerStateAuthority?.refreshOwnFromServer?.();if(typeof renderAll==='function')renderAll();if(typeof renderLeagues==='function')renderLeagues()}catch(_e){}},180)}
+  if(changed){window.dispatchEvent(new CustomEvent('fmworldmanagersscored',{detail:{gameweek:target,managers:changed,scored,source:VERSION}}));setTimeout(()=>{try{window.FMManagerStateAuthority?.refreshOwnFromServer?.();if(typeof renderAll==='function')renderAll();if(typeof renderLeagues==='function')renderLeagues();if(typeof window.fmRenderLeagueTeamView==='function')window.fmRenderLeagueTeamView()}catch(_e){}},180)}
   return true;
  }catch(e){console.warn('[FM world scorer bridge] failed',e);return false}
  finally{busy=false}
 }
-window.FMWorldScorerServerBridge={version:VERSION,finaliseAll,score,validSubmitted};
+window.FMWorldScorerServerBridge={version:VERSION,finaliseAll,score,validSubmitted,syncLeagueMembers};
 window.fmCreatorFinaliseWorldManagers=()=>finaliseAll(true);
 window.addEventListener('fmcloudready',()=>setTimeout(()=>finaliseAll(true),700));
 window.addEventListener('fmcanonicalpublished',()=>setTimeout(()=>finaliseAll(true),160));
