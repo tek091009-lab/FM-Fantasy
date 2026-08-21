@@ -1,12 +1,12 @@
 (()=>{
 'use strict';
-const VERSION='news-persistence-v1-import-snapshot-only';
+const VERSION='news-persistence-v2-final-import-snapshot-only';
 const PREFIX='fmFantasyNewsSnapshotV1:';
 const SECTION_IDS=['newsTransfers','newsRegistrations','newsPriceUp','newsPriceDown','newsInjuries','newsSuspensions'];
 const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
 const arr=v=>Array.isArray(v)?v:[];
 const norm=v=>String(v??'').trim().toLowerCase();
-let queueInstalled=false,storeInstalled=false,restoring=false,committed=null,pendingImport=null;
+let queueInstalled=false,storeInstalled=false,restoring=false,committed=null,pendingImport=null,commitWindowUntil=0;
 
 function stateRef(){try{return typeof state!=='undefined'?state:null}catch(_e){return null}}
 function worldRef(){try{return window.FMCloud?.getWorld?.()||null}catch(_e){return null}}
@@ -19,7 +19,7 @@ function signature(payload=payloadRef()){
 }
 function readLocal(){const k=key();if(!k)return null;try{const raw=localStorage.getItem(k);return raw?JSON.parse(raw):null}catch(_e){return null}}
 function writeLocal(snap){const k=key();if(!k||!snap)return;try{localStorage.setItem(k,JSON.stringify(snap))}catch(e){console.warn('[FM News persistence] local snapshot save failed',e)}}
-function clearLocal(){const k=key();if(k)try{localStorage.removeItem(k)}catch(_e){};committed=null;pendingImport=null}
+function clearLocal(){const k=key();if(k)try{localStorage.removeItem(k)}catch(_e){};committed=null;pendingImport=null;commitWindowUntil=0}
 function captureDom(){
  const sections={};let count=0;
  for(const id of SECTION_IDS){const el=document.getElementById(id);if(!el)continue;sections[id]={html:el.innerHTML,cleared:el.dataset?.fmNewsCleared||''};count++}
@@ -59,7 +59,7 @@ function applyStateNews(news){
  return changed;
 }
 function restore(){
- if(restoring)return false;
+ if(restoring||Date.now()<commitWindowUntil)return false;
  if(!payloadRef()){clearLocal();return false}
  const snap=chooseSnapshot();if(!snap)return false;
  committed=snap;restoring=true;
@@ -71,10 +71,12 @@ function restore(){
   return true;
  }finally{restoring=false}
 }
-function persistDomForCommitted(){
- if(!committed)return;
- const dom=captureDom();if(!dom.count)return;
- committed={...committed,dom};writeLocal(committed);
+function persistFinalImportSnapshot(){
+ if(!committed||Date.now()>commitWindowUntil)return;
+ const news=captureStateNews(),dom=captureDom();
+ committed={...committed,state_news:clone(news),dom:dom.count?dom:committed.dom};
+ writeLocal(committed);
+ try{const p=payloadRef();if(p?.meta?.news_snapshot_v1)p.meta.news_snapshot_v1.state_news=clone(news)}catch(_e){}
 }
 function makeImportSnapshot(payload,mode){
  const stNews=captureStateNews();
@@ -100,8 +102,10 @@ function installStoreWrapper(){
   if(snap){
    const canonical=result||payload,canon=canonicalSnapshot(canonical);
    committed=canon&&compatible(canon,canonical)?{...snap,...canon}:snap;
+   commitWindowUntil=Date.now()+5000;
    writeLocal(committed);
-   for(const ms of [0,120,350,800,1600,3000])setTimeout(()=>{persistDomForCommitted();restore()},ms);
+   for(const ms of [0,100,250,500,900,1500,2500,4000])setTimeout(persistFinalImportSnapshot,ms);
+   setTimeout(()=>{commitWindowUntil=0;restore()},5200);
   }
   pendingImport=null;
   return result;
@@ -116,17 +120,17 @@ function installQueueGuard(){
  const original=c.queueManagerSave.bind(c);
  c.queueManagerSave=st=>{
   const snap=clone(st||{}),mode=importMode();
-  if(!mode){const keep=committed||chooseSnapshot();if(keep&&keep.state_news!==undefined)snap.news=clone(keep.state_news)}
+  if(!mode&&Date.now()>=commitWindowUntil){const keep=committed||chooseSnapshot();if(keep&&keep.state_news!==undefined)snap.news=clone(keep.state_news)}
   return original(snap);
  };
  queueInstalled=true;return true;
 }
 function scheduleRestore(){for(const ms of [0,80,250,700,1500])setTimeout(restore,ms)}
-window.FMNewsPersistence={version:VERSION,restore,readLocal,chooseSnapshot,captureDom,captureStateNews,clearLocal,status:()=>({version:VERSION,queueInstalled,storeInstalled,hasCommitted:!!committed,local:readLocal(),canonical:canonicalSnapshot()})};
+window.FMNewsPersistence={version:VERSION,restore,readLocal,chooseSnapshot,captureDom,captureStateNews,clearLocal,persistFinalImportSnapshot,status:()=>({version:VERSION,queueInstalled,storeInstalled,hasCommitted:!!committed,commitWindow:Math.max(0,commitWindowUntil-Date.now()),local:readLocal(),canonical:canonicalSnapshot()})};
 window.addEventListener('fmcloudready',()=>{installQueueGuard();installStoreWrapper();scheduleRestore()});
 window.addEventListener('fmworldloaded',scheduleRestore);
 window.addEventListener('focus',scheduleRestore);
-window.addEventListener('fmcanonicalpublished',()=>{if(pendingImport){committed=pendingImport;writeLocal(committed);for(const ms of [50,250,750,1500])setTimeout(persistDomForCommitted,ms)}});
+window.addEventListener('fmcanonicalpublished',()=>{if(pendingImport){committed=pendingImport;commitWindowUntil=Math.max(commitWindowUntil,Date.now()+5000);writeLocal(committed);for(const ms of [50,200,500,1000,2000,3500])setTimeout(persistFinalImportSnapshot,ms)}});
 document.addEventListener('click',e=>{const b=e.target.closest?.('button,a,[role="button"]');if(!b)return;const s=norm(b.textContent||b.dataset?.nav||b.getAttribute('data-page')||'');if(s.includes('news'))scheduleRestore()},true);
-let tries=0;const timer=setInterval(()=>{tries++;installQueueGuard();installStoreWrapper();if(payloadRef()&&!importMode())restore();if((queueInstalled&&storeInstalled)||tries>180)clearInterval(timer)},100);
+let tries=0;const timer=setInterval(()=>{tries++;installQueueGuard();installStoreWrapper();if(payloadRef()&&!importMode()&&Date.now()>=commitWindowUntil)restore();if((queueInstalled&&storeInstalled)||tries>180)clearInterval(timer)},100);
 })();
