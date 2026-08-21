@@ -1,0 +1,56 @@
+name: Core integrity regression gate
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run full core regressions
+        run: |
+          set -euo pipefail
+          node scripts/test_season_publish_v84.js
+          node scripts/test_squad_registration_policy_v3.js
+          node scripts/test_news_persistence_v7.js
+          node scripts/test_news_refresh_manager_state_v8.js
+          node scripts/test_core_integrity_v33.js
+          if [ -f scripts/test_weekly_boundary_v12.js ]; then node scripts/test_weekly_boundary_v12.js; fi
+      - name: Syntax check runtime guards
+        run: |
+          set -euo pipefail
+          node --check sessionrpcbridge.js
+          node --check publishscorebarrier.js
+          node --check transferintegrityguard.js
+          node --check transferrolloverguard.js
+          node --check managerauthoritative.js
+          node --check servermanagerscoreclientv1.js
+          node --check managerstateauthorityv1.js
+          node --check newspersistencev5.js
+          node --check newsworldrecovery.js
+      - name: Verify packed importer compiles
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html); assert m,'embedded importer missing'
+          py=base64.b64decode(m.group(1)).decode('utf-8'); compile(py,'live_importer.py','exec')
+          assert 'browser_build_payload_from_fs' in py
+          print('packed importer compiles')
+          PY
+      - name: Verify source-controlled live migrations
+        run: |
+          set -euo pipefail
+          grep -q 'v_old_player_map' supabase/migrations/20260821165913_optimize_locked_history_merge_v2.sql
+          grep -q 'v_locked_count' supabase/migrations/20260821170136_repair_confirmed_team_transfer_baseline_v1.sql
+          grep -q 'server-authoritative-manager-scoring-v2' supabase/migrations/20260821165500_manager_scoring_v2_entry_ft_and_league_identity.sql

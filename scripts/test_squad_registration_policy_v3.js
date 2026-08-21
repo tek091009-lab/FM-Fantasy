@@ -1,5 +1,5 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
-function context(extra={}){const c={console,setTimeout:()=>0,clearTimeout:()=>{},setInterval:()=>0,clearInterval:()=>{},...extra};c.window=c.window||{addEventListener:()=>{}};c.globalThis=c;return vm.createContext(c)}
+function context(extra={}){const c={console,Date,setTimeout:()=>0,clearTimeout:()=>{},setInterval:()=>0,clearInterval:()=>{},requestAnimationFrame:fn=>fn(),MutationObserver:function(){this.observe=()=>{}},...extra};c.window=c.window||{addEventListener:()=>{}};c.globalThis=c;return vm.createContext(c)}
 {
  const c=context({fmApplyPostPayloadPricingCorrections:p=>p});
  vm.runInContext(fs.readFileSync('squadeligibilityfix.js','utf8'),c);
@@ -34,7 +34,7 @@ function context(extra={}){const c={console,setTimeout:()=>0,clearTimeout:()=>{}
  assert.equal(payload.meta.fantasy_player_pool_policy.includes('history from another club cannot promote a player'),true);
 }
 {
- const document={addEventListener:()=>{},querySelector:()=>null,getElementById:()=>null,head:{appendChild:()=>{}},createElement:()=>({style:{},dataset:{},appendChild:()=>{},querySelector:()=>null,querySelectorAll:()=>[],insertAdjacentElement:()=>{}})};
+ const document={documentElement:{},addEventListener:()=>{},querySelector:()=>null,getElementById:()=>null,head:{appendChild:()=>{}},createElement:()=>({style:{},dataset:{},appendChild:()=>{},querySelector:()=>null,querySelectorAll:()=>[],insertAdjacentElement:()=>{}})};
  const c=context({document});c.window.FMCloud=null;c.window.__FM_IMPORT_MODE_ACTIVE='update';
  vm.runInContext(fs.readFileSync('registrationnewsguard.js','utf8'),c);
  const old={meta:{snapshot_date:'2025-08-30'},players:[

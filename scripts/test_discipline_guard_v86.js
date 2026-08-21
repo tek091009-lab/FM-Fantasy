@@ -12,10 +12,19 @@ const base=window.fmApplyPostPayloadPricingCorrections;
 const v85=function(payload,...args){const out=base(payload,...args);for(const p of payload.players){for(const k of ['suspended','suspension_status','suspension_remaining','suspension_games_remaining','ban_games_remaining','banned_until','suspension_until','suspension_detail','suspension_evidence','suspension_evidence_structural'])delete p[k];p.suspended=true;p.suspension_status='suspended';p.suspension_remaining=1;p.suspension_evidence_structural={source:'selected_competition_history_v85',competition_scope:'selected_league_only',games_remaining:1,reason:'league yellow-card threshold'}}return out};v85.__fmV85Wrapped=true;window.fmApplyPostPayloadPricingCorrections=v85;
 load('disciplineguardv86post.js',ctx);
 assert(window.fmApplyPostPayloadPricingCorrections.__fmV86Post,'post wrapper missing');
+assert.equal(window.FMDisciplineGuardV86Post.version,'discipline-guard-v87-selected-league-authority');
 const direct={pid:1,suspended:true,suspension_status:'Suspended',ban_games_remaining:2,suspension_evidence_structural:{source:'discipline.dat/active-ban-v1',games_remaining:2}};
 const derived={pid:2};const payload={players:[direct,derived],meta:{}};
 window.fmApplyPostPayloadPricingCorrections(payload);
-assert.equal(direct.ban_games_remaining,2);assert.equal(direct.suspension_evidence_structural.source,'discipline.dat/active-ban-v1');
-assert(!derived.suspended);assert(!derived.suspension_evidence_structural);assert.equal(derived.discipline_derived_evidence.history_threshold_candidate.policy,'diagnostic_only_not_current_state_v86');
-assert.equal(payload.meta.discipline_v86.restored_current_evidence,1);assert.equal(payload.meta.discipline_v86.history_derived_candidates_quarantined,1);
-console.log('discipline guard v86 OK');
+for(const p of [direct,derived]){
+ assert.equal(p.suspended,true);
+ assert.equal(p.suspension_evidence_structural.source,'selected_competition_history_v85');
+ assert.equal(p.suspension_evidence_structural.competition_scope,'selected_league_only');
+ assert.equal(p.suspension_remaining,1);
+}
+assert.equal(direct.discipline_derived_evidence.raw_current_ban_candidate.ban_games_remaining,2);
+assert.equal(direct.discipline_derived_evidence.raw_current_ban_candidate.policy,'diagnostic_only_unscoped_competition_v87');
+assert.equal(payload.meta.discipline_v86.selected_league_authoritative,2);
+assert.equal(payload.meta.discipline_v86.raw_unscoped_bans_quarantined,0);
+assert.equal(payload.meta.discipline_current_state_policy.includes('selected-competition history is authoritative'),true);
+console.log('discipline guard v87 selected-league authority OK');

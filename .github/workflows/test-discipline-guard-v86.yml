@@ -18,20 +18,23 @@ jobs:
           node-version: '22'
       - name: Regression test
         run: node scripts/test_discipline_guard_v86.js
-      - name: Verify loader order and direct-ban truth
+      - name: Verify loader order and selected-league truth
         run: |
           python - <<'PY'
           from pathlib import Path
           idx=Path('index.html').read_text()
           pre=idx.index('./disciplineguardv86pre.js?v=1')
-          model=idx.index('./importmodelv85.js?v=1')
-          post=idx.index('./disciplineguardv86post.js?v=1')
+          model=idx.index('./importmodelv85.js?v=2')
+          post=idx.index('./disciplineguardv86post.js?v=2')
           assert pre < model < post
-          assert './availabilitytruth.js?v=7' in idx
+          assert './availabilitytruth.js?v=8' in idx
           truth=Path('availabilitytruth.js').read_text()
-          assert "src!=='discipline.dat/active-ban-v1'" in truth
-          assert "selected_competition_history_v85" not in truth
+          assert "selected_competition_history_v85" in truth
+          assert "competition_scope" in truth
+          assert "availability-truth-v8-selected-league-discipline" in truth
           guard=Path('disciplineguardv86post.js').read_text()
-          assert 'diagnostic_only_not_current_state_v86' in guard
-          print('v86 loader/direct-ban assertions OK')
+          assert 'discipline-guard-v87-selected-league-authority' in guard
+          assert 'diagnostic_only_unscoped_competition_v87' in guard
+          assert 'selected_competition_history_v85' in guard
+          print('v87 loader/selected-league assertions OK')
           PY
