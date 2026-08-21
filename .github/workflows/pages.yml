@@ -32,6 +32,7 @@ jobs:
           node scripts/test_season_publish_v84.js
           node scripts/test_squad_registration_policy_v3.js
           node scripts/test_news_persistence_v7.js
+          node scripts/test_news_refresh_manager_state_v8.js
           if [ -f scripts/test_weekly_boundary_v12.js ]; then node scripts/test_weekly_boundary_v12.js; fi
       - name: Check current JavaScript syntax
         run: |
@@ -41,6 +42,7 @@ jobs:
           node --check cloudapply.js
           node --check newspersistencev5.js
           node --check newsworldrecovery.js
+          node --check managerauthoritative.js
           node --check servermanagerscoreclientv1.js
           node --check managerstateauthorityv1.js
           node --check captainpointsdisplay.js
@@ -66,7 +68,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify V32.7 public deployment
+      - name: Verify V32.8 public deployment
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -81,11 +83,12 @@ jobs:
             view="$(curl -fsSL --max-time 20 "$base/newsview.js?v=$stamp" || true)"
             recover="$(curl -fsSL --max-time 20 "$base/newsworldrecovery.js?v=$stamp" || true)"
             cloud="$(curl -fsSL --max-time 20 "$base/cloudapply.js?v=$stamp" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-v32-7-news-lifecycle-authority' \
+            manager="$(curl -fsSL --max-time 20 "$base/managerauthoritative.js?v=$stamp" || true)"
+            if printf '%s' "$idx" | grep -q 'fm-deploy-v32-8-news-refresh-manager-state' \
               && printf '%s' "$idx" | grep -q 'newsview.js?v=6' \
               && printf '%s' "$idx" | grep -q 'newspersistencev5.js?v=7' \
               && printf '%s' "$idx" | grep -q 'newsworldrecovery.js?v=1' \
-              && ! printf '%s' "$idx" | grep -q 'newspersistencev4.js?v=6' \
+              && printf '%s' "$idx" | grep -q 'managerauthoritative.js?v=3' \
               && printf '%s' "$persist" | grep -q 'news-persistence-v7-import-news-authority' \
               && printf '%s' "$persist" | grep -q 'active_statuses:active' \
               && printf '%s' "$persist" | grep -q 'recoverFromPayload' \
@@ -93,13 +96,15 @@ jobs:
               && printf '%s' "$view" | grep -q 'if(hasPayload()){markActive();return false}' \
               && printf '%s' "$recover" | grep -q 'news-world-recovery-v1-canonical-payload-authority' \
               && printf '%s' "$recover" | grep -q 'FMCloud.loadWorld(true)' \
-              && printf '%s' "$cloud" | grep -q 'cloud-apply-v2-canonical-world-beats-stale-clear-flag'; then
+              && printf '%s' "$cloud" | grep -q 'cloud-apply-v2-canonical-world-beats-stale-clear-flag' \
+              && printf '%s' "$manager" | grep -q 'manager-authoritative-v2-preserve-world-derived-news' \
+              && printf '%s' "$manager" | grep -q 'restoreWorldDerivedState(worldDerived)'; then
               ok=1; break
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'V32.7 did not become live' >&2; exit 1; }
-      - name: Record verified V32.7 deployment
+          [ "$ok" -eq 1 ] || { echo 'V32.8 did not become live' >&2; exit 1; }
+      - name: Record verified V32.8 deployment
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -110,21 +115,21 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v32-7-news-lifecycle-authority",
+            "verification": "v32-8-news-refresh-manager-state",
             "news_clear_lifecycle": "a non-null canonical FM world automatically removes stale clear markers; the News clear observer is forbidden from wiping sections while a real payload exists",
-            "news_persistence": "state.news, state.activeStatuses, global NEWS and rendered News DOM are persisted for the imported database; season injury/suspension News can be rebuilt directly from the imported player availability payload even without a prior snapshot",
-            "news_refresh_policy": "refresh immediately restores the matching imported News model and cannot be blocked by a capture window or payload_version; late native rerenders are guarded",
-            "news_world_recovery": "canonical world loading deliberately ignores a stale local clear marker so a successful import cannot be hidden on the next refresh",
-            "news_regression_test": "verifies full active-status persistence, payload recovery hooks, payload-aware clear handling and canonical-world stale-clear recovery",
+            "news_persistence": "state.news, state.activeStatuses, global NEWS and rendered News DOM are persisted for the imported database",
+            "news_refresh_policy": "manager-state hydration preserves database-derived News and activeStatuses instead of replacing them with DEFAULT or stale manager-state values",
+            "news_world_recovery": "canonical world loading deliberately ignores a stale local clear marker so a successful import cannot be hidden on refresh",
+            "news_regression_test": "dynamically executes manager-authoritative restore with an empty remote manager News state and asserts imported News and activeStatuses survive the later manager refresh/render path",
             "transfer_news": "server BEFORE-update canonical transfer-news trigger plus public read-only current-import fallback",
-            "manager_scoring": "server-authoritative completed-gameweek trigger",
+            "manager_scoring": "server-authoritative completed-gameweek trigger without wiping imported News",
             "weekly_history_boundary": "canonical-through-previous-completed-gameweek-v12"
           }
           JSON
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.7 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.8 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.7 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.8 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
