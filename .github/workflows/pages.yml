@@ -35,6 +35,7 @@ jobs:
           node scripts/test_news_refresh_manager_state_v8.js
           node scripts/test_core_integrity_v33.js
           if [ -f scripts/test_weekly_boundary_v12.js ]; then node scripts/test_weekly_boundary_v12.js; fi
+          python scripts/test_news_aesthetic_v34.py
       - name: Check current JavaScript syntax
         run: |
           node --check sessionrpcbridge.js
@@ -43,6 +44,7 @@ jobs:
           node --check transferrolloverguard.js
           node --check newsdiffbridge.js
           node --check newsview.js
+          node --check newsaestheticv34.js
           node --check cloudapply.js
           node --check newspersistencev5.js
           node --check newsworldrecovery.js
@@ -72,7 +74,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify V33 public deployment
+      - name: Verify V34 public deployment
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -85,6 +87,7 @@ jobs:
             idx="$(curl -fsSL --max-time 20 "$base/index.html?v=$stamp" || true)"
             persist="$(curl -fsSL --max-time 20 "$base/newspersistencev5.js?v=$stamp" || true)"
             view="$(curl -fsSL --max-time 20 "$base/newsview.js?v=$stamp" || true)"
+            aesthetic="$(curl -fsSL --max-time 20 "$base/newsaestheticv34.js?v=$stamp" || true)"
             recover="$(curl -fsSL --max-time 20 "$base/newsworldrecovery.js?v=$stamp" || true)"
             cloud="$(curl -fsSL --max-time 20 "$base/cloudapply.js?v=$stamp" || true)"
             manager="$(curl -fsSL --max-time 20 "$base/managerauthoritative.js?v=$stamp" || true)"
@@ -92,12 +95,19 @@ jobs:
             barrier="$(curl -fsSL --max-time 20 "$base/publishscorebarrier.js?v=$stamp" || true)"
             transfer="$(curl -fsSL --max-time 20 "$base/transferintegrityguard.js?v=$stamp" || true)"
             rollover="$(curl -fsSL --max-time 20 "$base/transferrolloverguard.js?v=$stamp" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-v33-core-integrity' \
+            if printf '%s' "$idx" | grep -q 'fm-deploy-v34-news-six-card-layout' \
+              && printf '%s' "$idx" | grep -q 'newsaestheticv34.js?v=1' \
               && printf '%s' "$idx" | grep -q 'sessionrpcbridge.js?v=2' \
               && printf '%s' "$idx" | grep -q 'publishscorebarrier.js?v=2' \
               && printf '%s' "$idx" | grep -q 'managerauthoritative.js?v=4' \
               && printf '%s' "$idx" | grep -q 'transferintegrityguard.js?v=2' \
               && printf '%s' "$idx" | grep -q 'transferrolloverguard.js?v=1' \
+              && printf '%s' "$aesthetic" | grep -q 'news-aesthetic-v34-six-equal-cards' \
+              && printf '%s' "$aesthetic" | grep -q 'grid-template-columns:repeat(2,minmax(0,1fr))' \
+              && printf '%s' "$aesthetic" | grep -q 'grid-template-rows:repeat(3,minmax(0,1fr))' \
+              && ! printf '%s' "$aesthetic" | grep -q 'FMCloud' \
+              && ! printf '%s' "$aesthetic" | grep -q 'publishWorld' \
+              && ! printf '%s' "$aesthetic" | grep -q 'managerState' \
               && printf '%s' "$persist" | grep -q 'news-persistence-v7-import-news-authority' \
               && printf '%s' "$persist" | grep -q 'active_statuses:active' \
               && printf '%s' "$view" | grep -q 'news-view-v6-payload-aware-clear-state' \
@@ -116,8 +126,8 @@ jobs:
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'V33 did not become live' >&2; exit 1; }
-      - name: Record verified V33 deployment
+          [ "$ok" -eq 1 ] || { echo 'V34 did not become live' >&2; exit 1; }
+      - name: Record verified V34 deployment
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -128,21 +138,22 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v33-core-integrity",
-            "database_import": "canonical publish is server authoritative and weekly history merge uses indexed player maps",
-            "team_state": "manager hydrate restores critical saved squad, locked transfer baseline, bank, gameweek, points and FT state while preserving imported-world News",
-            "transfers": "confirmed teams seed a real 15-player locked baseline; transfer confirmation cannot mint the current gameweek FT",
-            "leagues": "server scoring synchronises member identity and points using user id with team/name/squad fallbacks",
-            "weekly_import": "publish is not considered complete until manager scoring succeeds; scoring failure retries then rolls back and reloads the previous canonical world",
-            "undo": "controlled import rollback may regress the canonical world while ordinary imports may not",
-            "news": "V32.8 News persistence and refresh protections retained",
-            "regressions": "season publish, squad registration, News persistence, manager critical state, transfer baseline, FT spend, publish scoring barrier, rollback reload, packed importer compile"
+            "verification": "v34-news-six-card-layout",
+            "database_import": "V33 canonical import and weekly scoring protections retained unchanged",
+            "team_state": "V33 manager squad, locked baseline, bank, gameweek, points and FT protections retained unchanged",
+            "transfers": "V33 transfer integrity protections retained unchanged",
+            "leagues": "V33 authoritative manager and league sync retained unchanged",
+            "weekly_import": "V33 publish-score barrier and safe rollback retained unchanged",
+            "undo": "V33 controlled rollback retained unchanged",
+            "news": "six existing News sections render as two equal columns by three equal rows; View all is header-visible whenever a section contains data",
+            "presentation_scope": "newsaestheticv34.js is DOM/CSS only and does not read or mutate FMCloud, manager state, imports, scoring, transfers or persistence",
+            "regressions": "V33 core suite plus packed News DOM, dynamic registration-card insertion, V34 syntax and presentation-only source guard"
           }
           JSON
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V33 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V34 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V33 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V34 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
