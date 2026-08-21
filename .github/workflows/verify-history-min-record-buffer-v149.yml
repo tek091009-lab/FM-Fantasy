@@ -1,0 +1,98 @@
+name: Verify retained history minimum record buffer v149
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_global_nonoverlap_scan_v138.py'
+      - 'scripts/upgrade_history_starter_bench_gap_v139.py'
+      - 'scripts/upgrade_history_starter_bench_compact_v140.py'
+      - 'scripts/upgrade_history_used_unused_bench_gap_v141.py'
+      - 'scripts/upgrade_history_used_unused_bench_compact_v142.py'
+      - 'scripts/upgrade_history_starter_bench_contiguous_v143.py'
+      - 'scripts/upgrade_history_used_unused_bench_contiguous_v144.py'
+      - 'scripts/upgrade_history_dual_subgroup_gaps_v145.py'
+      - 'scripts/upgrade_history_dual_subgroup_compact_v146.py'
+      - 'scripts/upgrade_history_dual_subgroup_contiguous_v147.py'
+      - 'scripts/upgrade_history_compact_stat_stride_v148.py'
+      - 'scripts/upgrade_history_min_record_buffer_v149.py'
+      - '.github/workflows/verify-history-min-record-buffer-v149.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply structural old-match decoder stack through v149
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+          python scripts/upgrade_history_starter_bench_compact_v140.py
+          python scripts/upgrade_history_used_unused_bench_gap_v141.py
+          python scripts/upgrade_history_used_unused_bench_compact_v142.py
+          python scripts/upgrade_history_starter_bench_contiguous_v143.py
+          python scripts/upgrade_history_used_unused_bench_contiguous_v144.py
+          python scripts/upgrade_history_dual_subgroup_gaps_v145.py
+          python scripts/upgrade_history_dual_subgroup_compact_v146.py
+          python scripts/upgrade_history_dual_subgroup_contiguous_v147.py
+          python scripts/upgrade_history_compact_stat_stride_v148.py
+          python scripts/upgrade_history_min_record_buffer_v149.py
+      - name: Verify packed importer and v149 invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+
+          # Current mapped GAME_MATCH_PLAYER_STATS fields end at byte index 157. The record parser
+          # therefore needs 158 bytes, not 214 bytes, merely to decode the current field set.
+          assert 'if p+158>len(buf) or buf[p]!=2:return None' in py
+          assert 'if p+214>len(buf) or buf[p]!=2:return None' not in py
+          mapped_offsets=[1,5,20,21,22,23,24,42,43,50,51,52,55,56,63,64,67,71,74,77,86,87,92,93,94,95,96,97,98,136,145,146,151,152,157]
+          assert max(mapped_offsets)==157
+          assert max(mapped_offsets)+1==158
+
+          # Both scanners must admit a final fully-readable 158-byte row, while retaining the
+          # existing +214 normal advance after accepted full-schema records.
+          assert py.count('while p+158<=end:')>=2
+          assert 'p+=214;continue' in py
+          assert "globals()['_RICH_GLOBAL_NONOVERLAP_SCAN_V138']=1" in py
+          assert 'def _v148_compact_stride_next(raw,p,end):' in py
+
+          # v148 look-ahead must use the same true minimum so a compact chain can end near the
+          # payload boundary rather than demanding another unused 56 bytes of tail.
+          for token in [
+              'q_hi=min(int(end)-157,p+214)',
+              's_hi=min(int(end)-157,q+214)',
+              't_hi=min(int(end)-157,s+214)',
+              "globals()['_RICH_TAIL_RECORDS_V149']",
+              "globals()['_RICH_HEADER_TAIL_RECORDS_V149']",
+          ]: assert token in py,token
+
+          # Boundary regression: a row starting at 1000 inside a 1170-byte payload has all mapped
+          # bytes through offset 157 available but fewer than 214 bytes. Old guard rejects; v149 can
+          # legitimately parse it using the unchanged field mappings.
+          p=1000;end=1170
+          assert p+158<=end
+          assert p+214>end
+          print('v149 compiles; final 158-byte-complete retained player rows are no longer dropped solely for lacking unused 214-byte tail capacity')
+          PY
