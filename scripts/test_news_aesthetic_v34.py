@@ -40,19 +40,26 @@ assert "transfers.insertAdjacentElement('afterend',card)" in reg
 assert "card.innerHTML='<div class=\"newsHead\"" in reg
 
 js=Path('newsaestheticv34.js').read_text()
+assert "news-aesthetic-v35-full-width-parent-grid" in js
+assert "const GRID_ID='fmNewsSixGrid'" in js
 assert "const IDS=['newsTransfers','newsRegistrations','newsPriceUp','newsPriceDown','newsInjuries','newsSuspensions']" in js
 assert "grid-template-columns:repeat(2,minmax(0,1fr))" in js
-assert "grid-template-rows:repeat(3,minmax(0,1fr))" in js
+assert "grid-template-rows:repeat(3,minmax(0,1fr)) auto" in js
+assert "parent.id=GRID_ID" in js
+assert "parent.dataset.fmParentGridV35='1'" in js
+assert "el.dataset.fmNewsFullWidthV35='1'" in js
 assert "btn.dataset.newsToggle=card.id+'Full'" in js
 assert "head.appendChild(btn)" in js
-assert "if(cs.length!==IDS.length)return null" in js
-assert "commonParent(cs)" in js
+# Regression for the V34 bug: never nest the six cards in a new grid cell.
+assert "grid=document.createElement('div')" not in js
+assert "parent.insertBefore(grid,cs[0])" not in js
+assert "grid.appendChild(card)" not in js
 for forbidden in ['FMCloud','queueManagerSave','publishWorld','localStorage','sessionStorage','supabase','managerState','freeTransfers','totalPoints']:
     assert forbidden not in js,f'presentation patch must not touch system state: {forbidden}'
 idx=Path('index.html').read_text()
 assert './registrationnewsguard.js?v=5' in idx
-assert './newsview.js?v=6' in idx and './newsaestheticv34.js?v=1' in idx
-assert idx.index('./registrationnewsguard.js?v=5') < idx.index('./newsaestheticv34.js?v=1')
-assert idx.index('./newsview.js?v=6') < idx.index('./newsaestheticv34.js?v=1')
-assert 'fm-deploy-v34-news-six-card-layout' in idx
-print('News v34 presentation-only regression passed: five packed cards share one parent and dynamic registrations is inserted beside Transfers')
+assert './newsview.js?v=6' in idx and './newsaestheticv34.js?v=2' in idx
+assert idx.index('./registrationnewsguard.js?v=5') < idx.index('./newsaestheticv34.js?v=2')
+assert idx.index('./newsview.js?v=6') < idx.index('./newsaestheticv34.js?v=2')
+assert 'fm-deploy-v35-news-full-width-parent-grid' in idx
+print('News v35 presentation regression passed: existing full-width parent is the six-card grid; no nested half-width wrapper')

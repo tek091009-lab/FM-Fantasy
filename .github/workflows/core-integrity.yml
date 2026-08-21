@@ -24,6 +24,7 @@ jobs:
           node scripts/test_core_integrity_v33.js
           if [ -f scripts/test_weekly_boundary_v12.js ]; then node scripts/test_weekly_boundary_v12.js; fi
           python scripts/test_news_aesthetic_v34.py
+          node scripts/test_news_parent_layout_v35.js
       - name: Syntax check runtime guards
         run: |
           set -euo pipefail

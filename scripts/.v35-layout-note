@@ -1,0 +1,1 @@
+V35 invariant: the existing full-width News card parent is the 2x3 grid. Never nest all six cards inside a new wrapper that becomes one legacy grid cell.
