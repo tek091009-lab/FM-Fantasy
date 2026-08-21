@@ -5,6 +5,7 @@
  const CLEAR_KEY='fmFantasyCloudDatabaseCleared';
  const wasCleared=()=>{try{return localStorage.getItem(CLEAR_KEY)==='1'||sessionStorage.getItem(CLEAR_KEY)==='1'}catch(_){return false}};
  const markActive=()=>{try{localStorage.removeItem(CLEAR_KEY);sessionStorage.removeItem(CLEAR_KEY)}catch(_){}};
+ function restoreNews(){try{if(window.FMNewsPersistence?.restore?.('cloud world applied'))return}catch(_e){}try{window.FMNewsPersistence?.recoverFromPayload?.('cloud world applied')}catch(_e){}}
  async function applyCloudWorld(){
    if(done||!window.FMCloud?.ready?.())return;
    try{
@@ -21,7 +22,7 @@
        try{Object.assign(window.state,window.FMCloud.managerState)}catch(_e){}
      }
      if(typeof window.renderAll==='function')window.renderAll();
-     try{window.FMNewsPersistence?.recoverFromPayload?.('cloud world applied')}catch(_e){}
+     restoreNews();
      try{window.FMRegistrationNewsGuard?.refresh?.()}catch(_e){}
      done=true;
      if(timer)clearInterval(timer);
