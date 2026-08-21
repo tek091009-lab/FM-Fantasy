@@ -34,6 +34,7 @@ jobs:
           node scripts/test_news_persistence_v7.js
           node scripts/test_news_refresh_manager_state_v8.js
           node scripts/test_core_integrity_v33.js
+          node scripts/test_transfer_draft_survives_restore_v37.js
           if [ -f scripts/test_weekly_boundary_v12.js ]; then node scripts/test_weekly_boundary_v12.js; fi
           python scripts/test_news_aesthetic_v34.py
       - name: Check current JavaScript syntax
@@ -74,7 +75,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify V36 public deployment
+      - name: Verify V37 public deployment
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -95,11 +96,11 @@ jobs:
             barrier="$(curl -fsSL --max-time 20 "$base/publishscorebarrier.js?v=$stamp" || true)"
             transfer="$(curl -fsSL --max-time 20 "$base/transferintegrityguard.js?v=$stamp" || true)"
             rollover="$(curl -fsSL --max-time 20 "$base/transferrolloverguard.js?v=$stamp" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-v36-news-stable-empty-state' \
+            if printf '%s' "$idx" | grep -q 'fm-deploy-v37-transfer-draft-restore' \
               && printf '%s' "$idx" | grep -q 'newsaestheticv34.js?v=3' \
               && printf '%s' "$idx" | grep -q 'sessionrpcbridge.js?v=2' \
               && printf '%s' "$idx" | grep -q 'publishscorebarrier.js?v=2' \
-              && printf '%s' "$idx" | grep -q 'managerauthoritative.js?v=4' \
+              && printf '%s' "$idx" | grep -q 'managerauthoritative.js?v=5' \
               && printf '%s' "$idx" | grep -q 'transferintegrityguard.js?v=2' \
               && printf '%s' "$idx" | grep -q 'transferrolloverguard.js?v=1' \
               && printf '%s' "$aesthetic" | grep -q 'news-aesthetic-v36-stable-empty-state' \
@@ -117,8 +118,10 @@ jobs:
               && printf '%s' "$view" | grep -q 'news-view-v6-payload-aware-clear-state' \
               && printf '%s' "$recover" | grep -q 'news-world-recovery-v1-canonical-payload-authority' \
               && printf '%s' "$cloud" | grep -q 'cloud-apply-v2-canonical-world-beats-stale-clear-flag' \
-              && printf '%s' "$manager" | grep -q 'manager-authoritative-v3-critical-state-integrity' \
+              && printf '%s' "$manager" | grep -q 'manager-authoritative-v4-preserve-transfer-drafts' \
               && printf '%s' "$manager" | grep -q 'restoreWorldDerivedState(worldDerived)' \
+              && printf '%s' "$manager" | grep -q 'restoreTransferDraft(transferDraft)' \
+              && printf '%s' "$manager" | grep -q 'function hasTransferDraft' \
               && printf '%s' "$session" | grep -q 'session-rpc-bridge-v2-authenticated-supabase-client' \
               && printf '%s' "$barrier" | grep -q 'publish-score-barrier-v2-score-before-import-completes' \
               && printf '%s' "$barrier" | grep -q 'fmfantasy_undo_last_import' \
@@ -130,8 +133,8 @@ jobs:
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'V36 did not become live' >&2; exit 1; }
-      - name: Record verified V36 deployment
+          [ "$ok" -eq 1 ] || { echo 'V37 did not become live' >&2; exit 1; }
+      - name: Record verified V37 deployment
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -142,22 +145,21 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v36-news-stable-empty-state",
+            "verification": "v37-transfer-draft-restore",
             "database_import": "V33 canonical import and weekly scoring protections retained unchanged",
-            "team_state": "V33 manager squad, locked baseline, bank, gameweek, points and FT protections retained unchanged",
-            "transfers": "V33 transfer integrity protections retained unchanged",
+            "team_state": "server-authoritative manager progress retained; unconfirmed transfer draft fields are preserved across delayed manager restores",
+            "transfers": "pending squad, XI/bench, captain/vice and bank survive repeated startup/server refreshes until Confirm/Clear Draft; freeTransfers and locked baseline remain server authoritative",
             "leagues": "V33 authoritative manager and league sync retained unchanged",
             "weekly_import": "V33 publish-score barrier and safe rollback retained unchanged",
             "undo": "V33 controlled rollback retained unchanged",
-            "news": "all six empty News cards display one stable No changes this import state; underlying competing empty renderers are visually suppressed; full-width 2x3 layout and header View all behaviour retained",
-            "presentation_scope": "newsaestheticv34.js is DOM/CSS only and does not read or mutate fantasy, import, scoring, transfer or persistence state",
-            "regressions": "V33 core suite plus full-width-parent regression, six-card stable empty-state source guard, packed News DOM, syntax and presentation-only isolation"
+            "news": "V36 stable six-card News layout and empty-state behaviour retained unchanged",
+            "regressions": "V33 core suite plus News lifecycle and V37 repeated manager-restore tests for both 15-player replacement drafts and 14-player transfer-out drafts"
           }
           JSON
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V36 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V37 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V36 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V37 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
