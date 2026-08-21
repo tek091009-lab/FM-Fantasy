@@ -76,7 +76,8 @@ function nativeQuality(){
  return qualityOfParts(st,gn,dom);
 }
 function saveCandidate(reason){
- if(restoring||Date.now()>captureUntil)return false;
+ // Absolute rule: persistence is read/write silent while an FM import is active.
+ if(restoring||importMode()||Date.now()>captureUntil)return false;
  const payload=payloadRef();if(!payload)return false;
  const snap=buildSnapshot(reason||captureReason);if(!snap||snap.quality<=0)return false;
  const existing=readLocal();
@@ -85,7 +86,7 @@ function saveCandidate(reason){
  return false;
 }
 function queueCapture(reason){
- if(Date.now()>captureUntil||restoring||captureQueued)return;
+ if(importMode()||Date.now()>captureUntil||restoring||captureQueued)return;
  captureQueued=true;
  setTimeout(()=>{captureQueued=false;saveCandidate(reason)},80);
 }
@@ -124,6 +125,7 @@ function restore(reason='refresh fallback'){
  const snap=readLocal();if(!snap||Number(snap.quality||0)<=0||!compatible(snap,payload))return false;
  restoring=true;
  try{
+  // Restore the two independent news stores independently; never short-circuit one with the other.
   const stateChanged=applyStateNews(snap.state_news);
   const globalChanged=applyGlobalNews(snap.global_news);
   if(stateChanged||globalChanged){try{if(typeof renderAll==='function')renderAll()}catch(_e){}}
