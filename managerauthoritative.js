@@ -1,5 +1,5 @@
 (()=>{
- const VERSION='manager-authoritative-v4-preserve-transfer-drafts';
+ const VERSION='manager-authoritative-v5-preserve-all-manager-drafts';
  const cfg=window.FM_FANTASY_CONFIG||{};
  if(!window.supabase||!cfg.supabaseUrl||!cfg.supabaseAnonKey)return;
  let client=null,busy=false,lastStamp='';
@@ -25,6 +25,17 @@
   if(Object.prototype.hasOwnProperty.call(saved,'news'))state.news=saved.news;
   if(Object.prototype.hasOwnProperty.call(saved,'activeStatuses'))state.activeStatuses=saved.activeStatuses;
  }
+ function editableDiff(a,b){
+  if(!a||!b)return true;
+  if(idSet(a.squad)!==idSet(b.squad))return true;
+  if(idSet(a.starters)!==idSet(b.starters))return true;
+  if(idSet(a.bench)!==idSet(b.bench))return true;
+  if(String(a.captain??'')!==String(b.captain??''))return true;
+  if(String(a.vice??'')!==String(b.vice??''))return true;
+  const ab=Number(a.bank),bb=Number(b.bank);
+  if(Number.isFinite(ab)&&Number.isFinite(bb)&&Math.abs(ab-bb)>1e-9)return true;
+  return false;
+ }
  function hasTransferDraft(st){
   st=st||(typeof state!=='undefined'?state:null);
   if(!st?.teamConfirmed||arr(st.lockedSquad).length!==15)return false;
@@ -37,25 +48,49 @@
   const bank=Number(st.bank),lockedBank=Number(st.lockedBank);
   return Number.isFinite(bank)&&Number.isFinite(lockedBank)&&Math.abs(bank-lockedBank)>1e-9;
  }
- function captureTransferDraft(){
-  if(typeof state==='undefined'||!hasTransferDraft(state))return null;
+ function hasInitialSquadDraft(st){
+  st=st||(typeof state!=='undefined'?state:null);
+  if(!st||st.teamConfirmed)return false;
+  const squad=arr(st.squad);if(!squad.length||squad.length>15)return false;
+  // FMCloud.managerState is deliberately kept as the last server snapshot.
+  // If the live builder differs from it, the user has an unsaved/in-flight
+  // squad edit and a delayed server hydrate must not paint the older snapshot
+  // back over the click that just happened.
+  const server=window.FMCloud?.managerState||null;
+  if(!server)return true;
+  if(server.teamConfirmed)return false;
+  return editableDiff(st,server);
+ }
+ function hasManagerDraft(st){return hasTransferDraft(st)||hasInitialSquadDraft(st)}
+ function captureManagerDraft(){
+  if(typeof state==='undefined'||!hasManagerDraft(state))return null;
   const out={};
   for(const k of ['squad','starters','bench','captain','vice','bank'])if(Object.prototype.hasOwnProperty.call(state,k))out[k]=clone(state[k]);
   return out;
  }
- function restoreTransferDraft(saved){
+ function restoreManagerDraft(saved){
   if(typeof state==='undefined'||!state||!saved)return false;
   for(const k of ['squad','starters','bench','captain','vice','bank'])if(Object.prototype.hasOwnProperty.call(saved,k))state[k]=clone(saved[k]);
   return true;
  }
+ // Backward-compatible names retained for the V37 transfer regression/API.
+ const captureTransferDraft=captureManagerDraft;
+ const restoreTransferDraft=restoreManagerDraft;
  function signature(remote,updatedAt=''){
   return [updatedAt,ids(remote?.squad),ids(remote?.lockedSquad),arr(remote?.starters).length,arr(remote?.bench).length,num(remote?.currentGameweek),num(remote?.completedGameweek),arr(remote?.pointsHistory).length,num(remote?.totalPoints),num(remote?.freeTransfers),num(remote?.lastTransferRollGW),String(remote?.lockedBank??''),String(remote?.teamName??''),String(remote?.managerName??'')].join('~');
  }
  function criticalHealthy(remote){
   if(typeof state==='undefined'||!state)return false;
-  const draft=hasTransferDraft(state);
-  if(!draft&&(arr(state.squad).length!==15||arr(state.starters).length!==11||arr(state.bench).length!==4))return false;
-  if(draft&&(!arr(state.squad).length||arr(state.squad).length>15))return false;
+  const draft=hasManagerDraft(state);
+  if(state.teamConfirmed){
+    if(!draft&&(arr(state.squad).length!==15||arr(state.starters).length!==11||arr(state.bench).length!==4))return false;
+    if(draft&&(!arr(state.squad).length||arr(state.squad).length>15))return false;
+  }else{
+    if(arr(state.squad).length>15)return false;
+    // A partial initial squad is a valid live state. If it is not a local draft,
+    // it must exactly match the server snapshot before we call it healthy.
+    if(!draft&&editableDiff(state,remote))return false;
+  }
   if(remote?.teamConfirmed&&arr(remote?.lockedSquad).length===15){
     if(arr(state.lockedSquad).length!==15||ids(state.lockedSquad)!==ids(remote.lockedSquad))return false;
     if(String(state.lockedBank??'')!==String(remote.lockedBank??''))return false;
@@ -82,16 +117,17 @@
    const sig=signature(clean,data.updated_at||'');
    if(sig===lastStamp&&criticalHealthy(clean))return true;
    if(typeof state==='undefined'||typeof DEFAULT==='undefined')return false;
-   // The server owns confirmed manager progress, but it must never erase a
-   // transfer the user is still drafting in the browser. Capture only editable
-   // transfer fields; FT balance, GW progress, points and the locked baseline
-   // continue to come from the server.
-   const transferDraft=captureTransferDraft();
+   // Server progress remains authoritative, but editable manager work must survive
+   // a stale hydrate while its queued save is still in flight. This covers both
+   // initial squad construction and confirmed-team transfer drafting.
+   const managerDraft=captureManagerDraft();
    const worldDerived=captureWorldDerivedState();
    state=Object.assign({},DEFAULT,clean);
    state.chips=state.chips||clone(DEFAULT.chips);
    restoreWorldDerivedState(worldDerived);
-   restoreTransferDraft(transferDraft);
+   restoreManagerDraft(managerDraft);
+   // Keep this as the pure server snapshot so the next local edit can be
+   // distinguished from data that genuinely arrived from the server.
    if(window.FMCloud)window.FMCloud.managerState=clone(clean);
    lastStamp=sig;
    if(typeof renderTransferPitch==='function')renderTransferPitch();
@@ -108,7 +144,7 @@
  }
  const schedule=(ms=80)=>setTimeout(restore,ms);
  window.fmRestoreManagerFromCloud=restore;
- window.FMManagerAuthoritative={version:VERSION,restore,captureWorldDerivedState,restoreWorldDerivedState,hasTransferDraft,captureTransferDraft,restoreTransferDraft,criticalHealthy,signature};
+ window.FMManagerAuthoritative={version:VERSION,restore,captureWorldDerivedState,restoreWorldDerivedState,editableDiff,hasTransferDraft,hasInitialSquadDraft,hasManagerDraft,captureManagerDraft,restoreManagerDraft,captureTransferDraft,restoreTransferDraft,criticalHealthy,signature};
  window.addEventListener('fmcloudready',()=>schedule(250));
  window.addEventListener('fmcanonicalpublished',()=>schedule(60));
  window.addEventListener('fmworldmanagersscored',()=>schedule(60));
