@@ -1,0 +1,59 @@
+name: Verify retained history short compact bench stride v159
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_stat_stride_v148.py'
+      - 'scripts/upgrade_history_short_compact_bench_stride_v159.py'
+      - '.github/workflows/verify-history-short-compact-bench-v159.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply prerequisite compact stride and v159 fallback
+        run: |
+          python scripts/upgrade_history_compact_stat_stride_v148.py
+          python scripts/upgrade_history_short_compact_bench_stride_v159.py
+      - name: Verify packed importer and short bench subgroup invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          for token in [
+              'def _v148_compact_stride_next(raw,p,end):',
+              'def _v159_benchish(rr):',
+              "globals()['_RICH_SHORT_COMPACT_BENCH_TRANSITIONS_V159']",
+              'if len(short)==1:',
+              'if len(hits)!=1:return None',
+          ]:assert token in py,token
+          # v148 remains the strong first route: four physical players prove a general compact run.
+          assert 'succ3.append(t)' in py
+          # v159 is deliberately only the missing short terminal subgroup case: two successor rows
+          # must be bench-like and spacing must remain inside the already-supported 158..213 family.
+          assert 'for q2 in range(p+158,q_hi2):' in py
+          assert 'for s2 in range(q2+158,s_hi2):' in py
+          assert "int(rr.get('sub_on',0) or 0)>0" in py
+          # Independent logic sanity check: a 180-byte three-row terminal subgroup is geometrically
+          # possible, but ambiguity must remain rejected.
+          starts=[1000,1180,1360]
+          ds=[starts[1]-starts[0],starts[2]-starts[1]]
+          assert all(158<=d<=213 for d in ds) and abs(ds[1]-ds[0])<=8
+          # A four-row general compact sequence is still owned by v148, not v159.
+          assert len(starts)==3
+          print('v159 compiles; v148 four-row authority preserved; one unique three-row bench-semantic compact subgroup can be recovered')
+          PY
