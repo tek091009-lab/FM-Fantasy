@@ -33,10 +33,14 @@ jobs:
           node scripts/test_squad_registration_policy_v3.js
           node scripts/test_news_persistence_v7.js
           node scripts/test_news_refresh_manager_state_v8.js
+          node scripts/test_core_integrity_v33.js
           if [ -f scripts/test_weekly_boundary_v12.js ]; then node scripts/test_weekly_boundary_v12.js; fi
       - name: Check current JavaScript syntax
         run: |
           node --check sessionrpcbridge.js
+          node --check publishscorebarrier.js
+          node --check transferintegrityguard.js
+          node --check transferrolloverguard.js
           node --check newsdiffbridge.js
           node --check newsview.js
           node --check cloudapply.js
@@ -68,7 +72,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify V32.8 public deployment
+      - name: Verify V33 public deployment
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -84,27 +88,36 @@ jobs:
             recover="$(curl -fsSL --max-time 20 "$base/newsworldrecovery.js?v=$stamp" || true)"
             cloud="$(curl -fsSL --max-time 20 "$base/cloudapply.js?v=$stamp" || true)"
             manager="$(curl -fsSL --max-time 20 "$base/managerauthoritative.js?v=$stamp" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-v32-8-news-refresh-manager-state' \
-              && printf '%s' "$idx" | grep -q 'newsview.js?v=6' \
-              && printf '%s' "$idx" | grep -q 'newspersistencev5.js?v=7' \
-              && printf '%s' "$idx" | grep -q 'newsworldrecovery.js?v=1' \
-              && printf '%s' "$idx" | grep -q 'managerauthoritative.js?v=3' \
+            session="$(curl -fsSL --max-time 20 "$base/sessionrpcbridge.js?v=$stamp" || true)"
+            barrier="$(curl -fsSL --max-time 20 "$base/publishscorebarrier.js?v=$stamp" || true)"
+            transfer="$(curl -fsSL --max-time 20 "$base/transferintegrityguard.js?v=$stamp" || true)"
+            rollover="$(curl -fsSL --max-time 20 "$base/transferrolloverguard.js?v=$stamp" || true)"
+            if printf '%s' "$idx" | grep -q 'fm-deploy-v33-core-integrity' \
+              && printf '%s' "$idx" | grep -q 'sessionrpcbridge.js?v=2' \
+              && printf '%s' "$idx" | grep -q 'publishscorebarrier.js?v=2' \
+              && printf '%s' "$idx" | grep -q 'managerauthoritative.js?v=4' \
+              && printf '%s' "$idx" | grep -q 'transferintegrityguard.js?v=2' \
+              && printf '%s' "$idx" | grep -q 'transferrolloverguard.js?v=1' \
               && printf '%s' "$persist" | grep -q 'news-persistence-v7-import-news-authority' \
               && printf '%s' "$persist" | grep -q 'active_statuses:active' \
-              && printf '%s' "$persist" | grep -q 'recoverFromPayload' \
               && printf '%s' "$view" | grep -q 'news-view-v6-payload-aware-clear-state' \
-              && printf '%s' "$view" | grep -q 'if(hasPayload()){markActive();return false}' \
               && printf '%s' "$recover" | grep -q 'news-world-recovery-v1-canonical-payload-authority' \
-              && printf '%s' "$recover" | grep -q 'FMCloud.loadWorld(true)' \
               && printf '%s' "$cloud" | grep -q 'cloud-apply-v2-canonical-world-beats-stale-clear-flag' \
-              && printf '%s' "$manager" | grep -q 'manager-authoritative-v2-preserve-world-derived-news' \
-              && printf '%s' "$manager" | grep -q 'restoreWorldDerivedState(worldDerived)'; then
+              && printf '%s' "$manager" | grep -q 'manager-authoritative-v3-critical-state-integrity' \
+              && printf '%s' "$manager" | grep -q 'restoreWorldDerivedState(worldDerived)' \
+              && printf '%s' "$session" | grep -q 'session-rpc-bridge-v2-authenticated-supabase-client' \
+              && printf '%s' "$barrier" | grep -q 'publish-score-barrier-v2-score-before-import-completes' \
+              && printf '%s' "$barrier" | grep -q 'fmfantasy_undo_last_import' \
+              && printf '%s' "$barrier" | grep -q 'loadWorld?.(true)' \
+              && printf '%s' "$transfer" | grep -q 'transfer-integrity-guard-v2-locked-squad-authority' \
+              && printf '%s' "$transfer" | grep -q 'st.lockedSquad=clone(st.squad)' \
+              && printf '%s' "$rollover" | grep -q 'transfer-rollover-guard-v1-boundary-only'; then
               ok=1; break
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'V32.8 did not become live' >&2; exit 1; }
-      - name: Record verified V32.8 deployment
+          [ "$ok" -eq 1 ] || { echo 'V33 did not become live' >&2; exit 1; }
+      - name: Record verified V33 deployment
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -115,21 +128,21 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v32-8-news-refresh-manager-state",
-            "news_clear_lifecycle": "a non-null canonical FM world automatically removes stale clear markers; the News clear observer is forbidden from wiping sections while a real payload exists",
-            "news_persistence": "state.news, state.activeStatuses, global NEWS and rendered News DOM are persisted for the imported database",
-            "news_refresh_policy": "manager-state hydration preserves database-derived News and activeStatuses instead of replacing them with DEFAULT or stale manager-state values",
-            "news_world_recovery": "canonical world loading deliberately ignores a stale local clear marker so a successful import cannot be hidden on refresh",
-            "news_regression_test": "dynamically executes manager-authoritative restore with an empty remote manager News state and asserts imported News and activeStatuses survive the later manager refresh/render path",
-            "transfer_news": "server BEFORE-update canonical transfer-news trigger plus public read-only current-import fallback",
-            "manager_scoring": "server-authoritative completed-gameweek trigger without wiping imported News",
-            "weekly_history_boundary": "canonical-through-previous-completed-gameweek-v12"
+            "verification": "v33-core-integrity",
+            "database_import": "canonical publish is server authoritative and weekly history merge uses indexed player maps",
+            "team_state": "manager hydrate restores critical saved squad, locked transfer baseline, bank, gameweek, points and FT state while preserving imported-world News",
+            "transfers": "confirmed teams seed a real 15-player locked baseline; transfer confirmation cannot mint the current gameweek FT",
+            "leagues": "server scoring synchronises member identity and points using user id with team/name/squad fallbacks",
+            "weekly_import": "publish is not considered complete until manager scoring succeeds; scoring failure retries then rolls back and reloads the previous canonical world",
+            "undo": "controlled import rollback may regress the canonical world while ordinary imports may not",
+            "news": "V32.8 News persistence and refresh protections retained",
+            "regressions": "season publish, squad registration, News persistence, manager critical state, transfer baseline, FT spend, publish scoring barrier, rollback reload, packed importer compile"
           }
           JSON
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.8 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V33 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V32.8 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V33 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
