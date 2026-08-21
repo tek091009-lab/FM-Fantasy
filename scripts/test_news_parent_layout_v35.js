@@ -9,5 +9,5 @@ must(js.includes("grid-template-rows:repeat(3,minmax(0,1fr)) auto"),'3 equal row
 must(!js.includes("grid=document.createElement('div')"),'regression: nested grid wrapper recreated');
 must(!js.includes("grid.appendChild(card)"),'regression: cards reparented into a single grid cell');
 must(idx.includes('./newsaestheticv34.js?v=3'),'V36 cache-bust missing');
-must(idx.includes('fm-deploy-v36-news-stable-empty-state'),'V36 marker missing');
-console.log('V35 parent-layout regression retained under V36');
+must(idx.includes('fm-deploy-v37-transfer-draft-restore'),'V37 loader marker missing');
+console.log('V35 parent-layout regression retained under V37');
