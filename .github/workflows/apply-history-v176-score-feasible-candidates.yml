@@ -1,0 +1,61 @@
+name: Apply historical score-feasible candidate quarantine v176
+
+on:
+  push:
+    branches: [automation/history-v176-score-feasible-candidates]
+    paths:
+      - 'scripts/upgrade_history_v176_score_feasible_candidates.py'
+      - '.github/workflows/apply-history-v176-score-feasible-candidates.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: automation/history-v176-score-feasible-candidates
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply v176 score-feasible candidate quarantine
+        run: python scripts/upgrade_history_v176_score_feasible_candidates.py
+      - name: Verify packed Python and candidate quarantine
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode('utf-8'); compile(py,'fm_importer.py','exec')
+          assert '_RICH_SCORE_FEASIBILITY_V176=1' in py
+          assert "pairs=_rich_candidate_squad_pairs(stats,played_score_pairs,diagnostics)" in py
+          p=py.find('def _rich_candidate_squad_pairs'); assert p>=0
+          q=py.find('\ndef ',p+4); q=len(py) if q<0 else q
+          b=py[p:q]
+          assert "strict_score=agg(strict)" in b
+          assert "strict_score in played_score_pairs" in b
+          assert "strict_score_impossible_pairs_quarantined_v176" in b
+          assert "if strict:\n            pairs.append(strict)" not in b
+          # Existing v175 physical scanner correction and final fixture authority must remain.
+          assert '_RICH_NONOVERLAP_V175=1' in py
+          assert "_RICH_SOURCE_SCOPE_V175='retained-match-members-only-scm-apm-pkm'" in py
+          assert 'register_match' in py and 'fixture_identity' in py
+          print('v176 packed importer verified')
+          PY
+      - name: Commit generated packed importer
+        run: |
+          if git diff --quiet -- app; then
+            echo 'No packed importer changes to commit'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app
+          git commit -m 'Apply score-feasible retained candidate quarantine v176'
+          git push origin HEAD:automation/history-v176-score-feasible-candidates

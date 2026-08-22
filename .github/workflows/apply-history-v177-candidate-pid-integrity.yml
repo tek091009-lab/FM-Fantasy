@@ -1,0 +1,66 @@
+name: Apply historical candidate PID integrity v177
+
+on:
+  push:
+    branches: [automation/history-v176-score-feasible-candidates]
+    paths:
+      - 'scripts/upgrade_history_v177_candidate_pid_integrity.py'
+      - '.github/workflows/apply-history-v177-candidate-pid-integrity.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: automation/history-v176-score-feasible-candidates
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply v177 stable PID candidate quarantine
+        run: python scripts/upgrade_history_v177_candidate_pid_integrity.py
+      - name: Verify packed Python and hard candidate invariants
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode('utf-8'); compile(py,'fm_importer.py','exec')
+          for tok in (
+              '_RICH_NONOVERLAP_V175=1',
+              '_RICH_SCORE_FEASIBILITY_V176=1',
+              '_RICH_CANDIDATE_PID_INTEGRITY_V177=1',
+              'candidate_duplicate_pid_within_side_quarantined_v177',
+              'candidate_cross_side_pid_quarantined_v177',
+              'candidate_nonpositive_pid_quarantined_v177',
+              'register_match',
+              'fixture_identity',
+          ):
+              assert tok in py, tok
+          p=py.find('def _rich_candidate_squad_pairs'); assert p>=0
+          q=py.find('\ndef ',p+4); q=len(py) if q<0 else q
+          b=py[p:q]
+          assert 'def pid_integrity(pair):' in b
+          assert 'if strict and not pid_integrity(strict):' in b
+          assert 'if not pid_integrity(pair):continue' in b
+          assert 'strict_score_impossible_pairs_quarantined_v176' in b
+          print('v177 packed importer verified')
+          PY
+      - name: Commit generated packed importer
+        run: |
+          if git diff --quiet -- app; then
+            echo 'No packed importer changes to commit'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app
+          git commit -m 'Apply retained candidate PID integrity quarantine v177'
+          git push origin HEAD:automation/history-v176-score-feasible-candidates
