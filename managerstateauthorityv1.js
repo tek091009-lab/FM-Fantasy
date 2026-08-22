@@ -1,6 +1,6 @@
 (()=>{
 'use strict';
-const VERSION='manager-state-authority-v1-monotonic-completed-scoring';
+const VERSION='manager-state-authority-v2-pure-server-draft-baseline';
 const cfg=window.FM_FANTASY_CONFIG||{};
 const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
 const arr=v=>Array.isArray(v)?v:[];
@@ -37,12 +37,15 @@ function mergeProgress(local,remote){
  }
  return out;
 }
-function applyProgressToLive(merged){
+function applyProgressToLive(merged,serverSnapshot=null){
  try{
    if(typeof state!=='undefined'&&state){
      for(const k of ['pointsHistory','totalPoints','completedGameweek','currentGameweek','firstGameweekPlayed','gameweekLineups','lastTransferRollGW','freeTransfers','chips'])if(Object.prototype.hasOwnProperty.call(merged,k))state[k]=clone(merged[k]);
    }
-   if(window.FMCloud)window.FMCloud.managerState=clone(merged);
+   // managerauthoritative.js uses FMCloud.managerState as the last pure server
+   // snapshot to detect an in-flight squad/lineup/captain edit. Never contaminate
+   // that baseline with local editable fields just because server progress won.
+   if(window.FMCloud)window.FMCloud.managerState=clone(serverSnapshot||merged);
  }catch(_e){}
 }
 async function remoteOwnState(){
@@ -58,7 +61,7 @@ function installQueueGuard(){
    const snap=clone(st||{});clearTimeout(queueTimer);
    queueTimer=setTimeout(async()=>{
      const remote=await remoteOwnState();const merged=remote?mergeProgress(snap,remote):snap;
-     if(remote&&historyDone(remote)>historyDone(snap))applyProgressToLive(merged);
+     if(remote&&historyDone(remote)>historyDone(snap))applyProgressToLive(merged,remote);
      original(merged);
    },120);
  };
@@ -77,7 +80,7 @@ async function kickCreatorScoring(force=true){
  finally{kickBusy=false}
 }
 function install(){installQueueGuard()}
-window.FMManagerStateAuthority={version:VERSION,historyDone,mergeProgress,refreshOwnFromServer,kickCreatorScoring,install};
+window.FMManagerStateAuthority={version:VERSION,historyDone,mergeProgress,applyProgressToLive,refreshOwnFromServer,kickCreatorScoring,install};
 window.addEventListener('fmcloudready',()=>setTimeout(async()=>{install();await kickCreatorScoring(true);await refreshOwnFromServer()},700));
 window.addEventListener('fmworldmanagersscored',()=>setTimeout(refreshOwnFromServer,120));
 window.addEventListener('fmcanonicalpublished',()=>setTimeout(()=>kickCreatorScoring(true),180));
