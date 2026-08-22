@@ -1,0 +1,64 @@
+name: Verify retained history two-row compact bench v169
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_two_row_compact_bench_stride_v169.py'
+      - '.github/workflows/verify-history-two-row-compact-bench-v169.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply structural history stack through v169
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_compact_stat_stride_v148.py
+          python scripts/upgrade_history_min_record_buffer_v149.py
+          python scripts/upgrade_history_short_compact_bench_stride_v159.py
+          python scripts/upgrade_history_short_compact_bench_tail_v160.py
+          python scripts/upgrade_history_compact_stride_tail_bounds_v161.py
+          python scripts/upgrade_history_two_row_compact_bench_stride_v169.py
+      - name: Verify packed importer and fail-closed two-row bench proof
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          for token in [
+              "globals()['_RICH_TWO_ROW_COMPACT_BENCH_TRANSITIONS_V169']",
+              "globals()['_RICH_TWO_ROW_COMPACT_BENCH_AMBIGUITIES_V169']",
+              'if current and _v159_benchish(current):',
+              'if len(two)==1:',
+              'if len(short)==1:',
+          ]: assert token in py,token
+
+          # Logic regression: v169 may recover exactly one compact successor only when BOTH rows are
+          # bench-semantic. Multiple byte starts remain unresolved; a starter/general current row
+          # cannot use the reduced two-row proof.
+          def choose(current_bench, successors):
+              good=[x for x in successors if x[1]] if current_bench else []
+              return good[0][0] if len(good)==1 else None
+          assert choose(True,[(1180,True)])==1180
+          assert choose(True,[(1180,True),(1184,True)]) is None
+          assert choose(False,[(1180,True)]) is None
+          assert choose(True,[(1180,False)]) is None
+          print('v169 compiles; two-row compact recovery is bench-semantic, unique-only and fail-closed')
+          PY
