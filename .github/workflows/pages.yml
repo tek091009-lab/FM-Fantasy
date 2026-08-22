@@ -106,33 +106,33 @@ jobs:
             barrier="$(curl -fsSL --max-time 20 "$base/publishscorebarrier.js?v=$stamp" || true)"
             transfer="$(curl -fsSL --max-time 20 "$base/transferintegrityguard.js?v=$stamp" || true)"
             rollover="$(curl -fsSL --max-time 20 "$base/transferrolloverguard.js?v=$stamp" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-v41-canonical-news-dom-authority' \
-              && printf '%s' "$idx" | grep -q 'newstransferstabilityv40.js?v=2' \
-              && printf '%s' "$idx" | grep -q 'newspersistencev5.js?v=8' \
-              && printf '%s' "$idx" | grep -q 'newsaestheticv34.js?v=3' \
-              && printf '%s' "$idx" | grep -q 'sessionrpcbridge.js?v=2' \
-              && printf '%s' "$idx" | grep -q 'publishscorebarrier.js?v=2' \
-              && printf '%s' "$idx" | grep -q 'managerauthoritative.js?v=7' \
-              && printf '%s' "$idx" | grep -q 'managerstateauthorityv1.js?v=2' \
-              && printf '%s' "$stability" | grep -q 'news-transfer-stability-v41-content-signature-authority' \
-              && printf '%s' "$stability" | grep -q 'transferSig' \
-              && printf '%s' "$stability" | grep -q 'registrationSig' \
-              && printf '%s' "$stability" | grep -q 'FMRegistrationNewsGuard' \
-              && printf '%s' "$persist" | grep -q 'news-persistence-v8-canonical-transfer-dom-authority' \
-              && printf '%s' "$persist" | grep -q "CANONICAL_DOM_IDS=new Set(['newsTransfers','newsRegistrations'])" \
-              && printf '%s' "$persist" | grep -q 'if(CANONICAL_DOM_IDS.has(id))continue' \
-              && printf '%s' "$persist" | grep -q 'FMNewsTransferStabilityV40?.stabilise?.()' \
-              && printf '%s' "$aesthetic" | grep -q 'news-aesthetic-v36-stable-empty-state' \
-              && printf '%s' "$aesthetic" | grep -q "const EMPTY_TEXT='No changes this import.'" \
-              && printf '%s' "$view" | grep -q 'news-view-v6-payload-aware-clear-state' \
-              && printf '%s' "$recover" | grep -q 'news-world-recovery-v1-canonical-payload-authority' \
-              && printf '%s' "$cloud" | grep -q 'cloud-apply-v2-canonical-world-beats-stale-clear-flag' \
-              && printf '%s' "$manager" | grep -q 'manager-authoritative-v6-preserve-team-management-drafts' \
-              && printf '%s' "$authority" | grep -q 'manager-state-authority-v2-pure-server-draft-baseline' \
-              && printf '%s' "$session" | grep -q 'session-rpc-bridge-v2-authenticated-supabase-client' \
-              && printf '%s' "$barrier" | grep -q 'publish-score-barrier-v2-score-before-import-completes' \
-              && printf '%s' "$transfer" | grep -q 'transfer-integrity-guard-v2-locked-squad-authority' \
-              && printf '%s' "$rollover" | grep -q 'transfer-rollover-guard-v1-boundary-only'; then
+            if printf '%s' "$idx" | grep -Fq 'fm-deploy-v41-canonical-news-dom-authority' \
+              && printf '%s' "$idx" | grep -Fq 'newstransferstabilityv40.js?v=2' \
+              && printf '%s' "$idx" | grep -Fq 'newspersistencev5.js?v=8' \
+              && printf '%s' "$idx" | grep -Fq 'newsaestheticv34.js?v=3' \
+              && printf '%s' "$idx" | grep -Fq 'sessionrpcbridge.js?v=2' \
+              && printf '%s' "$idx" | grep -Fq 'publishscorebarrier.js?v=2' \
+              && printf '%s' "$idx" | grep -Fq 'managerauthoritative.js?v=7' \
+              && printf '%s' "$idx" | grep -Fq 'managerstateauthorityv1.js?v=2' \
+              && printf '%s' "$stability" | grep -Fq 'news-transfer-stability-v41-content-signature-authority' \
+              && printf '%s' "$stability" | grep -Fq 'transferSig' \
+              && printf '%s' "$stability" | grep -Fq 'registrationSig' \
+              && printf '%s' "$stability" | grep -Fq 'FMRegistrationNewsGuard' \
+              && printf '%s' "$persist" | grep -Fq 'news-persistence-v8-canonical-transfer-dom-authority' \
+              && printf '%s' "$persist" | grep -Fq "CANONICAL_DOM_IDS=new Set(['newsTransfers','newsRegistrations'])" \
+              && printf '%s' "$persist" | grep -Fq 'if(CANONICAL_DOM_IDS.has(id))continue' \
+              && printf '%s' "$persist" | grep -Fq 'FMNewsTransferStabilityV40?.stabilise?.()' \
+              && printf '%s' "$aesthetic" | grep -Fq 'news-aesthetic-v36-stable-empty-state' \
+              && printf '%s' "$aesthetic" | grep -Fq "const EMPTY_TEXT='No changes this import.'" \
+              && printf '%s' "$view" | grep -Fq 'news-view-v6-payload-aware-clear-state' \
+              && printf '%s' "$recover" | grep -Fq 'news-world-recovery-v1-canonical-payload-authority' \
+              && printf '%s' "$cloud" | grep -Fq 'cloud-apply-v2-canonical-world-beats-stale-clear-flag' \
+              && printf '%s' "$manager" | grep -Fq 'manager-authoritative-v6-preserve-team-management-drafts' \
+              && printf '%s' "$authority" | grep -Fq 'manager-state-authority-v2-pure-server-draft-baseline' \
+              && printf '%s' "$session" | grep -Fq 'session-rpc-bridge-v2-authenticated-supabase-client' \
+              && printf '%s' "$barrier" | grep -Fq 'publish-score-barrier-v2-score-before-import-completes' \
+              && printf '%s' "$transfer" | grep -Fq 'transfer-integrity-guard-v2-locked-squad-authority' \
+              && printf '%s' "$rollover" | grep -Fq 'transfer-rollover-guard-v1-boundary-only'; then
               ok=1; break
             fi
             sleep 5
