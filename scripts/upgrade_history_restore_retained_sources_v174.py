@@ -28,7 +28,7 @@ py = base64.b64decode(m.group(1)).decode('utf-8')
 
 # v174 is a focused correction for a measured same-save history regression.
 # Older imports of the same Championship saves scanned 2-3 more archive members and found
-# ~10x more retained player-stat evidence. Newer imports explicitly blanket-skip
+# ~10x more retained player-stat evidence. Newer imports explicitly blanket-skipped
 # player_stats.dat / play_fixture_manager.dat / news.dat before the structural history parser.
 # Source names grant ZERO trust here: this patch only makes their bytes eligible for the
 # existing GAME_MATCH_PLAYER_STATS -> side -> exact score -> unique authoritative fixture ->
@@ -45,9 +45,21 @@ block = py[fs:fe]
 
 missing = [name for name in TARGETS if name not in block]
 if missing:
-    raise RuntimeError(f'v174 expected skip-policy names missing: {missing}')
-if 'register_match' not in py or 'def _rich_stat_record_at' not in py:
-    raise RuntimeError('v174 authoritative historical validation anchors missing')
+    print('V174_CONTEXT_DIAGNOSTIC_BEGIN')
+    for name in TARGETS:
+        hits=[]
+        start=0
+        while True:
+            p=py.find(name,start)
+            if p<0: break
+            hits.append(p); start=p+1
+        print(f'TARGET {name} HITS {hits}')
+        for p in hits[:10]:
+            lo=max(0,p-700); hi=min(len(py),p+700)
+            print(f'--- {name} @ {p} ---')
+            print(py[lo:hi].replace('\x00','<NUL>'))
+    print('V174_CONTEXT_DIAGNOSTIC_END')
+    raise RuntimeError(f'v174 expected skip-policy names missing from diagnostic function: {missing}')
 
 orig = block
 for name in TARGETS:
@@ -80,15 +92,12 @@ if "_RICH_SOURCE_RESTORATION_V174" not in block:
 
 py = py[:fs] + block + py[fe:]
 
-# Export a compact audit marker next to the existing retained-history diagnostics.
 if 'unlabelled_rich_source_restoration_v174' not in py:
     anchors = ["'unlabelled_rich_non_retained_members_skipped':", "'unlabelled_rich_members_scanned':"]
     ap = next((py.find(a) for a in anchors if py.find(a) >= 0), -1)
     if ap >= 0:
         ls = py.rfind('\n', 0, ap) + 1
-        le = py.find('\n', ap)
-        le = len(py) if le < 0 else le
-        line = py[ls:le]
+        line = py[ls:py.find('\n', ap)]
         ind = re.match(r'\s*', line).group(0)
         extra = (
             ind + "'unlabelled_rich_source_restoration_v174':bool(globals().get('_RICH_SOURCE_RESTORATION_V174',0)),\n" +
@@ -102,7 +111,6 @@ new_b64 = base64.b64encode(py.encode()).decode('ascii')
 html = html[:m.start(1)] + new_b64 + html[m.end(1):]
 repack(html)
 
-# Reconstruct and verify the actual packed importer, not just the patch source.
 chk = reconstruct()
 mm = re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"', chk)
 assert mm
@@ -117,13 +125,6 @@ fe = len(cpy) if fe < 0 else fe
 cblock = cpy[fs:fe]
 for name in TARGETS:
     assert name not in cblock, name
-for tok in [
-    "_RICH_SOURCE_RESTORATION_V174",
-    "structural-scan-only-no-source-trust",
-    'def _rich_stat_record_at',
-    'register_match',
-    'fixture_identity',
-]:
+for tok in ["_RICH_SOURCE_RESTORATION_V174","structural-scan-only-no-source-trust",'def _rich_stat_record_at','register_match','fixture_identity']:
     assert tok in cpy, tok
 print('v174 restores all three measured lost history sources to structural decoding; source names grant no fixture authority')
-# retrigger packed build
