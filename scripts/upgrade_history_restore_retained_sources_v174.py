@@ -1,0 +1,82 @@
+from __future__ import annotations
+import base64, gzip, re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+PARTS = [ROOT/'app'/f'part{i:02d}' for i in range(17)] + [ROOT/'app'/f'fix{i}' for i in range(17, 21)]
+TARGETS = ('player_stats.dat', 'play_fixture_manager.dat', 'news.dat')
+
+
+def reconstruct() -> str:
+    return gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in PARTS))).decode('utf-8')
+
+
+def repack(html: str) -> None:
+    packed = base64.b64encode(gzip.compress(html.encode('utf-8'), compresslevel=9, mtime=0)).decode()
+    step = (len(packed) + len(PARTS) - 1) // len(PARTS)
+    chunks = [packed[i*step:(i+1)*step] for i in range(len(PARTS))]
+    assert ''.join(chunks) == packed
+    for p, c in zip(PARTS, chunks):
+        p.write_text(c + '\n')
+
+
+html = reconstruct()
+m = re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"', html)
+if not m:
+    raise RuntimeError('FM_PY_SOURCE_B64 not found')
+py = base64.b64decode(m.group(1)).decode('utf-8')
+
+# v174: restore the exact .dat sources whose exclusion correlates with a measured collapse
+# in retained historical evidence on the same saves. Current production admits only
+# .scm/.apm/.pkm in _rich_is_retained_match_member(), excluding every .dat member before
+# structural history parsing. Restored filenames grant ZERO match authority; they merely
+# become eligible for the existing stat -> side -> score -> unique fixture -> register gate.
+fn = '_rich_is_retained_match_member'
+pos = py.find('def ' + fn)
+if pos < 0:
+    raise RuntimeError('v174 retained-member predicate missing')
+end = py.find('\ndef ', pos + 4)
+end = len(py) if end < 0 else end
+block = py[pos:end]
+old_return = "return Path(str(name or '')).suffix.lower() in ('.scm','.apm','.pkm')"
+if old_return not in block:
+    raise RuntimeError('v174 exact extension-only retained-member return line missing')
+new_return = (
+    "n=str(name or '').replace('\\\\','/').rsplit('/',1)[-1].lower()\n"
+    "    if n in ('player_stats.dat','play_fixture_manager.dat','news.dat'):\n"
+    "        return True\n"
+    "    return Path(n).suffix.lower() in ('.scm','.apm','.pkm')"
+)
+block = block.replace(old_return, new_return, 1)
+py = py[:pos] + block + py[end:]
+
+# Machine-readable marker only. Avoid touching unrelated debug-dict construction.
+marker = "_RICH_SOURCE_RESTORATION_V174=1\n_RICH_SOURCE_RESTORATION_POLICY_V174='exact-dat-admission-structural-validation-no-source-trust'\n_RICH_SOURCE_RESTORATION_MEMBERS_V174=['player_stats.dat','play_fixture_manager.dat','news.dat']\n"
+insert = py.find('def ' + fn)
+py = py[:insert] + marker + py[insert:]
+
+compile(py, 'fm_importer.py', 'exec')
+new_b64 = base64.b64encode(py.encode()).decode('ascii')
+html = html[:m.start(1)] + new_b64 + html[m.end(1):]
+repack(html)
+
+chk = reconstruct()
+mm = re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"', chk)
+assert mm
+cpy = base64.b64decode(mm.group(1)).decode('utf-8')
+compile(cpy, 'fm_importer.py', 'exec')
+pos = cpy.find('def ' + fn); assert pos >= 0
+end = cpy.find('\ndef ', pos + 4); end = len(cpy) if end < 0 else end
+cblock = cpy[pos:end]
+for name in TARGETS:
+    assert name in cblock, name
+assert old_return not in cblock
+for tok in [
+    '_RICH_SOURCE_RESTORATION_V174',
+    'exact-dat-admission-structural-validation-no-source-trust',
+    'def _rich_stat_record_at',
+    'register_match',
+    'fixture_identity',
+]:
+    assert tok in cpy, tok
+print('v174 admits the three measured lost .dat sources to structural history decoding; filenames grant no fixture authority')

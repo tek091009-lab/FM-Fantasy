@@ -2,12 +2,22 @@ name: Core integrity regression gate
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [automation/history-source-restoration-v174]
+    paths:
+      - 'scripts/upgrade_history_restore_retained_sources_v174.py'
+      - '.github/workflows/apply-history-source-restoration-v174.yml'
+      - '.github/workflows/core-integrity.yml'
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -63,3 +73,39 @@ jobs:
           grep -q 'v_old_player_map' supabase/migrations/20260821165913_optimize_locked_history_merge_v2.sql
           grep -q 'v_locked_count' supabase/migrations/20260821170136_repair_confirmed_team_transfer_baseline_v1.sql
           grep -q 'server-authoritative-manager-scoring-v2' supabase/migrations/20260821165500_manager_scoring_v2_entry_ft_and_league_identity.sql
+      - name: Apply focused v174 retained-history source restoration
+        if: (github.event_name == 'push' && github.ref_name == 'automation/history-source-restoration-v174') || (github.event_name == 'pull_request' && github.head_ref == 'automation/history-source-restoration-v174')
+        run: |
+          set -euo pipefail
+          python scripts/upgrade_history_restore_retained_sources_v174.py
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode('utf-8'); compile(py,'fm_importer.py','exec')
+          assert "_RICH_SOURCE_RESTORATION_V174" in py
+          assert "exact-dat-admission-structural-validation-no-source-trust" in py
+          pos=py.find('def _rich_is_retained_match_member'); assert pos >= 0
+          fe=py.find('\ndef ',pos+4); fe=len(py) if fe<0 else fe
+          block=py[pos:fe]
+          for member in ('player_stats.dat','play_fixture_manager.dat','news.dat'):
+              assert member in block, member
+          assert "('.scm','.apm','.pkm')" in block
+          assert 'register_match' in py and 'fixture_identity' in py and 'def _rich_stat_record_at' in py
+          print('v174 packed importer verified')
+          PY
+      - name: Commit packed v174 importer to research branch
+        if: (github.event_name == 'push' && github.ref_name == 'automation/history-source-restoration-v174') || (github.event_name == 'pull_request' && github.head_ref == 'automation/history-source-restoration-v174')
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- app; then
+            echo 'No packed importer changes to commit'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app
+          git commit -m 'Apply retained history source restoration v174'
+          git push origin HEAD:automation/history-source-restoration-v174
