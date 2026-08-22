@@ -121,8 +121,20 @@ if "core_gc_available_v163" not in block:
         block=block.replace(needle,needle+"        r['historical_fantasy_core_complete_v163']=False\n",1)
     py=py[:start]+block+py[end:]
 
+# Count promotion at the two existing prepare call sites without changing scanner authority.
+needle="                    r=_v155_prepare_core_fantasy_row(r)\n"
+call_marker="if bool(r.get('historical_fantasy_core_complete_v163')) and bool(r.get('core_gc_available_v163')):"
+if py.count(needle)>=2 and call_marker not in py:
+    # Distinguish global/header by the same locals-based convention v162 already uses.
+    repl=(needle+
+      "                    if bool(r.get('historical_fantasy_core_complete_v163')) and bool(r.get('core_gc_available_v163')):\n"
+      "                        _v163_is_header=('rows' in locals() and isinstance(locals().get('rows'),list))\n"
+      "                        _v163_key='_RICH_HEADER_CORE_GC_RECOVERED_V163' if _v163_is_header else '_RICH_CORE_GC_RECOVERED_V163'\n"
+      "                        globals()[_v163_key]=int(globals().get(_v163_key,0))+1\n")
+    py=py.replace(needle,repl)
+
 # Export evidence so the next hard-save rerun can tell exactly how much of the short-stride family
-# is 147..157 (potentially recoverable) versus true 145/146-byte incomplete rows.
+# is 147..157 (recoverable) versus true 145/146-byte incomplete rows.
 if 'unlabelled_rich_core_gc_recovered_v163' not in py:
     anchors=[
         "'unlabelled_rich_core_active_quarantined_v162':int(globals().get('_RICH_CORE_ACTIVE_QUARANTINED_V162',0)),",
@@ -134,17 +146,6 @@ if 'unlabelled_rich_core_gc_recovered_v163' not in py:
           "'unlabelled_rich_core_gc_recovered_v163':int(globals().get('_RICH_CORE_GC_RECOVERED_V163',0)),"+
           "'unlabelled_rich_header_core_gc_recovered_v163':int(globals().get('_RICH_HEADER_CORE_GC_RECOVERED_V163',0)),")
         py=py.replace(anchor,extra,1)
-
-# Count promotion at the two existing prepare call sites without changing scanner authority.
-needle="                    r=_v155_prepare_core_fantasy_row(r)\n"
-if py.count(needle)>=2 and "_RICH_CORE_GC_RECOVERED_V163" not in py[py.find(needle):]:
-    # Distinguish global/header by the same locals-based convention v162 already uses.
-    repl=(needle+
-      "                    if bool(r.get('historical_fantasy_core_complete_v163')) and bool(r.get('core_gc_available_v163')):\n"
-      "                        _v163_is_header=('rows' in locals() and isinstance(locals().get('rows'),list))\n"
-      "                        _v163_key='_RICH_HEADER_CORE_GC_RECOVERED_V163' if _v163_is_header else '_RICH_CORE_GC_RECOVERED_V163'\n"
-      "                        globals()[_v163_key]=int(globals().get(_v163_key,0))+1\n")
-    py=py.replace(needle,repl)
 
 compile(py,'fm_importer.py','exec')
 new_b64=base64.b64encode(py.encode()).decode('ascii')
