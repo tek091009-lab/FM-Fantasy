@@ -36,6 +36,7 @@ jobs:
           node scripts/test_core_integrity_v33.js
           node scripts/test_transfer_draft_survives_restore_v37.js
           node scripts/test_initial_squad_builder_survives_restore_v38.js
+          node scripts/test_team_management_survives_restore_v39.js
           if [ -f scripts/test_weekly_boundary_v12.js ]; then node scripts/test_weekly_boundary_v12.js; fi
           python scripts/test_news_aesthetic_v34.py
       - name: Check current JavaScript syntax
@@ -76,7 +77,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify V38 public deployment
+      - name: Verify V39 public deployment
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -93,15 +94,17 @@ jobs:
             recover="$(curl -fsSL --max-time 20 "$base/newsworldrecovery.js?v=$stamp" || true)"
             cloud="$(curl -fsSL --max-time 20 "$base/cloudapply.js?v=$stamp" || true)"
             manager="$(curl -fsSL --max-time 20 "$base/managerauthoritative.js?v=$stamp" || true)"
+            authority="$(curl -fsSL --max-time 20 "$base/managerstateauthorityv1.js?v=$stamp" || true)"
             session="$(curl -fsSL --max-time 20 "$base/sessionrpcbridge.js?v=$stamp" || true)"
             barrier="$(curl -fsSL --max-time 20 "$base/publishscorebarrier.js?v=$stamp" || true)"
             transfer="$(curl -fsSL --max-time 20 "$base/transferintegrityguard.js?v=$stamp" || true)"
             rollover="$(curl -fsSL --max-time 20 "$base/transferrolloverguard.js?v=$stamp" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-v38-initial-squad-draft-restore' \
+            if printf '%s' "$idx" | grep -q 'fm-deploy-v39-team-management-draft-restore' \
               && printf '%s' "$idx" | grep -q 'newsaestheticv34.js?v=3' \
               && printf '%s' "$idx" | grep -q 'sessionrpcbridge.js?v=2' \
               && printf '%s' "$idx" | grep -q 'publishscorebarrier.js?v=2' \
-              && printf '%s' "$idx" | grep -q 'managerauthoritative.js?v=6' \
+              && printf '%s' "$idx" | grep -q 'managerauthoritative.js?v=7' \
+              && printf '%s' "$idx" | grep -q 'managerstateauthorityv1.js?v=2' \
               && printf '%s' "$idx" | grep -q 'transferintegrityguard.js?v=2' \
               && printf '%s' "$idx" | grep -q 'transferrolloverguard.js?v=1' \
               && printf '%s' "$aesthetic" | grep -q 'news-aesthetic-v36-stable-empty-state' \
@@ -119,12 +122,14 @@ jobs:
               && printf '%s' "$view" | grep -q 'news-view-v6-payload-aware-clear-state' \
               && printf '%s' "$recover" | grep -q 'news-world-recovery-v1-canonical-payload-authority' \
               && printf '%s' "$cloud" | grep -q 'cloud-apply-v2-canonical-world-beats-stale-clear-flag' \
-              && printf '%s' "$manager" | grep -q 'manager-authoritative-v5-preserve-all-manager-drafts' \
-              && printf '%s' "$manager" | grep -q 'restoreWorldDerivedState(worldDerived)' \
+              && printf '%s' "$manager" | grep -q 'manager-authoritative-v6-preserve-team-management-drafts' \
+              && printf '%s' "$manager" | grep -q 'function hasConfirmedTeamManagementDraft' \
+              && printf '%s' "$manager" | grep -q 'function validConfirmedManagementShape' \
               && printf '%s' "$manager" | grep -q 'restoreManagerDraft(managerDraft)' \
-              && printf '%s' "$manager" | grep -q 'function hasTransferDraft' \
-              && printf '%s' "$manager" | grep -q 'function hasInitialSquadDraft' \
-              && printf '%s' "$manager" | grep -q 'function hasManagerDraft' \
+              && printf '%s' "$manager" | grep -q "if(ids(a.bench)!==ids(b.bench))return true" \
+              && printf '%s' "$authority" | grep -q 'manager-state-authority-v2-pure-server-draft-baseline' \
+              && printf '%s' "$authority" | grep -q 'FMCloud.managerState=clone(serverSnapshot||merged)' \
+              && printf '%s' "$authority" | grep -q 'applyProgressToLive(merged,remote)' \
               && printf '%s' "$session" | grep -q 'session-rpc-bridge-v2-authenticated-supabase-client' \
               && printf '%s' "$barrier" | grep -q 'publish-score-barrier-v2-score-before-import-completes' \
               && printf '%s' "$barrier" | grep -q 'fmfantasy_undo_last_import' \
@@ -136,8 +141,8 @@ jobs:
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'V38 did not become live' >&2; exit 1; }
-      - name: Record verified V38 deployment
+          [ "$ok" -eq 1 ] || { echo 'V39 did not become live' >&2; exit 1; }
+      - name: Record verified V39 deployment
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -148,21 +153,22 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v38-initial-squad-draft-restore",
+            "verification": "v39-team-management-draft-restore",
             "database_import": "V33 canonical import and weekly scoring protections retained unchanged",
-            "team_state": "initial squad builder and confirmed transfer drafts survive stale delayed manager restores; server catch-up automatically becomes the clean baseline",
-            "transfers": "V37 pending-transfer preservation retained; freeTransfers and locked transfer baseline remain server authoritative",
+            "team_state": "initial squad, confirmed transfers, captain, vice-captain, XI/bench swaps and bench order survive stale delayed manager restores until their save reaches the server",
+            "manager_baseline": "FMCloud.managerState remains a pure server snapshot even when newer scoring progress is merged into the live browser state",
+            "transfers": "V37/V38 transfer and initial-builder protections retained; freeTransfers and locked transfer baseline remain server authoritative",
             "leagues": "V33 authoritative manager and league sync retained unchanged",
             "weekly_import": "V33 publish-score barrier and safe rollback retained unchanged",
             "undo": "V33 controlled rollback retained unchanged",
             "news": "V36 stable six-card News layout and empty-state behaviour retained unchanged",
-            "regressions": "V33 core suite plus V37 confirmed-transfer restore race and V38 initial-builder first-click/catch-up/next-click restore-race tests"
+            "regressions": "V33 core suite plus V37 transfer race, V38 initial-builder race and V39 captain/vice/XI/bench/bench-order first-click restore-race tests"
           }
           JSON
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V38 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V39 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V38 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V39 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi
