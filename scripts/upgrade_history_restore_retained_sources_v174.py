@@ -126,3 +126,4 @@ for tok in [
 ]:
     assert tok in cpy, tok
 print('v174 restores all three measured lost history sources to structural decoding; source names grant no fixture authority')
+# retrigger packed build
