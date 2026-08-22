@@ -1,9 +1,12 @@
 (()=>{
 'use strict';
-const VERSION='news-persistence-v7-import-news-authority';
+const VERSION='news-persistence-v8-canonical-transfer-dom-authority';
 const PREFIX='fmFantasyNewsSnapshotV4:';
 const CLEAR_KEY='fmFantasyCloudDatabaseCleared';
 const SECTION_IDS=['newsTransfers','newsRegistrations','newsPriceUp','newsPriceDown','newsInjuries','newsSuspensions'];
+/* These two cards are derived deterministically from the canonical imported payload.
+   Persist their model data, but never replay saved DOM over their canonical renderer. */
+const CANONICAL_DOM_IDS=new Set(['newsTransfers','newsRegistrations']);
 const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
 const arr=v=>Array.isArray(v)?v:[];
 const norm=v=>String(v??'').trim().toLowerCase();
@@ -26,7 +29,7 @@ function markDatabaseActive(){
  return true;
 }
 function readLocal(){try{const raw=localStorage.getItem(storageKey());return raw?JSON.parse(raw):null}catch(_e){return null}}
-function writeLocal(snap){if(!snap)return false;try{localStorage.setItem(storageKey(),JSON.stringify(snap));return true}catch(e){console.warn('[FM News persistence v7] local snapshot save failed',e);return false}}
+function writeLocal(snap){if(!snap)return false;try{localStorage.setItem(storageKey(),JSON.stringify(snap));return true}catch(e){console.warn('[FM News persistence v8] local snapshot save failed',e);return false}}
 function clearLocal(){try{localStorage.removeItem(storageKey())}catch(_e){};lastSavedAt=0;lastSavedQuality=0}
 function compatible(snap,payload=payloadRef()){
  if(!snap||!payload)return false;
@@ -97,8 +100,22 @@ function startCapture(reason,ms=30000){
 function applyActiveStatuses(active){const st=stateRef();if(!st||active===undefined)return false;if(JSON.stringify(st.activeStatuses)!==JSON.stringify(active)){st.activeStatuses=clone(active);return true}return false}
 function applyStateNews(news){const st=stateRef();if(!st||news===undefined)return false;if(JSON.stringify(st.news)!==JSON.stringify(news)){st.news=clone(news);return true}return false}
 function applyGlobalNews(news){if(news===undefined)return false;const cur=globalNewsRef();if(cur){if(JSON.stringify(cur)===JSON.stringify(news))return false;cur.length=0;cur.push(...clone(arr(news)));return true}try{window.NEWS=clone(arr(news));return true}catch(_e){return false}}
-function restoreDom(dom){if(!dom?.sections)return false;let changed=false;for(const [id,s] of Object.entries(dom.sections)){const el=document.getElementById(id);if(!el||typeof s?.html!=='string')continue;if(el.innerHTML!==s.html){el.innerHTML=s.html;changed=true}if(el.dataset){if(s.cleared)el.dataset.fmNewsCleared=s.cleared;else delete el.dataset.fmNewsCleared}}const stamp=document.getElementById('newsStamp');if(stamp&&dom.stamp&&stamp.textContent!==dom.stamp){stamp.textContent=dom.stamp;changed=true}try{window.FMNewsClubFilter?.install?.(document.getElementById('newsRegistrations'))}catch(_e){}return changed}
-function nativeRender(){try{if(typeof renderNews==='function'){renderNews();return true}if(typeof window.renderNews==='function'){window.renderNews();return true}if(typeof renderAll==='function'){renderAll();return true}if(typeof window.renderAll==='function'){window.renderAll();return true}}catch(e){console.warn('[FM News persistence v7] native News render failed',e)}return false}
+function restoreDom(dom){
+ if(!dom?.sections)return false;let changed=false;
+ for(const [id,s] of Object.entries(dom.sections)){
+  /* V41: canonical transfer/registration cards are never restored from saved HTML.
+     Their canonical payload renderer is the single DOM authority. */
+  if(CANONICAL_DOM_IDS.has(id))continue;
+  const el=document.getElementById(id);if(!el||typeof s?.html!=='string')continue;
+  if(el.innerHTML!==s.html){el.innerHTML=s.html;changed=true}
+  if(el.dataset){if(s.cleared)el.dataset.fmNewsCleared=s.cleared;else delete el.dataset.fmNewsCleared}
+ }
+ const stamp=document.getElementById('newsStamp');if(stamp&&dom.stamp&&stamp.textContent!==dom.stamp){stamp.textContent=dom.stamp;changed=true}
+ try{window.FMNewsClubFilter?.install?.(document.getElementById('newsRegistrations'))}catch(_e){}
+ return changed;
+}
+function nativeRender(){try{if(typeof renderNews==='function'){renderNews();return true}if(typeof window.renderNews==='function'){window.renderNews();return true}if(typeof renderAll==='function'){renderAll();return true}if(typeof window.renderAll==='function'){window.renderAll();return true}}catch(e){console.warn('[FM News persistence v8] native News render failed',e)}return false}
+function stabiliseCanonicalNews(){try{window.FMRegistrationNewsGuard?.refresh?.();window.FMNewsTransferStabilityV40?.stabilise?.()}catch(_e){}}
 function restore(reason='refresh restore'){
  if(restoring||importMode())return false;
  const payload=payloadRef();if(!payload)return false;markDatabaseActive();
@@ -107,15 +124,15 @@ function restore(reason='refresh restore'){
  restoring=true;
  try{
   applyActiveStatuses(snap.active_statuses);applyStateNews(snap.state_news);applyGlobalNews(snap.global_news);nativeRender();
-  try{window.FMRegistrationNewsGuard?.refresh?.()}catch(_e){}
-  const reapply=()=>{if(!importMode()){markDatabaseActive();restoreDom(snap.dom)}};
+  stabiliseCanonicalNews();
+  const reapply=()=>{if(!importMode()){markDatabaseActive();restoreDom(snap.dom);stabiliseCanonicalNews()}};
   reapply();for(const ms of [40,120,300,800,1800,3500,7000])setTimeout(reapply,ms);
   lastRestoreAt=Date.now();return true;
  }finally{restoring=false}
 }
 function recoverFromPayload(reason='payload recovery'){
  if(restoring||importMode())return false;const payload=payloadRef(),st=stateRef();if(!payload||!st)return false;markDatabaseActive();
- restoring=true;try{const active=ensureActiveStatuses();nativeRender();try{window.FMRegistrationNewsGuard?.refresh?.()}catch(_e){};const has=!!(active&&(arr(active.injuries).length||arr(active.suspensions).length));if(has)setTimeout(()=>saveCandidate(reason,true),120);lastRestoreAt=Date.now();return has}finally{restoring=false}
+ restoring=true;try{const active=ensureActiveStatuses();nativeRender();stabiliseCanonicalNews();const has=!!(active&&(arr(active.injuries).length||arr(active.suspensions).length));if(has)setTimeout(()=>saveCandidate(reason,true),120);lastRestoreAt=Date.now();return has}finally{restoring=false}
 }
 function scheduleRestore(reason){for(const ms of [0,80,180,350,700,1200,2200,4000,7000,10000])setTimeout(()=>restore(reason),ms)}
 function installObserver(){
@@ -126,7 +143,7 @@ function installObserver(){
   if(touchesNews&&readLocal())setTimeout(()=>restore('late News render guard'),80);
  });observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true});
 }
-window.FMNewsPersistence={version:VERSION,readLocal,clearLocal,restore,recoverFromPayload,startCapture,saveCandidate,deriveActiveStatuses,ensureActiveStatuses,boundary,compatible,markDatabaseActive,status:()=>({version:VERSION,importMode:importMode(),captureWindow:Math.max(0,captureUntil-Date.now()),captureReason,lastSavedAt,lastSavedQuality,lastRestoreAt,hasLocal:!!readLocal(),localQuality:Number(readLocal()?.quality||0),payloadReady:!!payloadRef(),boundary:boundary()})};
+window.FMNewsPersistence={version:VERSION,readLocal,clearLocal,restore,recoverFromPayload,startCapture,saveCandidate,deriveActiveStatuses,ensureActiveStatuses,boundary,compatible,markDatabaseActive,restoreDom,canonicalDomIds:[...CANONICAL_DOM_IDS],status:()=>({version:VERSION,importMode:importMode(),captureWindow:Math.max(0,captureUntil-Date.now()),captureReason,lastSavedAt,lastSavedQuality,lastRestoreAt,hasLocal:!!readLocal(),localQuality:Number(readLocal()?.quality||0),payloadReady:!!payloadRef(),boundary:boundary()})};
 installObserver();
 window.addEventListener('fmcanonicalpublished',()=>{startCapture('fmcanonicalpublished');setTimeout(()=>saveCandidate('canonical publish',true),100)});
 window.addEventListener('fmworldloaded',()=>scheduleRestore('world loaded'));
