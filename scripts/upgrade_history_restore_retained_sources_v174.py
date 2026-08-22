@@ -50,23 +50,10 @@ new_return = (
 block = block.replace(old_return, new_return, 1)
 py = py[:pos] + block + py[end:]
 
+# Machine-readable marker only. Avoid touching unrelated debug-dict construction.
 marker = "_RICH_SOURCE_RESTORATION_V174=1\n_RICH_SOURCE_RESTORATION_POLICY_V174='exact-dat-admission-structural-validation-no-source-trust'\n_RICH_SOURCE_RESTORATION_MEMBERS_V174=['player_stats.dat','play_fixture_manager.dat','news.dat']\n"
 insert = py.find('def ' + fn)
 py = py[:insert] + marker + py[insert:]
-
-if 'unlabelled_rich_source_restoration_v174' not in py:
-    anchors = ["'unlabelled_rich_non_retained_members_skipped':", "'unlabelled_rich_members_scanned':"]
-    ap = next((py.find(a) for a in anchors if py.find(a) >= 0), -1)
-    if ap >= 0:
-        ls = py.rfind('\n', 0, ap) + 1
-        line = py[ls:py.find('\n', ap)]
-        ind = re.match(r'\s*', line).group(0)
-        extra = (
-            ind + "'unlabelled_rich_source_restoration_v174':bool(globals().get('_RICH_SOURCE_RESTORATION_V174',0)),\n" +
-            ind + "'unlabelled_rich_source_restoration_policy_v174':globals().get('_RICH_SOURCE_RESTORATION_POLICY_V174'),\n" +
-            ind + "'unlabelled_rich_source_restoration_members_v174':globals().get('_RICH_SOURCE_RESTORATION_MEMBERS_V174',[]),\n"
-        )
-        py = py[:ls] + extra + py[ls:]
 
 compile(py, 'fm_importer.py', 'exec')
 new_b64 = base64.b64encode(py.encode()).decode('ascii')
