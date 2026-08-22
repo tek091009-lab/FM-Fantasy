@@ -1,0 +1,64 @@
+name: Apply historical rich scanner v175
+
+on:
+  push:
+    branches: [automation/history-v175-source-scoped-nonoverlap]
+    paths:
+      - 'scripts/upgrade_history_v175_source_scoped_nonoverlap.py'
+      - '.github/workflows/apply-history-v175-source-scoped-nonoverlap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: automation/history-v175-source-scoped-nonoverlap
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply v175 retained rich scanner correction
+        run: python scripts/upgrade_history_v175_source_scoped_nonoverlap.py
+      - name: Verify packed Python and exact source scope
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          parts=[Path('app')/f'part{i:02d}' for i in range(17)]+[Path('app')/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode('utf-8')
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode('utf-8'); compile(py,'fm_importer.py','exec')
+          assert '_RICH_NONOVERLAP_V175=1' in py
+          assert "_RICH_SOURCE_SCOPE_V175='retained-match-members-only-scm-apm-pkm'" in py
+          pos=py.find('def _rich_is_retained_match_member'); assert pos>=0
+          end=py.find('\ndef ',pos+4); end=len(py) if end<0 else end
+          scope=py[pos:end]
+          assert "('.scm','.apm','.pkm')" in scope
+          for bad in ('news.dat','play_fixture_manager.dat','player_stats.dat'):
+              assert bad not in scope
+          for fn in ('_rich_scan_stats','_rich_scan_stats_fast'):
+              pos=py.find('def '+fn); assert pos>=0
+              end=py.find('\ndef ',pos+4); end=len(py) if end<0 else end
+              b=py[pos:end]
+              assert 'p+=140' not in b and 'p += 140' not in b
+              assert ('p+=214' in b) or ('p += 214' in b)
+          for tok in ('def _rich_stat_record_at','def _rich_candidate_squad_pairs','register_match','fixture_identity'):
+              assert tok in py
+          print('v175 packed importer verified')
+          PY
+      - name: Commit generated packed importer
+        run: |
+          if git diff --quiet -- app; then
+            echo 'No packed importer changes to commit'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app
+          git commit -m 'Apply source-scoped non-overlap rich scanner v175'
+          git push origin HEAD:automation/history-v175-source-scoped-nonoverlap
