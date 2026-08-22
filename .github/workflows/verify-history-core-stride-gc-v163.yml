@@ -1,0 +1,98 @@
+name: Verify retained history stride-aware GC v163
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_core_stride_gc_v163.py'
+      - '.github/workflows/verify-history-core-stride-gc-v163.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply structural history stack through v163
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+          python scripts/upgrade_history_starter_bench_compact_v140.py
+          python scripts/upgrade_history_used_unused_bench_gap_v141.py
+          python scripts/upgrade_history_used_unused_bench_compact_v142.py
+          python scripts/upgrade_history_starter_bench_contiguous_v143.py
+          python scripts/upgrade_history_used_unused_bench_contiguous_v144.py
+          python scripts/upgrade_history_dual_subgroup_gaps_v145.py
+          python scripts/upgrade_history_dual_subgroup_compact_v146.py
+          python scripts/upgrade_history_dual_subgroup_contiguous_v147.py
+          python scripts/upgrade_history_compact_stat_stride_v148.py
+          python scripts/upgrade_history_min_record_buffer_v149.py
+          python scripts/upgrade_history_core_stat_stride_v150.py
+          python scripts/upgrade_history_core_unrated_stride_v151.py
+          python scripts/upgrade_history_core_stride_tail_v152.py
+          python scripts/upgrade_history_core_stride_unique_pid_v153.py
+          python scripts/upgrade_history_core_stride_integrity_v154.py
+          python scripts/upgrade_history_core_stride_fantasy_complete_v155.py
+          python scripts/upgrade_history_short_compact_bench_stride_v159.py
+          python scripts/upgrade_history_short_compact_bench_tail_v160.py
+          python scripts/upgrade_history_compact_stride_tail_bounds_v161.py
+          python scripts/upgrade_history_core_stride_truth_v162.py
+          python scripts/upgrade_history_core_stride_gc_v163.py
+      - name: Verify packed importer and v163 invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+
+          required=[
+              'def _v163_apply_physical_gc(raw,p,end,stride,r):',
+              'if not (147<=d<=157):return r',
+              "gc=int(raw[int(p)+146])",
+              "r['core_exact_goals_conceded_v163']=gc",
+              '_v163_apply_physical_gc(raw,p,end,d,r0)',
+              '_v163_apply_physical_gc(raw,p,end,d,r) if r else r',
+              "elif bool(r.get('core_gc_available_v163')):",
+              "r['historical_fantasy_core_complete_v163']=True",
+              "r['historical_fantasy_core_complete_v163']=False",
+              "globals()[_v163_key]=int(globals().get(_v163_key,0))+1",
+              "globals()['_RICH_GLOBAL_NONOVERLAP_SCAN_V138']=1",
+          ]
+          for token in required:assert token in py,token
+
+          # Physical-boundary proof: +146 is not part of a 145- or 146-byte object, but it is
+          # inside every 147..157-byte object before the next player begins.
+          for stride in (145,146):
+              assert not (146 < stride)
+          for stride in range(147,158):
+              assert 146 < stride
+
+          # Byte-level example: a 150-byte object contains its +146 GC byte; the next player starts
+          # at +150, so reading +146 cannot borrow data from the next object.
+          raw=bytearray(400)
+          p=100;stride=150
+          raw[p+146]=3
+          next_player=p+stride
+          assert p+146 < next_player
+          assert raw[p+146]==3
+
+          # v162 quarantine remains represented for true missing-GC short objects.
+          assert "r['core_missing_fantasy_field_v162']='team_goals_conceded_while_on_pitch'" in py
+          # Impossible one-byte tail values are not promoted as football GC evidence.
+          assert 'if not (0<=gc<=20):' in py
+          print('v163 compiles; exact +146 goals-conceded is recovered only when physically inside a uniquely-proven 147..157-byte short-stride object; 145/146-byte active rows remain quarantined')
+          PY

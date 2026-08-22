@@ -1,0 +1,96 @@
+name: Verify retained history mixed-bench gap v171
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_global_nonoverlap_scan_v138.py'
+      - 'scripts/upgrade_history_starter_bench_gap_v139.py'
+      - 'scripts/upgrade_history_starter_bench_compact_v140.py'
+      - 'scripts/upgrade_history_used_unused_bench_gap_v141.py'
+      - 'scripts/upgrade_history_mixed_bench_gap_v171.py'
+      - '.github/workflows/verify-history-mixed-bench-gap-v171.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural stack through v171
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+          python scripts/upgrade_history_starter_bench_compact_v140.py
+          python scripts/upgrade_history_used_unused_bench_gap_v141.py
+          python scripts/upgrade_history_mixed_bench_gap_v171.py
+      - name: Verify packed importer and mixed-bench gap semantics
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def mixed_bench_internal_spacing_v171(rows):',
+              'def mixed_bench_gap_window_v171(j,left_n,right_n):',
+              "diagnostics['mixed_bench_gap_candidate_pairs_v171']+=1",
+              'unlabelled_rich_mixed_bench_gap_candidate_pairs_v171',
+              'def used_unused_bench_internal_spacing(rows):',
+              'def starter_bench_gap_window(j,left_n,right_n):',
+              "if agg(pair) not in played_score_pairs:continue",
+          ]
+          for token in required:assert token in py,token
+
+          # Successful retained data proves bench order may be mixed. A 20-player side with
+          # used/unused/used/unused rows around one physical metadata break must be accepted by v171,
+          # even though v141's ordered used->unused rule cannot describe it.
+          def qualifies(sub_on,inactive,gaps):
+              n=len(sub_on)
+              if not 18<=n<=22:return False
+              if any(g<214 for g in gaps):return False
+              # Every post-XI row is still bench-semantic, regardless of ordering.
+              for i in range(11,n):
+                  if not (sub_on[i]>0 or inactive[i]):return False
+              special=[]
+              for idx,g in enumerate(gaps):
+                  if g>=1500:
+                      if idx<11:return False
+                      special.append((idx,g))
+              if len(special)!=1:return False
+              idx,g=special[0]
+              if g>16384:return False
+              return bool(sub_on[11:idx+1]) and bool(sub_on[idx+1:])
+
+          n=20
+          sub=[0]*11+[0,68,85,0,61,0,75,0,0]
+          inactive=[False]*11+[True,False,False,True,False,True,False,True,True]
+          gaps=[214]*(n-1);gaps[14]=4096
+          assert qualifies(sub,inactive,gaps)
+          # This exact ordering is intentionally not the ordered v141 pattern: there is an unused
+          # player before later used substitutes on both sides of the metadata break.
+          assert sub[11]==0 and sub[12]>0 and sub[14]==0 and sub[15]>0
+          bad=list(gaps);bad[14]=214;bad[10]=4096
+          assert not qualifies(sub,inactive,bad)
+          bad_active=list(inactive);bad_active[18]=False
+          sub_bad=list(sub);sub_bad[18]=0
+          assert not qualifies(sub_bad,bad_active,gaps)
+          print('v171 compiles; one bounded gap inside a semantically valid mixed bench is accepted without assuming used substitutes precede unused bench rows')
+          PY

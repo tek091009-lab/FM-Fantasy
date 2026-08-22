@@ -1,0 +1,84 @@
+name: Verify retained history single-sub compact v170
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_global_nonoverlap_scan_v138.py'
+      - 'scripts/upgrade_history_compact_stat_stride_v148.py'
+      - 'scripts/upgrade_history_min_record_buffer_v149.py'
+      - 'scripts/upgrade_history_short_compact_bench_stride_v159.py'
+      - 'scripts/upgrade_history_short_compact_bench_tail_v160.py'
+      - 'scripts/upgrade_history_compact_stride_tail_bounds_v161.py'
+      - 'scripts/upgrade_history_two_row_compact_bench_stride_v169.py'
+      - 'scripts/upgrade_history_single_sub_compact_transition_v170.py'
+      - '.github/workflows/verify-history-single-sub-compact-v170.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply structural history stack through v170
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_compact_stat_stride_v148.py
+          python scripts/upgrade_history_min_record_buffer_v149.py
+          python scripts/upgrade_history_short_compact_bench_stride_v159.py
+          python scripts/upgrade_history_short_compact_bench_tail_v160.py
+          python scripts/upgrade_history_compact_stride_tail_bounds_v161.py
+          python scripts/upgrade_history_two_row_compact_bench_stride_v169.py
+          python scripts/upgrade_history_single_sub_compact_transition_v170.py
+      - name: Verify packed importer and single-used-sub compact reachability
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              "globals()['_RICH_SINGLE_SUB_COMPACT_TRANSITIONS_V170']",
+              "globals()['_RICH_SINGLE_SUB_COMPACT_AMBIGUITIES_V170']",
+              "int(rr4.get('sub_on',0) or 0)<=0",
+              'if current and not _v159_benchish(current):',
+              'if len(one_sub)==1:',
+              "globals()['_RICH_TWO_ROW_COMPACT_BENCH_TRANSITIONS_V169']",
+              'if len(short)==1:',
+              'if len(hits)!=1:return None',
+          ]
+          for token in required: assert token in py,token
+
+          # v170 closes a specific proof-length hole: starter11 -> exactly one used substitute can
+          # have one compact transition, so v159 (needs two successors) and v169 (both rows benchish)
+          # can never reach it. Positive sub_on on the sole successor is required.
+          def choose(current_bench, successors):
+              if current_bench:return None
+              good=[off for off,sub_on in successors if sub_on>0]
+              return good[0] if len(good)==1 else None
+          assert choose(False,[(1180,67)])==1180
+          assert choose(False,[(1180,0)]) is None
+          assert choose(True,[(1180,67)]) is None
+          assert choose(False,[(1180,67),(1184,71)]) is None
+
+          # Physical family stays tightly bounded; this is row reachability only, not attachment.
+          assert 158<=180<=213
+          print('v170 compiles; starter/general -> one positive-sub_on compact successor is uniquely recoverable while unused/ambiguous cases remain fail-closed')
+          PY

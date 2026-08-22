@@ -1,0 +1,88 @@
+name: Verify retained history false header boundary v133
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_direct_header_tid_v126.py'
+      - 'scripts/upgrade_history_direct_header_orientation_v127.py'
+      - 'scripts/upgrade_history_direct_header_locality_v128.py'
+      - 'scripts/upgrade_history_direct_header_span_v129.py'
+      - 'scripts/upgrade_history_direct_header_namespace_v130.py'
+      - 'scripts/upgrade_history_header_anchored_candidate_v131.py'
+      - 'scripts/upgrade_history_header_payload_boundary_v132.py'
+      - 'scripts/upgrade_history_header_false_boundary_v133.py'
+      - '.github/workflows/verify-history-direct-header-v133.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural decoder stack through v133
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_direct_header_tid_v126.py
+          python scripts/upgrade_history_direct_header_orientation_v127.py
+          python scripts/upgrade_history_direct_header_locality_v128.py
+          python scripts/upgrade_history_direct_header_span_v129.py
+          python scripts/upgrade_history_direct_header_namespace_v130.py
+          python scripts/upgrade_history_header_anchored_candidate_v131.py
+          python scripts/upgrade_history_header_payload_boundary_v132.py
+          python scripts/upgrade_history_header_false_boundary_v133.py
+      - name: Verify packed importer and false-boundary invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def _v133_header_embedded_in_stat(raw,hq):',
+              'def _v133_next_safe_header(raw,headers,hi):',
+              '_v133_next_safe_header(raw,headers,hi)',
+              'header_anchored_embedded_false_delimiters_skipped',
+              'header_anchored_extended_after_false_delimiter_scans',
+              'payload_start=q+span+12',
+              'if len(proposals)!=1:',
+              'register_match(ci,f,rev,leid,reid,source)',
+          ]
+          for token in required:assert token in py,token
+          assert "next_q=headers[hi+1][0] if hi+1<len(headers) else len(raw)" not in py
+
+          # Structural regression for the exact bug: if a header-like marker sits inside an already
+          # validated 214-byte player record, it cannot safely delimit the match payload. The next
+          # non-embedded structural header must be used instead.
+          valid_spans=[(1000,1214),(1300,1514)]
+          fake_header=1100;real_next_header=1800
+          def embedded(hq):
+              return any(p<hq<p+214 for p,_ in valid_spans)
+          assert embedded(fake_header)
+          assert not embedded(real_next_header)
+          headers=[500,fake_header,real_next_header]
+          chosen=next(h for h in headers[1:] if not embedded(h))
+          assert chosen==real_next_header
+
+          # v133 changes only payload delimiting. Existing exact-fixture uniqueness and authoritative
+          # registration remain mandatory.
+          assert 'if len(proposals)!=1:' in py
+          assert 'fixture_identity(f) in used_fixtures' in py
+          print('v133 compiles; header-like markers embedded in validated 214-byte stat rows cannot truncate a real old-match payload')
+          PY

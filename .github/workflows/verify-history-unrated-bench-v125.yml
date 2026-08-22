@@ -1,0 +1,70 @@
+name: Verify retained history unrated bench records v125
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - '.github/workflows/verify-history-unrated-bench-v125.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural decoder stack
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+      - name: Verify packed importer and zero-rating bench invariant
+        run: |
+          python - <<'PY'
+          import base64,gzip,re,struct
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          for token in [
+              'unrated_inactive=(rating==0',
+              "'unrated_inactive_candidate':bool(unrated_inactive)",
+              "if r.get('unrated_inactive_candidate'):",
+              "globals()['_RICH_UNRATED_INACTIVE_ROWS']",
+              'def appearance_only_lineup_coherent(rows):',
+              'def contiguous_lineup_window(j,left_n,right_n):',
+              'def compact_window(j,left_n,right_n):',
+          ]:assert token in py,token
+
+          # Independent byte-level regression: an otherwise-valid 214-byte unused player row with
+          # rating=0 and zero match activity is accepted by the v125 predicate, while an active
+          # zero-rated row is rejected. This tests the new representation without broadening the
+          # existing 4.00..10.00 rated-record path.
+          def predicate(c):
+              u32=lambda o:struct.unpack_from('<I',c,o)[0]
+              rating=struct.unpack_from('<H',c,136)[0]
+              base=(1<=c[5]<=99 and c[7]==2 and c[20]<=12 and c[21]<=20 and c[50]<=30 and c[51]<=30 and c[52]<=30 and c[56]<=12 and c[63]<=5 and c[64]<=2 and c[67]<=130 and c[71]<=130)
+              rated=400<=rating<=1000
+              inactive=(20,22,23,24,42,43,50,51,52,55,56,63,64,67,71,74,86,87,92,93,94,95,96,97,98,145,146,151,152,157)
+              unrated=(rating==0 and u32(1)>0 and all(c[i]==0 for i in inactive))
+              return base and (rated or unrated)
+          row=bytearray(214);row[0]=2;struct.pack_into('<I',row,1,24517);row[5]=10;row[7]=2
+          assert predicate(row)
+          row[20]=1
+          assert not predicate(row)
+          row[20]=0;struct.pack_into('<H',row,136,750)
+          assert predicate(row)
+          print('v125 compiles; inactive zero-rated retained bench row accepted; active zero-rated garbage rejected')
+          PY

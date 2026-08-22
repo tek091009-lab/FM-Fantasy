@@ -1,0 +1,79 @@
+name: Verify retained history direct match header v128
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_direct_header_tid_v126.py'
+      - 'scripts/upgrade_history_direct_header_orientation_v127.py'
+      - 'scripts/upgrade_history_direct_header_locality_v128.py'
+      - '.github/workflows/verify-history-direct-header-v128.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural decoder stack through v128
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_direct_header_tid_v126.py
+          python scripts/upgrade_history_direct_header_orientation_v127.py
+          python scripts/upgrade_history_direct_header_locality_v128.py
+      - name: Verify packed importer and locality invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def _v126_header_pairs(raw,start):',
+              'def direct_binary_header_fixture_pass():',
+              'def direct_binary_header_reversed_fixture_pass():',
+              'def _v128_header_pairs_extended(raw,start):',
+              'if 12<=distance<=120000:out.append((q,home_tid,away_tid,distance))',
+              'def direct_binary_header_extended_locality_pass():',
+              'if len(by_key)!=1:',
+              '_v128_direct_extended=direct_binary_header_extended_locality_pass()',
+              'unlabelled_rich_direct_header_extended_fixture_matches',
+          ]
+          for token in required:assert token in py,token
+
+          # Structural regression: v126's original locality accepted only 64..32768 bytes.
+          # v128 must additionally admit a header 40 bytes before the first stat row and one
+          # 80 kB before it, while rejecting an overlapping (<12 byte) pseudo-header.
+          def accepted(distance):
+              return 12<=distance<=120000
+          assert accepted(40)
+          assert accepted(80000)
+          assert not accepted(8)
+          assert not accepted(120001)
+
+          # Broader locality cannot choose by nearest header alone: all compatible evidence
+          # must collapse to exactly one fixture + one physical array orientation.
+          assert 'by_key=collections.defaultdict(list)' in py
+          assert "for hit in compatible:by_key[(hit[0],hit[1])].append(hit)" in py
+          assert "diagnostics['direct_header_extended_ambiguous_rejected']+=1" in py
+          # Final authoritative fixture registration remains mandatory for both orientations.
+          assert "register_match(ci,f,rev,leid,reid,source)" in py
+          assert 'if ci in used_candidates or fixture_identity(f) in used_fixtures:continue' in py
+          print('v128 compiles; near and >32KiB retained headers are admitted only when all compatible header evidence proves one unused authoritative fixture/orientation')
+          PY

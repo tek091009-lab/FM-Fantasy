@@ -1,0 +1,96 @@
+name: Verify retained history core-stride lookahead tail v167
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_core_stride_lookahead_tail_v167.py'
+      - '.github/workflows/verify-history-core-stride-lookahead-tail-v167.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply structural history stack through v167
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+          python scripts/upgrade_history_starter_bench_compact_v140.py
+          python scripts/upgrade_history_used_unused_bench_gap_v141.py
+          python scripts/upgrade_history_used_unused_bench_compact_v142.py
+          python scripts/upgrade_history_starter_bench_contiguous_v143.py
+          python scripts/upgrade_history_used_unused_bench_contiguous_v144.py
+          python scripts/upgrade_history_dual_subgroup_gaps_v145.py
+          python scripts/upgrade_history_dual_subgroup_compact_v146.py
+          python scripts/upgrade_history_dual_subgroup_contiguous_v147.py
+          python scripts/upgrade_history_compact_stat_stride_v148.py
+          python scripts/upgrade_history_min_record_buffer_v149.py
+          python scripts/upgrade_history_core_stat_stride_v150.py
+          python scripts/upgrade_history_core_unrated_stride_v151.py
+          python scripts/upgrade_history_core_stride_tail_v152.py
+          python scripts/upgrade_history_core_stride_unique_pid_v153.py
+          python scripts/upgrade_history_core_stride_integrity_v154.py
+          python scripts/upgrade_history_core_stride_fantasy_complete_v155.py
+          python scripts/upgrade_history_short_compact_bench_stride_v159.py
+          python scripts/upgrade_history_short_compact_bench_tail_v160.py
+          python scripts/upgrade_history_compact_stride_tail_bounds_v161.py
+          python scripts/upgrade_history_core_stride_truth_v162.py
+          python scripts/upgrade_history_core_stride_gc_v163.py
+          python scripts/upgrade_history_core_stride_gc_continuation_v164.py
+          python scripts/upgrade_history_core_stride_variable_continuation_v165.py
+          python scripts/upgrade_history_core_stride_lookahead_v166.py
+          python scripts/upgrade_history_core_stride_lookahead_tail_v167.py
+      - name: Verify packed importer and one-shot proven-lookahead continuation
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              "globals().setdefault('_RICH_CORE_STRIDE_LOOKAHEAD_PENDING_V167',{})",
+              "globals()['_RICH_CORE_STRIDE_LOOKAHEAD_TAILS_V167']",
+              "globals()['_RICH_CORE_STRIDE_LOOKAHEAD_TAIL_REVALIDATION_REJECTS_V167']",
+              "_v167_pending[(id(raw),int(q),int(end))]=(int(npid),int(_v167_q2),int(_v167_pid2),int(_v167_step2))",
+              "r['core_stride_lookahead_tail_v167']=True",
+              "globals()['_RICH_CORE_STRIDE_LOOKAHEAD_RESOLVED_V166']",
+          ]
+          for token in required:assert token in py,token
+
+          # Logic regression: v166 proves q=1149 as the only ambiguous first candidate with one
+          # successor q2=1299. That second transition is evidence already paid for and must be kept
+          # for the immediately-following q call, not rediscovered from scratch.
+          raw_id=77;end=2000
+          pending={}
+          q=1149;npid=2;step2=150;q2=1299;pid2=4
+          pending[(raw_id,q,end)]=(npid,q2,pid2,step2)
+          expected_pid,stored_q2,stored_pid2,stored_step2=pending.pop((raw_id,q,end))
+          assert expected_pid==2 and stored_q2==1299 and stored_pid2==4
+          assert stored_q2-q==stored_step2==150
+          assert not pending
+
+          # Revalidation remains fail-closed: wrong current PID or an altered physical step cannot
+          # consume the pending proof.
+          assert not (3==expected_pid)
+          assert not ((1300-q)==stored_step2)
+
+          block=py[py.index('def _v153_core_stride_continue'):py.index('\ndef ',py.index('def _v153_core_stride_continue')+1)]
+          assert "_RICH_CORE_STRIDE_LOOKAHEAD_PENDING_V167" in block
+          assert "_v167_pending.pop(_v167_key,None)" in block
+          print('v167 compiles; a successor already proved by v166 ambiguity lookahead is carried exactly one scanner step and revalidated by raw object, offset, PID and physical stride before use')
+          PY

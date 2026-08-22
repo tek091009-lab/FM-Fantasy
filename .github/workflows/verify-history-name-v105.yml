@@ -1,0 +1,73 @@
+name: Verify retained-name history recovery v105
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_confirmed_name_anchor_v99.py'
+      - 'scripts/upgrade_history_name_transfer_support_v100.py'
+      - 'scripts/upgrade_history_confirmed_name_one_side_v101.py'
+      - 'scripts/upgrade_history_confirmed_name_global_constraint_v102.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_pair_v103.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_global_v104.py'
+      - 'scripts/upgrade_history_canonical_name_alias_v105.py'
+      - '.github/workflows/verify-history-name-v105.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained-name decoder stack to packed importer
+        run: |
+          python scripts/upgrade_history_confirmed_name_anchor_v99.py
+          python scripts/upgrade_history_name_transfer_support_v100.py
+          python scripts/upgrade_history_confirmed_name_one_side_v101.py
+          python scripts/upgrade_history_confirmed_name_global_constraint_v102.py
+          python scripts/upgrade_history_fixture_conditioned_name_pair_v103.py
+          python scripts/upgrade_history_fixture_conditioned_name_global_v104.py
+          python scripts/upgrade_history_canonical_name_alias_v105.py
+      - name: Verify compiled importer and canonical alias safeguards
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode(); compile(py,'fm_importer.py','exec')
+          required=[
+            'def _retained_name_canonical_key(row):',
+            "_ud.normalize('NFKD',raw.casefold())",
+            'def _retained_name_owner_set(row):',
+            "return confirmed_retained_name_clubs.get(key,set()),'exact'",
+            "return confirmed_retained_canonical_name_clubs.get(ckey,set()),'canonical'",
+            'confirmed_retained_canonical_name_clubs[_ckey].add(_eid)',
+            'confirmed_name_canonical_alias_uses',
+            'unlabelled_rich_confirmed_name_canonical_alias_uses',
+            'def confirmed_name_fixture_conditioned_global_pass():',
+            'def confirmed_name_fixture_conditioned_pair_pass():',
+            'def confirmed_name_global_constraint_pass():',
+            'def confirmed_name_one_side_pass():',
+          ]
+          for s in required: assert s in py,s
+          assert 'owners=confirmed_retained_name_clubs.get(key,set())' not in py
+          # Exact ambiguity must remain authoritative: canonical fallback is reached only when
+          # the exact text key is absent from the confirmed exact-name table.
+          exact_guard="if key and key in confirmed_retained_name_clubs:"
+          canon_guard="if ckey and ckey in confirmed_retained_canonical_name_clubs:"
+          assert exact_guard in py and canon_guard in py and py.index(exact_guard)<py.index(canon_guard)
+          # No fuzzy-name machinery: canonicalization may only normalize Unicode/accents/
+          # punctuation/whitespace and cannot reorder tokens or perform edit-distance matching.
+          for forbidden in ['levenshtein','difflib','SequenceMatcher','fuzzywuzzy']:
+              assert forbidden not in py
+          print('v99-v105 retained-name stack compiles; exact evidence stays authoritative and canonical fallback is collision-safe')
+          PY

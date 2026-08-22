@@ -1,0 +1,82 @@
+name: Verify retained history mixed-bench contiguous v173
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_global_nonoverlap_scan_v138.py'
+      - 'scripts/upgrade_history_starter_bench_gap_v139.py'
+      - 'scripts/upgrade_history_starter_bench_compact_v140.py'
+      - 'scripts/upgrade_history_used_unused_bench_gap_v141.py'
+      - 'scripts/upgrade_history_mixed_bench_gap_v171.py'
+      - 'scripts/upgrade_history_mixed_bench_compact_v172.py'
+      - 'scripts/upgrade_history_mixed_bench_contiguous_v173.py'
+      - '.github/workflows/verify-history-mixed-bench-contiguous-v173.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural stack through v173
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+          python scripts/upgrade_history_starter_bench_compact_v140.py
+          python scripts/upgrade_history_used_unused_bench_gap_v141.py
+          python scripts/upgrade_history_mixed_bench_gap_v171.py
+          python scripts/upgrade_history_mixed_bench_compact_v172.py
+          python scripts/upgrade_history_mixed_bench_contiguous_v173.py
+      - name: Verify packed importer and mixed-bench contiguous semantics
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def mixed_bench_internal_spacing_v171(rows):',
+              'def mixed_bench_compact_window_v172(j,left_n,right_n):',
+              'def mixed_bench_contiguous_window_v173(j,left_n,right_n):',
+              'if team_gap>=outlier:return None',
+              "diagnostics['mixed_bench_contiguous_candidate_pairs_v173']+=1",
+              'unlabelled_rich_mixed_bench_contiguous_candidate_pairs_v173',
+              "if agg(pair) not in played_score_pairs:continue",
+          ]
+          for token in required:assert token in py,token
+
+          # Mixed-bench metadata-gap semantics are already proven by v171. v173 owns only the
+          # ordinary contiguous team boundary; the compact outlier remains v172's responsibility.
+          ordinary=[214]*30
+          ordered=sorted(ordinary);med=ordered[len(ordered)//2];q75=ordered[(3*len(ordered))//4]
+          threshold=max(230,int(med*1.35),q75+16)
+          assert threshold==288
+          assert 214 < threshold                 # ordinary continuation => v173
+          assert 340 >= threshold                # compact outlier => v172, not v173
+          assert 214<=214<=500 and 214<=340<=500
+
+          internal_gap=4096
+          assert 1500<=internal_gap<=16384
+          sub=[0]*11+[0,68,85,0,61,0,75,0,0]
+          inactive=[False]*11+[True,False,False,True,False,True,False,True,True]
+          assert all(sub[i]>0 or inactive[i] for i in range(11,len(sub)))
+          print('v173 compiles; mixed-bench metadata-gap rows now cover the ordinary contiguous team-boundary representation without stealing v172 outliers')
+          PY

@@ -1,0 +1,87 @@
+name: Verify retained history dual subgroup gaps v145
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_global_nonoverlap_scan_v138.py'
+      - 'scripts/upgrade_history_starter_bench_gap_v139.py'
+      - 'scripts/upgrade_history_starter_bench_compact_v140.py'
+      - 'scripts/upgrade_history_used_unused_bench_gap_v141.py'
+      - 'scripts/upgrade_history_used_unused_bench_compact_v142.py'
+      - 'scripts/upgrade_history_starter_bench_contiguous_v143.py'
+      - 'scripts/upgrade_history_used_unused_bench_contiguous_v144.py'
+      - 'scripts/upgrade_history_dual_subgroup_gaps_v145.py'
+      - '.github/workflows/verify-history-dual-subgroup-gaps-v145.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply structural old-match decoder stack through v145
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+          python scripts/upgrade_history_starter_bench_compact_v140.py
+          python scripts/upgrade_history_used_unused_bench_gap_v141.py
+          python scripts/upgrade_history_used_unused_bench_compact_v142.py
+          python scripts/upgrade_history_starter_bench_contiguous_v143.py
+          python scripts/upgrade_history_used_unused_bench_contiguous_v144.py
+          python scripts/upgrade_history_dual_subgroup_gaps_v145.py
+      - name: Verify packed importer and v145 invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def dual_subgroup_internal_spacing(rows):',
+              'if large[0][0]!=10 or large[1][0]<11:return False,0,0,-1',
+              "if not all(int(r.get('sub_on',0) or 0)>0 for r in used):return False,0,0,-1",
+              'if not all(inactive_bench(r) for r in unused):return False,0,0,-1',
+              'def dual_subgroup_gap_window(j,left_n,right_n):',
+              'if team_gap<=500:return None',
+              "if agg(pair) not in played_score_pairs:continue",
+              "diagnostics['dual_subgroup_gap_candidate_pairs']+=1",
+              'unlabelled_rich_dual_subgroup_gap_candidate_pairs',
+              'def starter_bench_gap_window(j,left_n,right_n):',
+              'def used_unused_bench_gap_window(j,left_n,right_n):',
+          ]
+          for token in required:assert token in py,token
+
+          # Structural regression: one team can contain TWO natural subgroup breaks without those
+          # breaks being mistaken for arbitrary internal corruption: XI->bench and used->unused.
+          ordinary=[214]*17
+          xi_gap=4096
+          used_unused_gap=3072
+          ordered=sorted(ordinary);med=ordered[len(ordered)//2];q75=ordered[(3*len(ordered))//4]
+          floor=max(1500,int(med*2.0),q75+512)
+          assert xi_gap>=floor and used_unused_gap>=floor
+          assert xi_gap<=16384 and used_unused_gap<=16384
+          # A third unexplained large gap must remain invalid under v145's exact-two-break rule.
+          large=[(10,xi_gap),(14,used_unused_gap)]
+          assert len(large)==2 and large[0][0]==10 and large[1][0]>=11
+          large_bad=large+[(16,2048)]
+          assert len(large_bad)!=2
+          print('v145 compiles; dual XI/bench + used/unused subgroup breaks admitted while arbitrary third gaps remain rejected')
+          PY

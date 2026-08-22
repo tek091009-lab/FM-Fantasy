@@ -1,0 +1,74 @@
+name: Verify retained history fixture-manager member v157
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_player_stats_member_v156.py'
+      - 'scripts/upgrade_history_fixture_manager_member_v157.py'
+      - '.github/workflows/verify-history-fixture-manager-member-v157.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply structural history stack through v157 source admission
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+          python scripts/upgrade_history_starter_bench_compact_v140.py
+          python scripts/upgrade_history_used_unused_bench_gap_v141.py
+          python scripts/upgrade_history_used_unused_bench_compact_v142.py
+          python scripts/upgrade_history_starter_bench_contiguous_v143.py
+          python scripts/upgrade_history_used_unused_bench_contiguous_v144.py
+          python scripts/upgrade_history_dual_subgroup_gaps_v145.py
+          python scripts/upgrade_history_dual_subgroup_compact_v146.py
+          python scripts/upgrade_history_dual_subgroup_contiguous_v147.py
+          python scripts/upgrade_history_compact_stat_stride_v148.py
+          python scripts/upgrade_history_min_record_buffer_v149.py
+          python scripts/upgrade_history_core_stat_stride_v150.py
+          python scripts/upgrade_history_core_unrated_stride_v151.py
+          python scripts/upgrade_history_core_stride_tail_v152.py
+          python scripts/upgrade_history_core_stride_unique_pid_v153.py
+          python scripts/upgrade_history_core_stride_integrity_v154.py
+          python scripts/upgrade_history_core_stride_fantasy_complete_v155.py
+          python scripts/upgrade_history_player_stats_member_v156.py
+          python scripts/upgrade_history_fixture_manager_member_v157.py
+      - name: Verify only news remains blanket-excluded and all fixture gates survive
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode(); compile(py,'fm_importer.py','exec')
+          key='unlabelled_rich_non_retained_member_names'
+          pos=py.find(key); assert pos>=0
+          fs=py.rfind('\ndef ',0,pos); fs=fs+1 if fs>=0 else py.rfind('def ',0,pos)
+          fe=py.find('\ndef ',pos); fe=len(py) if fe<0 else fe
+          block=py[fs:fe]
+          assert 'player_stats.dat' not in block
+          assert 'play_fixture_manager.dat' not in block
+          assert 'news.dat' in block
+          assert "_RICH_PLAYER_STATS_MEMBER_READMITTED_V156" in block
+          assert "_RICH_FIXTURE_MANAGER_MEMBER_READMITTED_V157" in block
+          assert "structural-scan-only-no-source-trust" in block
+          # Source admission must not become a shortcut around structural/fixture validation.
+          for tok in ['def _rich_stat_record_at','played_score_set','register_match','fixture_identity']:
+              assert tok in py,tok
+          print('v157 compiles: player_stats.dat + play_fixture_manager.dat are structurally scanned; news.dat remains excluded; normal authoritative fixture gates remain')
+          PY

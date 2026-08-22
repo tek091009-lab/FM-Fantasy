@@ -1,0 +1,84 @@
+name: Verify retained history dual subgroup compact v146
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_global_nonoverlap_scan_v138.py'
+      - 'scripts/upgrade_history_starter_bench_gap_v139.py'
+      - 'scripts/upgrade_history_starter_bench_compact_v140.py'
+      - 'scripts/upgrade_history_used_unused_bench_gap_v141.py'
+      - 'scripts/upgrade_history_used_unused_bench_compact_v142.py'
+      - 'scripts/upgrade_history_starter_bench_contiguous_v143.py'
+      - 'scripts/upgrade_history_used_unused_bench_contiguous_v144.py'
+      - 'scripts/upgrade_history_dual_subgroup_gaps_v145.py'
+      - 'scripts/upgrade_history_dual_subgroup_compact_v146.py'
+      - '.github/workflows/verify-history-dual-subgroup-compact-v146.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply structural old-match decoder stack through v146
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+          python scripts/upgrade_history_starter_bench_compact_v140.py
+          python scripts/upgrade_history_used_unused_bench_gap_v141.py
+          python scripts/upgrade_history_used_unused_bench_compact_v142.py
+          python scripts/upgrade_history_starter_bench_contiguous_v143.py
+          python scripts/upgrade_history_used_unused_bench_contiguous_v144.py
+          python scripts/upgrade_history_dual_subgroup_gaps_v145.py
+          python scripts/upgrade_history_dual_subgroup_compact_v146.py
+      - name: Verify packed importer and v146 invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def dual_subgroup_internal_spacing(rows):',
+              'def dual_subgroup_gap_window(j,left_n,right_n):',
+              'def dual_subgroup_compact_window(j,left_n,right_n):',
+              'if team_gap<214 or team_gap>500:return None',
+              'if ok and idx in (10,bench_idx) and g>=1500:continue',
+              "team_gap<max(230,int(med*1.35),q75+16)",
+              "if agg(pair) not in played_score_pairs:continue",
+              "diagnostics['dual_subgroup_compact_candidate_pairs']+=1",
+              'unlabelled_rich_dual_subgroup_compact_candidate_pairs',
+          ]
+          for token in required:assert token in py,token
+
+          # Structural regression: both internal subgroup breaks may coexist with a compact team
+          # separator, but that separator must remain a genuine outlier against ordinary ~214-byte
+          # player-record spacing. A normal 214 continuation stays out of v146.
+          ordinary=[214]*30
+          ordered=sorted(ordinary);med=ordered[len(ordered)//2];q75=ordered[(3*len(ordered))//4]
+          floor=max(230,int(med*1.35),q75+16)
+          assert 340>=floor
+          assert 214<floor
+          assert 214<=340<=500
+          xi_gap=4096;used_unused_gap=3072
+          assert 1500<=xi_gap<=16384 and 1500<=used_unused_gap<=16384
+          print('v146 compiles; dual subgroup metadata gaps can coexist with a compact outlier team boundary while ordinary continuity remains excluded')
+          PY

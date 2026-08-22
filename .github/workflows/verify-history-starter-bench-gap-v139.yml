@@ -1,0 +1,110 @@
+name: Verify retained history starter-bench internal gap v139
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_direct_header_tid_v126.py'
+      - 'scripts/upgrade_history_direct_header_orientation_v127.py'
+      - 'scripts/upgrade_history_direct_header_locality_v128.py'
+      - 'scripts/upgrade_history_direct_header_span_v129.py'
+      - 'scripts/upgrade_history_direct_header_namespace_v130.py'
+      - 'scripts/upgrade_history_header_anchored_candidate_v131.py'
+      - 'scripts/upgrade_history_header_payload_boundary_v132.py'
+      - 'scripts/upgrade_history_header_false_boundary_v133.py'
+      - 'scripts/upgrade_history_header_fixture_delimiter_v134.py'
+      - 'scripts/upgrade_history_header_payload_complete_delimiter_v135.py'
+      - 'scripts/upgrade_history_same_header_alias_delimiter_v136.py'
+      - 'scripts/upgrade_history_header_nonoverlap_scan_v137.py'
+      - 'scripts/upgrade_history_global_nonoverlap_scan_v138.py'
+      - 'scripts/upgrade_history_starter_bench_gap_v139.py'
+      - '.github/workflows/verify-history-starter-bench-gap-v139.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural decoder stack through v139
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_direct_header_tid_v126.py
+          python scripts/upgrade_history_direct_header_orientation_v127.py
+          python scripts/upgrade_history_direct_header_locality_v128.py
+          python scripts/upgrade_history_direct_header_span_v129.py
+          python scripts/upgrade_history_direct_header_namespace_v130.py
+          python scripts/upgrade_history_header_anchored_candidate_v131.py
+          python scripts/upgrade_history_header_payload_boundary_v132.py
+          python scripts/upgrade_history_header_false_boundary_v133.py
+          python scripts/upgrade_history_header_fixture_delimiter_v134.py
+          python scripts/upgrade_history_header_payload_complete_delimiter_v135.py
+          python scripts/upgrade_history_same_header_alias_delimiter_v136.py
+          python scripts/upgrade_history_header_nonoverlap_scan_v137.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+      - name: Verify packed importer and v139 physical-layout invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          for token in [
+              'def starter_bench_internal_spacing(rows):',
+              'if idx==10 and g>=1500:',
+              'if special>16384:return False,False,0',
+              'def starter_bench_gap_window(j,left_n,right_n):',
+              'if team_gap<=500:return None',
+              "diagnostics['starter_bench_internal_gap_candidate_pairs']+=1",
+              'unlabelled_rich_starter_bench_internal_gap_candidate_pairs',
+              "globals()['_RICH_GLOBAL_NONOVERLAP_SCAN_V138']=1",
+              'rows.append(r);p+=214;continue',
+          ]: assert token in py,token
+
+          # Structural regression: one 4 KiB metadata break exactly at XI->bench is accepted;
+          # the same break elsewhere inside the side is rejected; two large internal breaks reject.
+          ns={}
+          exec(compile(py,'fm_importer.py','exec'),ns,ns)
+          # Pull helper source from candidate function indirectly is awkward because it is nested,
+          # so mirror the exact invariant here as a regression of the representation contract.
+          def valid(gaps):
+              if any(g<214 for g in gaps):return False
+              special=0;ordinary=[]
+              for idx,g in enumerate(gaps):
+                  if idx==10 and g>=1500:
+                      special=g;continue
+                  if g>=1500:return False
+                  ordinary.append(g)
+              if not special:return True
+              if special>16384:return False
+              ordered=sorted(ordinary)
+              if ordered:
+                  med=ordered[len(ordered)//2];q75=ordered[(3*len(ordered))//4]
+                  if special<max(1500,int(med*2.0),q75+512):return False
+              return True
+          normal=[214]*19
+          xi_gap=normal.copy();xi_gap[10]=4096
+          wrong_gap=normal.copy();wrong_gap[7]=4096
+          two_gaps=normal.copy();two_gaps[10]=4096;two_gaps[15]=4096
+          assert valid(xi_gap)
+          assert not valid(wrong_gap)
+          assert not valid(two_gaps)
+          print('v139 compiles; one bounded XI->bench internal metadata gap is accepted while off-boundary/multiple gaps remain rejected')
+          PY

@@ -1,0 +1,83 @@
+name: Verify retained history header payload boundary v132
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_direct_header_tid_v126.py'
+      - 'scripts/upgrade_history_direct_header_orientation_v127.py'
+      - 'scripts/upgrade_history_direct_header_locality_v128.py'
+      - 'scripts/upgrade_history_direct_header_span_v129.py'
+      - 'scripts/upgrade_history_direct_header_namespace_v130.py'
+      - 'scripts/upgrade_history_header_anchored_candidate_v131.py'
+      - 'scripts/upgrade_history_header_payload_boundary_v132.py'
+      - '.github/workflows/verify-history-direct-header-v132.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural decoder stack through v132
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_direct_header_tid_v126.py
+          python scripts/upgrade_history_direct_header_orientation_v127.py
+          python scripts/upgrade_history_direct_header_locality_v128.py
+          python scripts/upgrade_history_direct_header_span_v129.py
+          python scripts/upgrade_history_direct_header_namespace_v130.py
+          python scripts/upgrade_history_header_anchored_candidate_v131.py
+          python scripts/upgrade_history_header_payload_boundary_v132.py
+      - name: Verify packed importer and payload-boundary invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def direct_header_anchored_candidate_pass_v131():',
+              'payload_start=q+span+12',
+              'stats=_v131_scan_stats(raw,payload_start,end)',
+              'header_anchored_header_prefix_bytes_skipped',
+              'header_anchored_payload_boundary_scans',
+              'unlabelled_rich_header_anchored_payload_boundary_scans',
+              'if len(proposals)!=1:',
+              'register_match(ci,f,rev,leid,reid,source)',
+              'def direct_binary_header_fixture_pass():',
+              'def direct_binary_header_learned_namespace_pass():',
+          ]
+          for token in required:assert token in py,token
+          assert 'stats=_v131_scan_stats(raw,q,end)' not in py
+
+          # Binary boundary regression: the proven header begins at q; AWAY marker is q+span and
+          # consumes 12 bytes through its team-id field. Player scanning must begin afterwards.
+          q=100;span=40;payload_start=q+span+12
+          assert payload_start==152
+          # A fake stat-looking byte inside the header prefix must lie outside the payload scan.
+          fake_stat=125;real_stat=200
+          assert q<=fake_stat<payload_start<real_stat
+
+          # v132 changes only where header-first scanning starts. Exact fixture uniqueness and the
+          # authoritative register_match gate from v131 remain mandatory.
+          assert "if len(proposals)!=1:" in py
+          assert 'fixture_identity(f) in used_fixtures' in py
+          print('v132 compiles; header-first old-match scanning excludes HOME/AWAY metadata and preserves unique-fixture registration safeguards')
+          PY

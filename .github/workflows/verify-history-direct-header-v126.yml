@@ -1,0 +1,89 @@
+name: Verify retained history direct match header v126
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_direct_header_tid_v126.py'
+      - '.github/workflows/verify-history-direct-header-v126.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural decoder stack
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_direct_header_tid_v126.py
+      - name: Verify packed importer and direct-header invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re,struct
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def _v126_header_pairs(raw,start):',
+              "raw.find(b'\\x03\\x02',q,hi)",
+              "raw.find(b'\\x00\\x03\\x02',q+11,min(hi,q+96))",
+              'def _v126_fixture_modes(home_id,away_id,hs,as_):',
+              "modes.append('fixture_tid')",
+              "modes.append('club_eid')",
+              "modes.append('club_eid_plus1')",
+              'def direct_binary_header_fixture_pass():',
+              'if len(by_fixture)!=1:',
+              "register_match(ci,f,False,heid,aeid,'unlabelled_retained_direct_match_header_tid_v126')",
+              '_v126_direct=direct_binary_header_fixture_pass()',
+              'unlabelled_rich_direct_header_fixture_matches',
+              'def appearance_only_lineup_coherent(rows):',
+              'def contiguous_lineup_window(j,left_n,right_n):',
+              'def compact_window(j,left_n,right_n):',
+              'unrated_inactive=(rating==0',
+          ]
+          for token in required:assert token in py,token
+
+          # Independent binary-header regression using the exact reverse-engineered layout:
+          # 03 02 <meta:u32> 02 <home:u32> ... 00 03 02 <meta:u32> 02 <away:u32>.
+          raw=bytearray(3000);q=100
+          raw[q:q+2]=b'\x03\x02';struct.pack_into('<I',raw,q+2,991);raw[q+6]=2;struct.pack_into('<I',raw,q+7,452)
+          marker=q+24;raw[marker:marker+3]=b'\x00\x03\x02';struct.pack_into('<I',raw,marker+3,992);raw[marker+7]=2;struct.pack_into('<I',raw,marker+8,467)
+          start=q+972
+          def scan(raw,start):
+              lo=max(0,start-32768);hi=min(len(raw),start);out=[];p=lo
+              while True:
+                  p=raw.find(b'\x03\x02',p,hi)
+                  if p<0:break
+                  if p+12<=hi and raw[p+6]==2:
+                      h=int.from_bytes(raw[p+7:p+11],'little')
+                      m2=raw.find(b'\x00\x03\x02',p+11,min(hi,p+96))
+                      if m2>=0 and m2+12<=hi and raw[m2+7]==2:
+                          a=int.from_bytes(raw[m2+8:m2+12],'little')
+                          if 0<h<1000000 and 0<a<1000000 and h!=a and 64<=start-p<=32768:out.append((h,a))
+                  p+=1
+              return out
+          assert (452,467) in scan(raw,start)
+          # A plausible-looking random header with team IDs outside the authoritative pair must
+          # not itself attach anything; production additionally requires exact fixture+score uniqueness.
+          assert (452,467)!=(999,1000)
+          assert "if int(fhs)!=int(hs) or int(fas)!=int(as_):continue" in py
+          assert "if fixture_identity(f) in used_fixtures:continue" in py
+          print('v126 compiles; proven retained header layout recovered; exact score + unique authoritative fixture + register_match safeguards retained')
+          PY

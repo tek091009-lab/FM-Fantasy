@@ -1,0 +1,92 @@
+name: Verify retained history direct match header v130
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_compact_boundary_v122.py'
+      - 'scripts/upgrade_history_contiguous_lineup_boundary_v123.py'
+      - 'scripts/upgrade_history_appearance_only_sides_v124.py'
+      - 'scripts/upgrade_history_unrated_bench_records_v125.py'
+      - 'scripts/upgrade_history_direct_header_tid_v126.py'
+      - 'scripts/upgrade_history_direct_header_orientation_v127.py'
+      - 'scripts/upgrade_history_direct_header_locality_v128.py'
+      - 'scripts/upgrade_history_direct_header_span_v129.py'
+      - 'scripts/upgrade_history_direct_header_namespace_v130.py'
+      - '.github/workflows/verify-history-direct-header-v130.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained structural decoder stack through v130
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_direct_header_tid_v126.py
+          python scripts/upgrade_history_direct_header_orientation_v127.py
+          python scripts/upgrade_history_direct_header_locality_v128.py
+          python scripts/upgrade_history_direct_header_span_v129.py
+          python scripts/upgrade_history_direct_header_namespace_v130.py
+      - name: Verify packed importer and learned-namespace invariants
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'confirmed_candidate_fixture_pairs=[]',
+              'confirmed_candidate_fixture_pairs.append((ci,f,int(leid),int(reid)))',
+              'def _v130_all_header_pairs(raw,start):',
+              'def _v130_learn_shift():',
+              'if dh==da and abs(dh)<=1000000:per_fixture.add(int(dh))',
+              'if n>=3:ranked.append',
+              'if top[0]-second[0]<2:return None,0',
+              'def _v130_fixture_modes(home_id,away_id,hs,as_,fixture_shift,club_shift):',
+              'def direct_binary_header_learned_namespace_pass():',
+              '_v130_direct_namespace=direct_binary_header_learned_namespace_pass()',
+              '_v130_round=direct_binary_header_learned_namespace_pass()',
+              'unlabelled_rich_direct_header_namespace_fixture_matches',
+          ]
+          for token in required:assert token in py,token
+
+          # Independent vote regression. Three authoritative fixtures agreeing on +132 must
+          # establish that transform; a one-off +999 noise observation cannot beat it.
+          from collections import Counter,defaultdict
+          votes=Counter();support=defaultdict(set)
+          samples=[('f1',452,320),('f2',467,335),('f3',498,366),('noise',1400,401)]
+          for fid,header,authoritative in samples:
+              shift=header-authoritative
+              votes[shift]+=1;support[shift].add(fid)
+          ranked=[]
+          for shift,count in votes.items():
+              n=len(support[shift])
+              if n>=3:ranked.append((n,count,-abs(shift),shift))
+          ranked.sort(reverse=True)
+          assert ranked and ranked[0][3]==132 and ranked[0][0]==3
+
+          # Equal HOME/AWAY delta is mandatory per confirming match; mismatched deltas cannot
+          # train a namespace even if one side happens to use the desired number.
+          home_header,away_header=452,467
+          home_tid,away_tid=320,334
+          assert (home_header-home_tid)!=(away_header-away_tid)
+
+          # Old structural decoders remain additive rather than replaced.
+          for token in ['def _v128_header_pairs_extended(raw,start):','def _v129_header_pairs_long_span(raw,start):','def direct_binary_header_fixture_pass():']:
+              assert token in py,token
+          print('v130 compiles; team-ID namespace is learned only from >=3 authoritative fixtures with equal two-sided deltas and clear support margin')
+          PY

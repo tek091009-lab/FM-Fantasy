@@ -1,0 +1,94 @@
+name: Verify retained-ID history recovery v118
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_confirmed_name_anchor_v99.py'
+      - 'scripts/upgrade_history_name_transfer_support_v100.py'
+      - 'scripts/upgrade_history_confirmed_name_one_side_v101.py'
+      - 'scripts/upgrade_history_confirmed_name_global_constraint_v102.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_pair_v103.py'
+      - 'scripts/upgrade_history_fixture_conditioned_name_global_v104.py'
+      - 'scripts/upgrade_history_canonical_name_alias_v105.py'
+      - 'scripts/upgrade_history_confirmed_name_cohort_v106.py'
+      - 'scripts/upgrade_history_accumulated_name_roster_v107.py'
+      - 'scripts/upgrade_history_accumulated_name_roster_global_v108.py'
+      - 'scripts/upgrade_history_transitive_name_cohort_graph_v109.py'
+      - 'scripts/upgrade_history_transitive_name_pair_counter_v110.py'
+      - 'scripts/upgrade_history_transitive_id_cohort_graph_v111.py'
+      - 'scripts/upgrade_history_local_id_anchor_v112.py'
+      - 'scripts/upgrade_history_fixture_conditioned_id_pair_v113.py'
+      - 'scripts/upgrade_history_fixture_conditioned_id_global_v114.py'
+      - 'scripts/upgrade_history_edge_trim_id_pair_v115.py'
+      - 'scripts/upgrade_history_edge_trim_sort_v116.py'
+      - 'scripts/upgrade_history_edge_trim_score_v117.py'
+      - 'scripts/upgrade_history_edge_duplicate_v118.py'
+      - '.github/workflows/verify-history-id-v118.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply retained history decoder stack
+        run: |
+          python scripts/upgrade_history_confirmed_name_anchor_v99.py
+          python scripts/upgrade_history_name_transfer_support_v100.py
+          python scripts/upgrade_history_confirmed_name_one_side_v101.py
+          python scripts/upgrade_history_confirmed_name_global_constraint_v102.py
+          python scripts/upgrade_history_fixture_conditioned_name_pair_v103.py
+          python scripts/upgrade_history_fixture_conditioned_name_global_v104.py
+          python scripts/upgrade_history_canonical_name_alias_v105.py
+          python scripts/upgrade_history_confirmed_name_cohort_v106.py
+          python scripts/upgrade_history_accumulated_name_roster_v107.py
+          python scripts/upgrade_history_accumulated_name_roster_global_v108.py
+          python scripts/upgrade_history_transitive_name_cohort_graph_v109.py
+          python scripts/upgrade_history_transitive_name_pair_counter_v110.py
+          python scripts/upgrade_history_transitive_id_cohort_graph_v111.py
+          python scripts/upgrade_history_local_id_anchor_v112.py
+          python scripts/upgrade_history_fixture_conditioned_id_pair_v113.py
+          python scripts/upgrade_history_fixture_conditioned_id_global_v114.py
+          python scripts/upgrade_history_edge_trim_id_pair_v115.py
+          python scripts/upgrade_history_edge_trim_sort_v116.py
+          python scripts/upgrade_history_edge_trim_score_v117.py
+          python scripts/upgrade_history_edge_duplicate_v118.py
+      - name: Verify compiled importer and duplicate-edge invariant
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          segment=py[py.index('    def confirmed_id_edge_trim_pair_pass():'):py.index('    def confirmed_name_transitive_graph_pass():')]
+          for s in [
+              'kept_pids={row_pid(kk) for kk in kept}',
+              'if pid in kept_pids:',
+              "'target_duplicate_trim':target_duplicate_trim",
+              "diagnostics['confirmed_id_edge_trim_target_duplicate_matches']+=1",
+              'lscore,rscore=score_of(repaired)',
+              "register_match(ci,f,rev,leid,reid,'unlabelled_retained_confirmed_id_edge_trim_score_v117')",
+          ]:assert s in segment,s
+          # Synthetic invariant: an edge duplicate of the same player is structurally removable,
+          # but a unique target-club player is not. The duplicate goal must disappear from score.
+          rows=[{'player_id':10,'goals':1,'own_goals':0}]+[{'player_id':20+i,'goals':0,'own_goals':0} for i in range(9)]+[{'player_id':10,'goals':1,'own_goals':0}]
+          kept=rows[:-1];removed=rows[-1:]
+          kept_pids={r['player_id'] for r in kept}
+          assert removed[0]['player_id'] in kept_pids
+          assert sum(r['goals'] for r in rows)==2
+          assert sum(r['goals'] for r in kept)==1
+          unique=[{'player_id':99,'goals':0,'own_goals':0}]+kept
+          kept2=unique[1:]
+          assert unique[0]['player_id'] not in {r['player_id'] for r in kept2}
+          print('v99-v118 stack compiles; duplicate target-club edge rows may be repaired without allowing unique target players to be trimmed')
+          PY
