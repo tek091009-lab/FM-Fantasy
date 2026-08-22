@@ -29,6 +29,7 @@ jobs:
           python-version: '3.12'
       - name: Run core regressions
         run: |
+          set -euo pipefail
           node scripts/test_season_publish_v84.js
           node scripts/test_squad_registration_policy_v3.js
           node scripts/test_news_persistence_v7.js
@@ -38,11 +39,13 @@ jobs:
           node scripts/test_initial_squad_builder_survives_restore_v38.js
           node scripts/test_team_management_survives_restore_v39.js
           node scripts/test_news_transfer_stability_v40.js
+          node scripts/test_news_persistence_canonical_dom_v41.js
           if [ -f scripts/test_weekly_boundary_v12.js ]; then node scripts/test_weekly_boundary_v12.js; fi
           python scripts/test_news_aesthetic_v34.py
           node scripts/test_news_parent_layout_v35.js
       - name: Check current JavaScript syntax
         run: |
+          set -euo pipefail
           node --check sessionrpcbridge.js
           node --check publishscorebarrier.js
           node --check transferintegrityguard.js
@@ -80,7 +83,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-      - name: Verify V40 public deployment
+      - name: Verify V41 public deployment
         shell: bash
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
@@ -103,23 +106,24 @@ jobs:
             barrier="$(curl -fsSL --max-time 20 "$base/publishscorebarrier.js?v=$stamp" || true)"
             transfer="$(curl -fsSL --max-time 20 "$base/transferintegrityguard.js?v=$stamp" || true)"
             rollover="$(curl -fsSL --max-time 20 "$base/transferrolloverguard.js?v=$stamp" || true)"
-            if printf '%s' "$idx" | grep -q 'fm-deploy-v40-populated-transfer-news-stability' \
-              && printf '%s' "$idx" | grep -q 'newstransferstabilityv40.js?v=1' \
-              && printf '%s' "$idx" | grep -q 'newspersistencev5.js?v=7' \
+            if printf '%s' "$idx" | grep -q 'fm-deploy-v41-canonical-news-dom-authority' \
+              && printf '%s' "$idx" | grep -q 'newstransferstabilityv40.js?v=2' \
+              && printf '%s' "$idx" | grep -q 'newspersistencev5.js?v=8' \
               && printf '%s' "$idx" | grep -q 'newsaestheticv34.js?v=3' \
               && printf '%s' "$idx" | grep -q 'sessionrpcbridge.js?v=2' \
               && printf '%s' "$idx" | grep -q 'publishscorebarrier.js?v=2' \
               && printf '%s' "$idx" | grep -q 'managerauthoritative.js?v=7' \
               && printf '%s' "$idx" | grep -q 'managerstateauthorityv1.js?v=2' \
-              && printf '%s' "$stability" | grep -q 'news-transfer-stability-v40-canonical-dom-authority' \
-              && printf '%s' "$stability" | grep -q 'transferNeedsRepair' \
-              && printf '%s' "$stability" | grep -q 'registrationNeedsRepair' \
-              && printf '%s' "$stability" | grep -q 'hideLegacyTransferRows' \
+              && printf '%s' "$stability" | grep -q 'news-transfer-stability-v41-content-signature-authority' \
+              && printf '%s' "$stability" | grep -q 'transferSig' \
+              && printf '%s' "$stability" | grep -q 'registrationSig' \
               && printf '%s' "$stability" | grep -q 'FMRegistrationNewsGuard' \
-              && printf '%s' "$stability" | grep -q 'FMNewsAestheticV34?.apply?.()' \
+              && printf '%s' "$persist" | grep -q 'news-persistence-v8-canonical-transfer-dom-authority' \
+              && printf '%s' "$persist" | grep -q "CANONICAL_DOM_IDS=new Set(['newsTransfers','newsRegistrations'])" \
+              && printf '%s' "$persist" | grep -q 'if(CANONICAL_DOM_IDS.has(id))continue' \
+              && printf '%s' "$persist" | grep -q 'FMNewsTransferStabilityV40?.stabilise?.()' \
               && printf '%s' "$aesthetic" | grep -q 'news-aesthetic-v36-stable-empty-state' \
               && printf '%s' "$aesthetic" | grep -q "const EMPTY_TEXT='No changes this import.'" \
-              && printf '%s' "$persist" | grep -q 'news-persistence-v7-import-news-authority' \
               && printf '%s' "$view" | grep -q 'news-view-v6-payload-aware-clear-state' \
               && printf '%s' "$recover" | grep -q 'news-world-recovery-v1-canonical-payload-authority' \
               && printf '%s' "$cloud" | grep -q 'cloud-apply-v2-canonical-world-beats-stale-clear-flag' \
@@ -133,8 +137,8 @@ jobs:
             fi
             sleep 5
           done
-          [ "$ok" -eq 1 ] || { echo 'V40 did not become live' >&2; exit 1; }
-      - name: Record verified V40 deployment
+          [ "$ok" -eq 1 ] || { echo 'V41 did not become live' >&2; exit 1; }
+      - name: Record verified V41 deployment
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -145,19 +149,20 @@ jobs:
           {
             "verified_live_sha": "${GITHUB_SHA}",
             "verified_at": "${stamp}",
-            "verification": "v40-populated-transfer-news-stability",
+            "verification": "v41-canonical-news-dom-authority",
             "database_import": "canonical import, scoring and weekly update logic unchanged",
-            "news_transfers": "canonical populated transfer and registration rows remain DOM-authoritative even when older News persistence/native renderers repaint the cards",
+            "news_transfers": "saved News DOM can no longer repaint Confirmed transfers or New registrations; those cards are always rebuilt from the current canonical payload",
+            "news_signature": "same-count stale transfer or registration DOM is rejected by canonical content signature",
             "news_empty_state": "V36 single No changes this import empty state retained",
             "team_state": "V39 captain vice and team-management first-click protections retained unchanged",
             "transfers_gameplay": "V37/V38 free-transfer and locked-squad protections retained unchanged",
-            "regressions": "V33 core suite plus V37-V39 manager races and V40 populated transfer/registration renderer-race test"
+            "regressions": "V33 core suite plus V37-V39 manager races, V40 renderer guard and V41 persistence DOM ownership/content-signature tests"
           }
           JSON
           content="$(base64 -w0 /tmp/marker.json)"
           existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [ -n "$existing_sha" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V40 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V41 deployment ${GITHUB_SHA::7}" -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
           else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V40 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/deploy-marker.json" -f message="Record verified V41 deployment ${GITHUB_SHA::7}" -f content="$content" -f branch=main >/dev/null
           fi

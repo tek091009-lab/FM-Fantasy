@@ -56,9 +56,10 @@ for forbidden in ['FMCloud','queueManagerSave','publishWorld','localStorage','se
 idx=Path('index.html').read_text()
 assert './registrationnewsguard.js?v=5' in idx
 assert './newsview.js?v=6' in idx and './newsaestheticv34.js?v=3' in idx
-assert './newstransferstabilityv40.js?v=1' in idx
+assert './newstransferstabilityv40.js?v=2' in idx
+assert './newspersistencev5.js?v=8' in idx
 assert idx.index('./registrationnewsguard.js?v=5') < idx.index('./newsaestheticv34.js?v=3')
 assert idx.index('./newsview.js?v=6') < idx.index('./newsaestheticv34.js?v=3')
-assert idx.index('./newspersistencev5.js?v=7') < idx.index('./newstransferstabilityv40.js?v=1')
-assert 'fm-deploy-v40-populated-transfer-news-stability' in idx
-print('News v36 presentation regression retained under V40 loader with populated transfer DOM stability guard')
+assert idx.index('./newspersistencev5.js?v=8') < idx.index('./newstransferstabilityv40.js?v=2')
+assert 'fm-deploy-v41-canonical-news-dom-authority' in idx
+print('News v36 presentation regression retained under V41 canonical transfer DOM authority')
