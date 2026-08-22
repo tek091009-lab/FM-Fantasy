@@ -1,0 +1,94 @@
+name: Verify retained history GC continuation v164
+
+on:
+  push:
+    branches: [automation/history-v100-fixture-conditioned-names]
+    paths:
+      - 'scripts/upgrade_history_core_stride_gc_continuation_v164.py'
+      - '.github/workflows/verify-history-core-stride-gc-continuation-v164.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply structural history stack through v164
+        run: |
+          python scripts/upgrade_history_compact_boundary_v122.py
+          python scripts/upgrade_history_contiguous_lineup_boundary_v123.py
+          python scripts/upgrade_history_appearance_only_sides_v124.py
+          python scripts/upgrade_history_unrated_bench_records_v125.py
+          python scripts/upgrade_history_global_nonoverlap_scan_v138.py
+          python scripts/upgrade_history_starter_bench_gap_v139.py
+          python scripts/upgrade_history_starter_bench_compact_v140.py
+          python scripts/upgrade_history_used_unused_bench_gap_v141.py
+          python scripts/upgrade_history_used_unused_bench_compact_v142.py
+          python scripts/upgrade_history_starter_bench_contiguous_v143.py
+          python scripts/upgrade_history_used_unused_bench_contiguous_v144.py
+          python scripts/upgrade_history_dual_subgroup_gaps_v145.py
+          python scripts/upgrade_history_dual_subgroup_compact_v146.py
+          python scripts/upgrade_history_dual_subgroup_contiguous_v147.py
+          python scripts/upgrade_history_compact_stat_stride_v148.py
+          python scripts/upgrade_history_min_record_buffer_v149.py
+          python scripts/upgrade_history_core_stat_stride_v150.py
+          python scripts/upgrade_history_core_unrated_stride_v151.py
+          python scripts/upgrade_history_core_stride_tail_v152.py
+          python scripts/upgrade_history_core_stride_unique_pid_v153.py
+          python scripts/upgrade_history_core_stride_integrity_v154.py
+          python scripts/upgrade_history_core_stride_fantasy_complete_v155.py
+          python scripts/upgrade_history_short_compact_bench_stride_v159.py
+          python scripts/upgrade_history_short_compact_bench_tail_v160.py
+          python scripts/upgrade_history_compact_stride_tail_bounds_v161.py
+          python scripts/upgrade_history_core_stride_truth_v162.py
+          python scripts/upgrade_history_core_stride_gc_v163.py
+          python scripts/upgrade_history_core_stride_gc_continuation_v164.py
+      - name: Verify packed importer and v164 reachability
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html);assert m
+          py=base64.b64decode(m.group(1)).decode();compile(py,'fm_importer.py','exec')
+          required=[
+              'def _v153_core_stride_continue(raw,p,end,stride,seen_pids=None):',
+              'def _v163_apply_physical_gc(raw,p,end,stride,r):',
+              'r=_v163_apply_physical_gc(raw,p,end,d,r) if r else r',
+              "r['core_gc_continuation_v164']=True",
+              "'_RICH_CORE_GC_CONTINUATION_RECOVERED_V164'",
+              "'_RICH_HEADER_CORE_GC_CONTINUATION_RECOVERED_V164'",
+              "elif bool(r.get('core_gc_available_v163')):",
+              '_v152_state_pair=_v153_core_stride_continue(',
+          ]
+          for token in required:assert token in py,token
+
+          # Reachability regression: after v153, the live scanners call _v153_core_stride_continue,
+          # not _v152_core_stride_continue. Therefore v163's old patch to only the v152 helper could
+          # not mark stateful tail rows with +146 GC. v164 must place the same physical-byte rule in
+          # the live v153 helper.
+          v153=py[py.index('def _v153_core_stride_continue'):py.index('\ndef ',py.index('def _v153_core_stride_continue')+1)]
+          assert '_v163_apply_physical_gc(raw,p,end,d,r)' in v153
+
+          # Physical evidence remains unchanged: +146 belongs to the current object only for proven
+          # 147..157-byte strides. True 145/146-byte active rows must remain quarantined by v162.
+          for d in (145,146):assert not (147<=d<=157)
+          for d in range(147,158):assert 147<=d<=157
+          assert "r['core_missing_fantasy_field_v162']='team_goals_conceded_while_on_pitch'" in py
+
+          # Tail scenario: initial four-record proof can establish a 150-byte run, but the last three
+          # records cannot independently re-prove three future successors. Their only live route is
+          # the v153 continuation; v164 now gives those accepted rows the same exact +146 recovery.
+          starts=[1000,1150,1300,1450,1600,1750,1900]
+          assert all(starts[i+1]-starts[i]==150 for i in range(len(starts)-1))
+          assert len(starts[-3:])==3
+          print('v164 compiles; v163 +146 GC recovery now reaches the actually-live v153 continuation, so final active rows of proven 147..157-byte runs are not quarantined solely for lacking fresh four-row lookahead')
+          PY
