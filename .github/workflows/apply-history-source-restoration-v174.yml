@@ -1,0 +1,57 @@
+name: Apply retained history source restoration v174
+
+on:
+  push:
+    branches: [automation/history-source-restoration-v174]
+    paths:
+      - 'scripts/upgrade_history_restore_retained_sources_v174.py'
+      - '.github/workflows/apply-history-source-restoration-v174.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: automation/history-source-restoration-v174
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply focused old-match source restoration
+        run: python scripts/upgrade_history_restore_retained_sources_v174.py
+      - name: Verify packed importer compiles and retains authoritative gates
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          root=Path('.')
+          parts=[root/'app'/f'part{i:02d}' for i in range(17)]+[root/'app'/f'fix{i}' for i in range(17,21)]
+          html=gzip.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts))).decode()
+          m=re.search(r'const FM_PY_SOURCE_B64\s*=\s*"([^\"]+)"',html); assert m
+          py=base64.b64decode(m.group(1)).decode(); compile(py,'fm_importer.py','exec')
+          key='unlabelled_rich_non_retained_member_names'
+          pos=py.find(key); assert pos>=0
+          fs=py.rfind('\ndef ',0,pos); fs=fs+1 if fs>=0 else py.rfind('def ',0,pos)
+          fe=py.find('\ndef ',pos); fe=len(py) if fe<0 else fe
+          block=py[fs:fe]
+          for member in ['player_stats.dat','play_fixture_manager.dat','news.dat']:
+              assert member not in block, member
+          for tok in ["_RICH_SOURCE_RESTORATION_V174",'def _rich_stat_record_at','register_match','fixture_identity']:
+              assert tok in py,tok
+          print('packed importer verified: three measured-lost archive members are structurally scanned and authoritative fixture gates remain')
+          PY
+      - name: Commit generated packed importer
+        run: |
+          if git diff --quiet -- app; then
+            echo 'No packed importer changes to commit'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app
+          git commit -m 'Apply retained history source restoration v174'
+          git push origin HEAD:automation/history-source-restoration-v174
