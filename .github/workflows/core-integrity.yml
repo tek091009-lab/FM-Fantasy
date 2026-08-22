@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'push' && 'automation/history-source-restoration-v174' || github.ref }}
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -74,7 +74,7 @@ jobs:
           grep -q 'v_locked_count' supabase/migrations/20260821170136_repair_confirmed_team_transfer_baseline_v1.sql
           grep -q 'server-authoritative-manager-scoring-v2' supabase/migrations/20260821165500_manager_scoring_v2_entry_ft_and_league_identity.sql
       - name: Apply focused v174 retained-history source restoration
-        if: github.event_name == 'push' && github.ref == 'refs/heads/automation/history-source-restoration-v174'
+        if: (github.event_name == 'push' && github.ref_name == 'automation/history-source-restoration-v174') || (github.event_name == 'pull_request' && github.head_ref == 'automation/history-source-restoration-v174')
         run: |
           set -euo pipefail
           python scripts/upgrade_history_restore_retained_sources_v174.py
@@ -97,7 +97,7 @@ jobs:
           print('v174 packed importer verified')
           PY
       - name: Commit packed v174 importer to research branch
-        if: github.event_name == 'push' && github.ref == 'refs/heads/automation/history-source-restoration-v174'
+        if: (github.event_name == 'push' && github.ref_name == 'automation/history-source-restoration-v174') || (github.event_name == 'pull_request' && github.head_ref == 'automation/history-source-restoration-v174')
         run: |
           set -euo pipefail
           if git diff --quiet -- app; then
@@ -105,7 +105,7 @@ jobs:
             exit 0
           fi
           git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.email '4189823+github-actions[bot]@users.noreply.github.com'
           git add app
           git commit -m 'Apply retained history source restoration v174'
           git push origin HEAD:automation/history-source-restoration-v174
