@@ -48,17 +48,17 @@ assert "grid-template-columns:repeat(2,minmax(0,1fr))" in js
 assert "grid-template-rows:repeat(3,minmax(0,1fr)) auto" in js
 assert "parent.id=GRID_ID" in js
 assert "btn.dataset.newsToggle=card.id+'Full'" in js
-# V34 regression must never return: do not nest all six cards inside a new half-width wrapper.
 assert "grid=document.createElement('div')" not in js
 assert "parent.insertBefore(grid,cs[0])" not in js
 assert "grid.appendChild(card)" not in js
-# Presentation layer must remain isolated from fantasy/import state.
 for forbidden in ['FMCloud','queueManagerSave','publishWorld','localStorage','sessionStorage','supabase','managerState','freeTransfers','totalPoints']:
     assert forbidden not in js,f'presentation patch must not touch system state: {forbidden}'
 idx=Path('index.html').read_text()
 assert './registrationnewsguard.js?v=5' in idx
 assert './newsview.js?v=6' in idx and './newsaestheticv34.js?v=3' in idx
+assert './newstransferstabilityv40.js?v=1' in idx
 assert idx.index('./registrationnewsguard.js?v=5') < idx.index('./newsaestheticv34.js?v=3')
 assert idx.index('./newsview.js?v=6') < idx.index('./newsaestheticv34.js?v=3')
-assert 'fm-deploy-v39-team-management-draft-restore' in idx
-print('News v36 presentation regression retained under V39 loader: full-width six-card grid plus one stable No changes this import empty state')
+assert idx.index('./newspersistencev5.js?v=7') < idx.index('./newstransferstabilityv40.js?v=1')
+assert 'fm-deploy-v40-populated-transfer-news-stability' in idx
+print('News v36 presentation regression retained under V40 loader with populated transfer DOM stability guard')
