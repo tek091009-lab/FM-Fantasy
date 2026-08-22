@@ -3,7 +3,7 @@ const assert=require('assert');
 const fs=require('fs');
 const vm=require('vm');
 const source=fs.readFileSync('managerauthoritative.js','utf8');
-assert(source.includes('manager-authoritative-v5-preserve-all-manager-drafts'));
+assert(source.includes('manager-authoritative-v6-preserve-team-management-drafts'));
 assert(source.includes("out.news=clone(state.news)"));
 assert(source.includes("out.activeStatuses=clone(state.activeStatuses)"));
 assert(source.includes('restoreWorldDerivedState(worldDerived)'));
@@ -14,7 +14,7 @@ assert(source.includes("FMNewsPersistence?.restore?.('manager authoritative rest
   const remoteManager={
     squad:[...locked],lockedSquad:[...locked],lockedBank:0,
     starters:Array.from({length:11},(_,i)=>`p${i+1}`),
-    bench:Array.from({length:4},(_,i)=>`p${i+12}`),
+    bench:Array.from({length:4},(_,i)=>`p${i+12}`),captain:'p1',vice:'p2',bank:0,
     currentGameweek:6,completedGameweek:5,pointsHistory:[{gw:5,net:30}],totalPoints:30,
     freeTransfers:1,lastTransferRollGW:5,teamConfirmed:true,teamName:'HMS PISS THE LEAGUE',managerName:'Thomas Kelleher',
     chips:{first:{},second:{}}
@@ -29,7 +29,7 @@ assert(source.includes("FMNewsPersistence?.restore?.('manager authoritative rest
   };
   const client={auth:{async getSession(){return {data:{session:{user:{id:'u1'}}}}}},from(){return chain}};
   const ctx={
-    console,JSON,Object,Array,Promise,setTimeout,clearTimeout,
+    console,JSON,Object,Array,Promise,Set,setTimeout,clearTimeout,
     requestAnimationFrame:fn=>fn(),
     document:{addEventListener(){},visibilityState:'visible'},
     FM_FANTASY_CONFIG:{supabaseUrl:'https://example.invalid',supabaseAnonKey:'anon'},
@@ -57,6 +57,8 @@ assert(source.includes("FMNewsPersistence?.restore?.('manager authoritative rest
   assert.strictEqual(ctx.state.freeTransfers,1);
   assert.strictEqual(ctx.state.lastTransferRollGW,5);
   assert.strictEqual(ctx.state.squad.length,15,'manager fields still hydrate from remote state');
+  assert.strictEqual(ctx.state.captain,'p1');
+  assert.strictEqual(ctx.state.vice,'p2');
   assert(renderNewsCalls>=1,'News is rerendered after manager hydrate');
   assert(renderLeagueCalls>=1,'Leagues are rerendered after manager hydrate');
   const renderedCount=(ctx.state.news.injuries||[]).length+(ctx.state.news.suspensions||[]).length+(ctx.state.activeStatuses.injuries||[]).length+(ctx.state.activeStatuses.suspensions||[]).length;
